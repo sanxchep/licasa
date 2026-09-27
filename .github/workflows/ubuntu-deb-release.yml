@@ -66,6 +66,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
       - name: Install GitHub CLI
         run: |
           sudo apt-get update
@@ -88,5 +91,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
+          cp "packaging/release-notes/$RELEASE_TAG.md" dist/release-notes.md
+          printf '\n### Package SHA-256\n\n```text\n' >> dist/release-notes.md
+          cat dist/licasa_*.deb.sha256 >> dist/release-notes.md
+          printf '```\n' >> dist/release-notes.md
+          printf '\nSource commit: `%s`.\n' "$(git rev-parse HEAD)" >> dist/release-notes.md
           gh release create "$RELEASE_TAG" dist/licasa_*.deb dist/licasa_*.deb.sha256 \
-            --verify-tag --generate-notes
+            --verify-tag --title "Licasa $RELEASE_TAG" \
+            --notes-file dist/release-notes.md
