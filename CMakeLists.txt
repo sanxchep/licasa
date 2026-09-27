@@ -186,7 +186,7 @@ if(LICASA_ENABLE_HEIF)
     find_package(libde265 1.1.2 CONFIG REQUIRED)
     add_library(licasa_heif MODULE src/plugins/heif_handler.cpp)
     target_include_directories(licasa_heif PRIVATE src)
-    target_link_libraries(licasa_heif PRIVATE Qt6::Gui heif)
+    target_link_libraries(licasa_heif PRIVATE Qt6::Gui heif de265)
     set_target_properties(licasa_heif PROPERTIES
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/plugins/licasa-codecs"
             INSTALL_RPATH "$ORIGIN/../../lib")

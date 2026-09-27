@@ -21,8 +21,8 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends cmake ninja-build g++ python3 \
-            pkg-config patch meson nasm clang-format-18 \
+          sudo apt-get install --no-install-recommends cmake make ninja-build g++ python3 \
+            pkg-config patch meson nasm clang-format-18 libjpeg-turbo8-dev \
             qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-image-formats-plugins \
             qt6-base-private-dev qt6-declarative-private-dev qt6-shadertools-dev \
             qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript \
