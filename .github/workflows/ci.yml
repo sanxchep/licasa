@@ -56,9 +56,7 @@ jobs:
         run: |
           cmake --install build/release --prefix "$RUNNER_TEMP/licasa-package"
           python3 tools/check_hardening.py "$RUNNER_TEMP/licasa-package/bin/licasa"
-          python3 tools/smoke_package.py "$RUNNER_TEMP/licasa-package" \
-            --jxl --raw --avif --avif-animation --apng \
-            --vendor-cache "$RUNNER_TEMP/vendor-samples" \
+          python3 tools/verify_installed_release.py "$RUNNER_TEMP/licasa-package" \
             --output build/release/package-smoke.json
           QT_QPA_PLATFORM=offscreen "$RUNNER_TEMP/licasa-package/bin/licasa_diagnostics" \
             --formats tests/test-assets/formats/core-matrix/jpeg/full-hd-1920x1080.jpg \
