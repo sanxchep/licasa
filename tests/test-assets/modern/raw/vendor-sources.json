@@ -1,0 +1,34 @@
+[
+  {
+    "file": "apple-iphone-12-pro.dng",
+    "source": "https://raw.pixls.us/getfile.php/4264/nice/Apple%20-%20iPhone%2012%20Pro%20-%208bit%20%284:3%29.DNG",
+    "sha256": "e91e77a4533ed7cce551d83330676ea5c47dd5e55fb38adda7819366afdbdfc2",
+    "license": "CC0-1.0",
+    "camera": "Apple iPhone 12 Pro",
+    "bytes": 29195592
+  },
+  {
+    "file": "google-pixel-6-pro.dng",
+    "source": "https://raw.pixls.us/getfile.php/5961/nice/Google%20-%20Pixel%206%20Pro%20-%2016bit%20%284:3%29.dng",
+    "sha256": "3a859e917a91698a3e15ce3b3721a48a1fb1296873e0697d3bf7c2793297200d",
+    "license": "CC0-1.0",
+    "camera": "Google Pixel 6 Pro",
+    "bytes": 11932956
+  },
+  {
+    "file": "google-pixel-8-pro-50mp.dng",
+    "source": "https://raw.pixls.us/getfile.php/7751/nice/Google%20-%20Pixel%208%20Pro%20-%2016bit%20%284:3%29.dng",
+    "sha256": "45420c595401547cca950ae58d552bc82b32d31ce1d58c082df33004016197f5",
+    "license": "CC0-1.0",
+    "camera": "Google Pixel 8 Pro",
+    "bytes": 45101750
+  },
+  {
+    "file": "samsung-s22.dng",
+    "source": "https://raw.pixls.us/getfile.php/7783/nice/Samsung%20-%20SM-S901E%20-%204:3.dng",
+    "sha256": "8f0ddc0a672503a840995a6901b16d3650f4c41b8c775e66a553b30222a69864",
+    "license": "CC0-1.0",
+    "camera": "Samsung SM-S901E",
+    "bytes": 42970855
+  }
+]

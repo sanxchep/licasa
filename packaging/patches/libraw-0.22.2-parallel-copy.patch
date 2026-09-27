@@ -1,0 +1,66 @@
+--- a/src/postprocessing/mem_image.cpp
++++ b/src/postprocessing/mem_image.cpp
+@@ -221,43 +221,50 @@
+ 
+   if (S.flip & 4)
+     SWAP(S.height, S.width);
+-  uchar *ppm;
+-  ushort *ppm2;
+-  int c, row, col, soff, rstep, cstep;
++  int soff, rstep, cstep;
+ 
+   soff = flip_index(0, 0);
+   cstep = flip_index(0, 1) - soff;
+   rstep = flip_index(1, 0) - flip_index(0, S.width);
+ 
+-  for (row = 0; row < S.height; row++, soff += rstep)
++  // Row starts are independent after gamma_curve has populated the lookup table.
++  // Reconstruct the original loop's running source offset for each output row.
++  const int rowstep = S.width * cstep + rstep;
++#ifdef _OPENMP
++#pragma omp parallel for if (INT64(S.width) * S.height >= 8 * 1024 * 1024) schedule(static)
++#endif
++  for (int row = 0; row < S.height; row++)
+   {
++    int row_soff = soff + row * rowstep;
+     uchar *bufp = ((uchar *)scan0) + size_t(row) * size_t(stride);
+-    ppm2 = (ushort *)(ppm = bufp);
++    uchar *ppm = bufp;
++    ushort *ppm2 = (ushort *)bufp;
++    int c;
+     // keep trivial decisions in the outer loop for speed
+     if (bgr)
+     {
+       if (O.output_bps == 8)
+       {
+-        for (col = 0; col < S.width; col++, soff += cstep)
+-          FORBGR *ppm++ = imgdata.color.curve[imgdata.image[soff][c]] >> 8;
++        for (int col = 0; col < S.width; col++, row_soff += cstep)
++          FORBGR *ppm++ = imgdata.color.curve[imgdata.image[row_soff][c]] >> 8;
+       }
+       else
+       {
+-        for (col = 0; col < S.width; col++, soff += cstep)
+-          FORBGR *ppm2++ = imgdata.color.curve[imgdata.image[soff][c]];
++        for (int col = 0; col < S.width; col++, row_soff += cstep)
++          FORBGR *ppm2++ = imgdata.color.curve[imgdata.image[row_soff][c]];
+       }
+     }
+     else
+     {
+       if (O.output_bps == 8)
+       {
+-        for (col = 0; col < S.width; col++, soff += cstep)
+-          FORRGB *ppm++ = imgdata.color.curve[imgdata.image[soff][c]] >> 8;
++        for (int col = 0; col < S.width; col++, row_soff += cstep)
++          FORRGB *ppm++ = imgdata.color.curve[imgdata.image[row_soff][c]] >> 8;
+       }
+       else
+       {
+-        for (col = 0; col < S.width; col++, soff += cstep)
+-          FORRGB *ppm2++ = imgdata.color.curve[imgdata.image[soff][c]];
++        for (int col = 0; col < S.width; col++, row_soff += cstep)
++          FORRGB *ppm2++ = imgdata.color.curve[imgdata.image[row_soff][c]];
+       }
+     }
+ 

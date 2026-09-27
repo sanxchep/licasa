@@ -1,0 +1,119 @@
+{
+  "license": "MIT",
+  "generator": "tools/make_raw_fixtures.py",
+  "numpy": "2.5.3",
+  "tifffile": "2024.2.12",
+  "imagecodecs": "2026.8.16",
+  "assets": [
+    {
+      "file": "small.dng",
+      "sensor_size": [
+        2048,
+        1536
+      ],
+      "preview_sizes": [
+        [
+          512,
+          384
+        ]
+      ],
+      "orientation": 1,
+      "preview_decodes": true,
+      "full_decodes": true,
+      "bytes": 734591,
+      "sha256": "a93ff994871b2f0b743220dc87594a3c3b46badf21a9d885db5c2bf51b6ec5d9"
+    },
+    {
+      "file": "rotated.dng",
+      "sensor_size": [
+        2048,
+        1536
+      ],
+      "preview_sizes": [
+        [
+          512,
+          384
+        ]
+      ],
+      "orientation": 6,
+      "preview_decodes": true,
+      "full_decodes": true,
+      "bytes": 734591,
+      "sha256": "499df9cba69555a94e634b7ae52f7645763959b1d713651a6b54cb719253c04f"
+    },
+    {
+      "file": "multiple-previews.dng",
+      "sensor_size": [
+        2048,
+        1536
+      ],
+      "preview_sizes": [
+        [
+          128,
+          96
+        ],
+        [
+          512,
+          384
+        ]
+      ],
+      "orientation": 1,
+      "preview_decodes": true,
+      "full_decodes": true,
+      "bytes": 771696,
+      "sha256": "9962734f998f0f8af7988eb3730afae5fdc88cd6666f2f52148d40318e56bd80"
+    },
+    {
+      "file": "large-48mp.dng",
+      "sensor_size": [
+        8000,
+        6000
+      ],
+      "preview_sizes": [
+        [
+          1024,
+          768
+        ]
+      ],
+      "orientation": 1,
+      "preview_decodes": true,
+      "full_decodes": true,
+      "bytes": 4754685,
+      "sha256": "5c1bf46093bfb55e87d46453f2ca69c2e5d5b4090bf6030bf2f8bf0cf43b62c6"
+    },
+    {
+      "file": "no-preview.dng",
+      "sensor_size": [
+        2048,
+        1536
+      ],
+      "preview_sizes": [],
+      "orientation": 1,
+      "preview_decodes": false,
+      "full_decodes": true,
+      "bytes": 144527,
+      "sha256": "9cbc38cb5baaae800dd1123481cab5c981fe2da0e460603062efdb189eb7723b"
+    },
+    {
+      "file": "broken-preview-offset.dng",
+      "preview_decodes": false,
+      "malformed": true,
+      "bytes": 734591,
+      "sha256": "a2cff1e677876ec286373159c283c37fecb06bedd347ecdc47ead5964a5a1668"
+    },
+    {
+      "file": "oversized-preview.dng",
+      "preview_decodes": false,
+      "malformed": true,
+      "bytes": 734591,
+      "sha256": "3541713cdb311321f542a92a7631a811fc92da65017b9a5e725c6bf2e09414c4"
+    },
+    {
+      "file": "truncated.dng",
+      "preview_decodes": false,
+      "malformed": true,
+      "bytes": 55,
+      "sha256": "b57e50c8074a9f25320bbf4433083b6a23c53d0905e0361dbebe18e963e25136"
+    }
+  ]
+}

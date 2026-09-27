@@ -1,0 +1,12 @@
+--- a/lib/CMakeLists.txt
++++ b/lib/CMakeLists.txt
+@@ -31,7 +31,8 @@
+ else ()
+   set(JPEGXL_INTERNAL_FLAGS
+     # F_FLAGS
+-    -fmerge-all-constants
++    # Preserve C++ object identity/lifetimes, including sanitizer scope checks.
++    # GCC documents -fmerge-all-constants as producing non-conforming behavior.
+     -fno-builtin-fwrite
+     -fno-builtin-fread
+ 

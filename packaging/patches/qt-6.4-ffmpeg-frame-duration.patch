@@ -1,0 +1,15 @@
+--- a/src/plugins/multimedia/ffmpeg/qffmpegdecoder.cpp
++++ b/src/plugins/multimedia/ffmpeg/qffmpegdecoder.cpp
+@@ -663,8 +663,10 @@
+ 
+     AVStream *stream = frame.codec()->stream();
+     qint64 startTime = frame.pts();
+-    qint64 duration = (1000000*stream->avg_frame_rate.den + (stream->avg_frame_rate.num>>1))
+-                      /stream->avg_frame_rate.num;
++    qint64 duration = qMax(qint64(0), frame.duration());
++    if (stream->avg_frame_rate.num > 0 && stream->avg_frame_rate.den > 0)
++        duration = (qint64(1000000) * stream->avg_frame_rate.den
++                    + stream->avg_frame_rate.num / 2) / stream->avg_frame_rate.num;
+ 
+     if (sink) {
+         qint64 startTime = frame.pts();

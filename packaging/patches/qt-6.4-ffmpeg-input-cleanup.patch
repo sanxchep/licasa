@@ -1,0 +1,103 @@
+--- a/src/plugins/multimedia/ffmpeg/qffmpegdecoder.cpp
++++ b/src/plugins/multimedia/ffmpeg/qffmpegdecoder.cpp
+@@ -28,6 +28,23 @@
+ 
+ using namespace QFFmpeg;
+ 
++// QIODevice-backed AVIO is caller-owned, including its possibly replaced buffer.
++static void freeCustomIO(AVIOContext *io)
++{
++    if (!io)
++        return;
++    av_freep(&io->buffer);
++    avio_context_free(&io);
++}
++
++static void closeInput(AVFormatContext *&context)
++{
++    AVIOContext *io = context && (context->flags & AVFMT_FLAG_CUSTOM_IO)
++            ? context->pb : nullptr;
++    avformat_close_input(&context);
++    freeCustomIO(io);
++}
++
+ Q_LOGGING_CATEGORY(qLcDemuxer, "qt.multimedia.ffmpeg.demuxer")
+ Q_LOGGING_CATEGORY(qLcDecoder, "qt.multimedia.ffmpeg.decoder")
+ Q_LOGGING_CATEGORY(qLcVideoRenderer, "qt.multimedia.ffmpeg.videoRenderer")
+@@ -85,6 +102,7 @@
+     av_dict_set(&opts, "refcounted_frames", "1", 0);
+     av_dict_set(&opts, "threads", "auto", 0);
+     ret = avcodec_open2(context.get(), decoder, &opts);
++    av_dict_free(&opts);
+     if (ret < 0)
+         return "Failed to open FFmpeg codec context " + err2str(ret);
+ 
+@@ -105,13 +123,7 @@
+ 
+ Demuxer::~Demuxer()
+ {
+-    if (context) {
+-        if (context->pb) {
+-            avio_context_free(&context->pb);
+-            context->pb = nullptr;
+-        }
+-        avformat_free_context(context);
+-    }
++    closeInput(context);
+ }
+ 
+ StreamDecoder *Demuxer::addStream(int streamIndex)
+@@ -215,7 +227,7 @@
+         Q_ASSERT(!streamDecoder);
+     }
+ #endif
+-    avformat_close_input(&context);
++    closeInput(context);
+     Thread::cleanup();
+ }
+ 
+@@ -1040,6 +1052,7 @@
+     QByteArray url = media.toEncoded(QUrl::PreferLocalFile);
+ 
+     AVFormatContext *context = nullptr;
++    std::unique_ptr<AVIOContext, decltype(&freeCustomIO)> customIO(nullptr, freeCustomIO);
+     if (stream) {
+         if (!stream->isOpen()) {
+             if (!stream->open(QIODevice::ReadOnly)) {
+@@ -1052,8 +1065,17 @@
+             stream->seek(0);
+         context = avformat_alloc_context();
+         constexpr int bufferSize = 32768;
+-        unsigned char *buffer = (unsigned char *)av_malloc(bufferSize);
+-        context->pb = avio_alloc_context(buffer, bufferSize, false, stream, ::read, nullptr, ::seek);
++        unsigned char *buffer = context ? (unsigned char *)av_malloc(bufferSize) : nullptr;
++        if (buffer)
++            customIO.reset(avio_alloc_context(buffer, bufferSize, false, stream, ::read, nullptr, ::seek));
++        if (!customIO) {
++            av_free(buffer);
++            avformat_free_context(context);
++            emit errorOccured(QMediaPlayer::ResourceError,
++                              QMediaPlayer::tr("Could not allocate media input."));
++            return;
++        }
++        context->pb = customIO.get();
+     }
+ 
+     int ret = avformat_open_input(&context, url.constData(), nullptr, nullptr);
+@@ -1072,7 +1094,7 @@
+     if (ret < 0) {
+         emit errorOccured(QMediaPlayer::FormatError,
+                           QMediaPlayer::tr("Could not find stream information for media file"));
+-        avformat_free_context(context);
++        avformat_close_input(&context);
+         return;
+     }
+ 
+@@ -1099,6 +1121,7 @@
+     m_isSeekable = !(context->ctx_flags & AVFMTCTX_UNSEEKABLE);
+ 
+     demuxer = new Demuxer(this, context);
++    customIO.release(); // Demuxer now owns the successful custom input.
+     demuxer->start();
+ }
+ 

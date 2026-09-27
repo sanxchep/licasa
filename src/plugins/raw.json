@@ -1,0 +1,4 @@
+{
+    "Keys": ["dng", "raw", "cr2", "cr3", "nef", "nrw", "arw", "srw", "rw2", "pef", "orf", "raf"],
+    "MimeTypes": ["image/x-adobe-dng", "image/x-dcraw", "image/x-canon-cr2", "image/x-canon-cr3", "image/x-nikon-nef", "image/x-nikon-nrw", "image/x-sony-arw", "image/x-samsung-srw", "image/x-panasonic-rw2", "image/x-pentax-pef", "image/x-olympus-orf", "image/x-fuji-raf"]
+}

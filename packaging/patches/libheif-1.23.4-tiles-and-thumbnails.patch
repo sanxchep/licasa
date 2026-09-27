@@ -1,0 +1,38 @@
+--- a/libheif/image-items/image_item.cc
++++ b/libheif/image-items/image_item.cc
+@@ -1433,8 +1433,8 @@
+   // Prevent divide by zero.
+ 
+   if (tiling.tile_width != 0 && tiling.tile_height != 0) {
+-    right_excess = tiling.image_width % tiling.tile_width;
+-    bottom_excess = tiling.image_height % tiling.tile_height;
++    right_excess = (tiling.tile_width - tiling.image_width % tiling.tile_width) % tiling.tile_width;
++    bottom_excess = (tiling.tile_height - tiling.image_height % tiling.tile_height) % tiling.tile_height;
+   }
+   else {
+     right_excess = 0;
+@@ -1527,9 +1527,11 @@
+       }
+ 
+       left_excess += left;
+-      right_excess += right;
++      right_excess += tiling.image_width - 1 - right;
+       top_excess += top;
+-      bottom_excess += bottom;
++      bottom_excess += tiling.image_height - 1 - bottom;
++      tiling.image_width = right - left + 1;
++      tiling.image_height = bottom - top + 1;
+     }
+ 
+     // --- scaling (not supported yet)
+--- a/libheif/api/libheif/heif_aux_images.cc
++++ b/libheif/api/libheif/heif_aux_images.cc
+@@ -230,7 +230,7 @@
+                                          const heif_image_handle* master_image,
+                                          const heif_image_handle* thumbnail_image)
+ {
+-  Error error = ctx->context->assign_thumbnail(thumbnail_image->image, master_image->image);
++  Error error = ctx->context->assign_thumbnail(master_image->image, thumbnail_image->image);
+   return error.error_struct(ctx->context.get());
+ }
+ 

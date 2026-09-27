@@ -1,0 +1,12 @@
+diff --git a/src/decoders/decoders_dcraw.cpp b/src/decoders/decoders_dcraw.cpp
+--- a/src/decoders/decoders_dcraw.cpp
++++ b/src/decoders/decoders_dcraw.cpp
+@@ -364,6 +364,8 @@ int LibRaw::ljpeg_diff(ushort *huff)
+     throw LIBRAW_EXCEPTION_IO_CORRUPT;
+ 
+   len = gethuff(huff);
++  if (len == 0)
++    return 0;
+   if (len == 16 && (!dng_version || dng_version >= 0x1010000))
+     return -32768;
+   diff = getbits(len);

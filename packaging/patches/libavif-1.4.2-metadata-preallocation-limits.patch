@@ -1,0 +1,51 @@
+diff --git a/src/read.c b/src/read.c
+--- a/src/read.c
++++ b/src/read.c
+@@ -14,6 +14,12 @@
+ 
+ #define AUXTYPE_SIZE 64
+ #define CONTENTTYPE_SIZE 64
++
++// Licasa's private libavif build rejects metadata before libavif allocates it.
++// The application retains the same post-parse XMP and ICC checks.
++#define LICASA_XMP_SIZE_LIMIT (1u * 1024u * 1024u)
++#define LICASA_ICC_SIZE_LIMIT (4u * 1024u * 1024u)
++#define LICASA_CONTAINER_METADATA_SIZE_LIMIT (8u * 1024u * 1024u)
+ 
+ // class VisualSampleEntry(codingname) extends SampleEntry(codingname) {
+ //     unsigned int(16) pre_defined = 0;
+@@ -1929,6 +1935,10 @@
+             AVIF_CHECKRES(avifRWDataSet(&image->exif, avifROStreamCurrent(&exifBoxStream), avifROStreamRemainingBytes(&exifBoxStream)));
+         } else if (!decoder->ignoreXMP && !memcmp(item->type, "mime", 4) &&
+                    !strcmp(item->contentType.contentType, AVIF_CONTENT_TYPE_XMP)) {
++            if (item->size > LICASA_XMP_SIZE_LIMIT) {
++                avifDiagnosticsPrintf(&decoder->diag, "XMP item exceeds Licasa's 1 MiB metadata limit");
++                return AVIF_RESULT_BMFF_PARSE_FAILED;
++            }
+             avifROData xmpContents;
+             avifResult readResult = avifDecoderItemRead(item, decoder->io, &xmpContents, 0, 0, &decoder->diag);
+             if (readResult != AVIF_RESULT_OK) {
+@@ -4888,6 +4898,13 @@
+             } else {
+                 sizeToRead = header.size;
+             }
++            // Meta and movie boxes are buffered in full before their child
++            // properties are inspected. Bound that first allocation, including
++            // ICC profiles carried inside a colr property.
++            if ((isMeta || isMoov) && sizeToRead > LICASA_CONTAINER_METADATA_SIZE_LIMIT) {
++                avifDiagnosticsPrintf(&decoder->diag, "AVIF metadata container exceeds Licasa's 8 MiB limit");
++                return AVIF_RESULT_BMFF_PARSE_FAILED;
++            }
+             readResult = decoder->io->read(decoder->io, 0, parseOffset, sizeToRead, &boxContents);
+             if (readResult != AVIF_RESULT_OK) {
+                 return readResult;
+@@ -5676,6 +5693,9 @@
+             if (colrICCSeen) {
+                 return AVIF_RESULT_BMFF_PARSE_FAILED;
+             }
++            if (prop->u.colr.iccSize > LICASA_ICC_SIZE_LIMIT) {
++                return AVIF_RESULT_BMFF_PARSE_FAILED;
++            }
+             avifROData iccRead;
+             AVIF_CHECKRES(io->read(io, 0, prop->u.colr.iccOffset, prop->u.colr.iccSize, &iccRead));
+             colrICCSeen = AVIF_TRUE;

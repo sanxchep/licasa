@@ -1,0 +1,4 @@
+if(NOT DEFINED LICASA_CODEC_LIBRARY OR NOT EXISTS "${LICASA_CODEC_LIBRARY}")
+    message(FATAL_ERROR "Expected an existing codec library")
+endif()
+file(RPATH_REMOVE FILE "${LICASA_CODEC_LIBRARY}")

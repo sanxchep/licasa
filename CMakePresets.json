@@ -1,0 +1,199 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release verification",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "ON",
+        "LICASA_BUILD_DIAGNOSTICS": "ON"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "ASan verification",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "LICASA_ENABLE_IPO": "OFF",
+        "LICASA_BUILD_DIAGNOSTICS": "ON",
+        "LICASA_SANITIZER": "address"
+      }
+    },
+    {
+      "name": "ubsan",
+      "displayName": "UBSan verification",
+      "inherits": "asan",
+      "binaryDir": "${sourceDir}/build/ubsan",
+      "cacheVariables": {
+        "LICASA_SANITIZER": "undefined"
+      }
+    },
+    {
+      "name": "clion-core",
+      "displayName": "CLion - Core Debug",
+      "description": "Fast local CLion profile. Builds the application, diagnostics and core QML/native tests without private modern codecs.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/core",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_TESTING": "ON",
+        "LICASA_ENABLE_IPO": "OFF",
+        "LICASA_BUILD_DIAGNOSTICS": "ON",
+        "LICASA_ENABLE_HEIF": "OFF",
+        "LICASA_ENABLE_JXL": "OFF",
+        "LICASA_ENABLE_RAW": "OFF",
+        "LICASA_ENABLE_AVIF": "OFF",
+        "LICASA_ENABLE_APNG": "OFF",
+        "LICASA_ENABLE_MOTION_PLAYBACK": "OFF"
+      }
+    },
+    {
+      "name": "clion-modern",
+      "displayName": "CLion - Modern Codecs",
+      "description": "Primary development bench: HEIF, JPEG XL, RAW, AVIF and APNG enabled using the pinned local codec prefix.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/modern",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "BUILD_TESTING": "ON",
+        "LICASA_ENABLE_IPO": "OFF",
+        "LICASA_BUILD_DIAGNOSTICS": "ON",
+        "LICASA_ENABLE_HEIF": "ON",
+        "LICASA_ENABLE_JXL": "ON",
+        "LICASA_ENABLE_RAW": "ON",
+        "LICASA_ENABLE_AVIF": "ON",
+        "LICASA_ENABLE_APNG": "ON",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/build/codecs/release-prefix",
+        "LICASA_ENABLE_MOTION_PLAYBACK": "ON",
+        "LICASA_QT_FFMPEG_PLUGIN": "${sourceDir}/build/deps/qt-ffmpeg-runtime-release/libffmpegmediaplugin.so",
+        "LICASA_QT_QUICK_BACKPORT_LIBRARY": "${sourceDir}/build/deps/qt-backport-runtime/libQt6Quick.so.6.4.2",
+        "LICASA_SANITIZER": ""
+      }
+    },
+    {
+      "name": "clion-modern-asan",
+      "displayName": "CLion - Modern Codecs + ASan",
+      "inherits": "clion-modern",
+      "binaryDir": "${sourceDir}/build/modern-asan",
+      "cacheVariables": {
+        "LICASA_SANITIZER": "address",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/build/codecs/address-prefix",
+        "LICASA_QT_FFMPEG_PLUGIN": "${sourceDir}/build/deps/qt-ffmpeg-runtime-address/libffmpegmediaplugin.so"
+      }
+    },
+    {
+      "name": "clion-modern-ubsan",
+      "displayName": "CLion - Modern Codecs + UBSan",
+      "inherits": "clion-modern",
+      "binaryDir": "${sourceDir}/build/modern-ubsan",
+      "cacheVariables": {
+        "LICASA_SANITIZER": "undefined",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/build/codecs/undefined-prefix",
+        "LICASA_QT_FFMPEG_PLUGIN": "${sourceDir}/build/deps/qt-ffmpeg-runtime-undefined/libffmpegmediaplugin.so"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "ubsan",
+      "configurePreset": "ubsan"
+    },
+    {
+      "name": "clion-core",
+      "configurePreset": "clion-core"
+    },
+    {
+      "name": "clion-modern",
+      "configurePreset": "clion-modern"
+    },
+    {
+      "name": "clion-modern-asan",
+      "configurePreset": "clion-modern-asan"
+    },
+    {
+      "name": "clion-modern-ubsan",
+      "configurePreset": "clion-modern-ubsan"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ubsan",
+      "configurePreset": "ubsan",
+      "environment": {
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "clion-core",
+      "configurePreset": "clion-core",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "clion-modern",
+      "configurePreset": "clion-modern",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "clion-modern-asan",
+      "configurePreset": "clion-modern-asan",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "clion-modern-ubsan",
+      "configurePreset": "clion-modern-ubsan",
+      "environment": {
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

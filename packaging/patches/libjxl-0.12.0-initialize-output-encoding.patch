@@ -1,0 +1,22 @@
+--- a/lib/jxl/dec_xyb.h
++++ b/lib/jxl/dec_xyb.h
+@@ -55,8 +55,8 @@
+   bool color_encoding_is_original;
+   // Contains an opsin matrix that converts to the primaries of the output
+   // encoding.
+-  OpsinParams opsin_params;
+-  bool all_default_opsin;
++  OpsinParams opsin_params{};
++  bool all_default_opsin = false;
+   // Used for Gamma and DCI transfer functions.
+   float inverse_gamma;
+   // Luminances of color_encoding's primaries, used for the HLG inverse OOTF and
+@@ -69,7 +69,7 @@
+   // Used for the HLG inverse OOTF and PQ tone mapping.
+   float desired_intensity_target;
+   bool cms_set = false;
+-  JxlCmsInterface color_management_system;
++  JxlCmsInterface color_management_system{};
+ 
+   Status SetFromMetadata(const CodecMetadata& metadata);
+   Status MaybeSetColorEncoding(const ColorEncoding& c_desired);

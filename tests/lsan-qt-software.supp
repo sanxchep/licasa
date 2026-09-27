@@ -1,0 +1,7 @@
+# Qt 6.4 software renderer owns textures in QSGRenderContext::m_textures,
+# but neither its invalidate() nor its destructor deletes the cache. Reproduced
+# with an isolated, ordinary QML Image; Qt 6.8 includes the missing cleanup.
+# This suppression is enabled ONLY for the software QML suite on Qt < 6.8.
+# Native Licasa decoder/save tests have no suppressions. Remove on Qt >= 6.8.
+# See docs/TESTING.md (Sanitizers and lifetimes) for reproduction and scope.
+leak:QSGRenderContext::textureForFactory

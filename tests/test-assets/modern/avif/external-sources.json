@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "maximum_total_bytes": 8388608,
+  "sources": [
+    {
+      "id": "link-u-avif-sample-images",
+      "repository": "link-u/avif-sample-images",
+      "commit": "c666a368b73006246694919b5dbcc078317af6cc",
+      "license_note": "Per-file licenses are recorded below; transform/fox fixtures are CC-BY-SA-4.0.",
+      "files": [
+        {"path": "kimono.avif", "git_blob_sha1": "e91fe56e724b4b7e2fbfab4412bcf3c7bbcfc972", "size": 85445, "license": "CC-BY-SA-4.0", "purpose": "transform baseline"},
+        {"path": "kimono.rotate90.avif", "git_blob_sha1": "ee7c5246e13054a81f70f4affea1571381a88474", "size": 84837, "license": "CC-BY-SA-4.0", "purpose": "irot"},
+        {"path": "kimono.rotate270.avif", "git_blob_sha1": "aed93e55a0c964bed1833077d1726402faa7931d", "size": 84886, "license": "CC-BY-SA-4.0", "purpose": "irot"},
+        {"path": "kimono.mirror-horizontal.avif", "git_blob_sha1": "3447d4ad89e6994a42caa6e0ffa54b2d5713d224", "size": 84996, "license": "CC-BY-SA-4.0", "purpose": "imir"},
+        {"path": "kimono.mirror-vertical.avif", "git_blob_sha1": "41d2bd209127c0555ab3e8c70938e5314efce642", "size": 84632, "license": "CC-BY-SA-4.0", "purpose": "imir"},
+        {"path": "kimono.mirror-vertical.rotate270.avif", "git_blob_sha1": "164c66bc7dea6cd7e156d3490789f0daa4625898", "size": 85529, "license": "CC-BY-SA-4.0", "purpose": "irot+imir ordering"},
+        {"path": "kimono.crop.avif", "git_blob_sha1": "777813e690c8f086fecd5028450e053800440490", "size": 85486, "license": "CC-BY-SA-4.0", "purpose": "clap"},
+        {"path": "kimono.mirror-vertical.rotate270.crop.avif", "git_blob_sha1": "47ab00b1e4b3a73eedca526d31e35e04813bec39", "size": 85570, "license": "CC-BY-SA-4.0", "purpose": "clap+irot+imir ordering"},
+        {"path": "kimono.png", "git_blob_sha1": "2bddce177ae5c7b21eb0424ea032f1e4db03d294", "size": 1278247, "license": "CC-BY-SA-4.0", "purpose": "transform visual reference"},
+        {"path": "kimono.crop.png", "git_blob_sha1": "ea47f4c9a26aa9581dd2803b84d18d94934d9a27", "size": 157486, "license": "CC-BY-SA-4.0", "purpose": "clean-aperture visual reference"},
+        {"path": "fox.profile0.8bpc.yuv420.odd-width.odd-height.avif", "git_blob_sha1": "5edb77e51de8b4e2151392e9b786a05f4f0f8ef2", "size": 77645, "license": "CC-BY-SA-4.0", "purpose": "odd coded dimensions"}
+      ]
+    },
+    {
+      "id": "libavif-v1.4.2",
+      "repository": "AOMediaCodec/libavif",
+      "commit": "c5240fc79fe5c2407e10afd35f5505ef6333ea49",
+      "license_note": "libavif test data; see upstream tests/data/README.md and LICENSE.",
+      "files": [
+        {"path": "tests/data/draw_points.png", "git_blob_sha1": "a96fe6f0569b7707b7d274f40889b162507b9b6c", "size": 304, "license": "libavif-test-data", "purpose": "progressive visual reference"},
+        {"path": "tests/data/draw_points_idat_progressive.avif", "git_blob_sha1": "fe8b23db327e95a6ace804801b59c5fef7e92696", "size": 600, "license": "libavif-test-data", "purpose": "progressive still"},
+        {"path": "tests/data/draw_points_idat_progressive_metasize0.avif", "git_blob_sha1": "2eb8614edef2a7d898c4894daa70c6e64486f05d", "size": 600, "license": "libavif-test-data", "purpose": "progressive still with size-zero meta"},
+        {"path": "tests/data/colors-animated-8bpc.avif", "git_blob_sha1": "afa875d1030cb48429efab1e0bb97044a6d5259a", "size": 1235, "license": "libavif-test-data", "purpose": "explicit sequence rejection"},
+        {"path": "tests/data/colors_sdr_srgb.avif", "git_blob_sha1": "26f3ce12b61d8949c44947bcd7186764b99dd7d8", "size": 18845, "license": "libavif-test-data", "purpose": "SDR sRGB signaling"},
+        {"path": "tests/data/colors_hdr_p3.avif", "git_blob_sha1": "6a2403f110da57369d57413490d309f4670ff17f", "size": 26532, "license": "libavif-test-data", "purpose": "HDR P3 signaling remains untagged"},
+        {"path": "tests/data/colors_hdr_rec2020.avif", "git_blob_sha1": "6d94d576b0c8920929b0b0007cd062c06dcfb1ca", "size": 24065, "license": "libavif-test-data", "purpose": "HDR Rec.2020 signaling remains untagged"},
+        {"path": "tests/data/paris_icc_exif_xmp.avif", "git_blob_sha1": "c66de3a5ae2a663ce2c08a5ae67166ed4c7db52c", "size": 21132, "license": "libavif-test-data", "purpose": "ICC preservation"},
+        {"path": "tests/data/paris_icc_exif_xmp.png", "git_blob_sha1": "1bee17d2246daed64d2f80de8b49a894e7c0c52a", "size": 153217, "license": "libavif-test-data", "purpose": "ICC reference"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+name: Build and verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [release, asan, ubsan]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends cmake ninja-build g++ python3 \
+            pkg-config patch meson nasm clang-format-18 \
+            qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-image-formats-plugins \
+            qt6-base-private-dev qt6-declarative-private-dev qt6-shadertools-dev \
+            qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript \
+            qml6-module-qttest qml6-module-qtquick-controls qml6-module-qtquick-templates \
+            qml6-module-qtquick-dialogs qml6-module-qtquick-layouts
+      - name: Check first-party C++ formatting
+        run: python3 tools/check_code_style.py
+      - name: Build the same-version Qt Quick cleanup backport
+        run: python3 tools/build_qt_backport.py --jobs "$(nproc)"
+      - name: Build maintained native image codecs
+        env:
+          PRESET: ${{ matrix.preset }}
+        run: |
+          case "$PRESET" in
+            release) sanitizer=() ;;
+            asan) sanitizer=(--sanitizer address) ;;
+            ubsan) sanitizer=(--sanitizer undefined) ;;
+          esac
+          python3 tools/build_codecs.py --prefix "$PWD/build/codecs/prefix" "${sanitizer[@]}" --jobs "$(nproc)"
+      - name: Configure the application and matching sanitizer tests
+        run: |
+          cmake --preset ${{ matrix.preset }} \
+            -DLICASA_ENABLE_HEIF=ON -DLICASA_ENABLE_JXL=ON -DLICASA_ENABLE_RAW=ON \
+            -DLICASA_ENABLE_AVIF=ON -DLICASA_ENABLE_APNG=ON \
+            -DCMAKE_PREFIX_PATH="$PWD/build/codecs/prefix" \
+            -DLICASA_QT_QUICK_BACKPORT_LIBRARY="$PWD/build/deps/qt-backport-runtime/libQt6Quick.so.6.4.2"
+      - run: cmake --build --preset ${{ matrix.preset }} --parallel "$(nproc)"
+      - run: ctest --preset ${{ matrix.preset }}
+      - name: Verify installed release
+        if: matrix.preset == 'release'
+        run: |
+          cmake --install build/release --prefix "$RUNNER_TEMP/licasa-package"
+          python3 tools/check_hardening.py "$RUNNER_TEMP/licasa-package/bin/licasa"
+          python3 tools/smoke_package.py "$RUNNER_TEMP/licasa-package" \
+            --jxl --raw --avif --avif-animation --apng \
+            --vendor-cache "$RUNNER_TEMP/vendor-samples" \
+            --output build/release/package-smoke.json
+          QT_QPA_PLATFORM=offscreen "$RUNNER_TEMP/licasa-package/bin/licasa_diagnostics" \
+            --formats tests/test-assets/formats/core-matrix/jpeg/full-hd-1920x1080.jpg \
+            > build/release/runtime-formats.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-${{ matrix.preset }}
+          path: |
+            build/${{ matrix.preset }}/Testing/Temporary/LastTest.log
+            build/${{ matrix.preset }}/runtime-formats.json
+            build/${{ matrix.preset }}/package-smoke.json
+            build/${{ matrix.preset }}/raw-viewer-behavior.json
+            build/${{ matrix.preset }}/viewer-lifecycle.json

@@ -1,0 +1,92 @@
+name: Ubuntu deb and release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag, such as v0.1.0 (required to publish)
+        type: string
+        required: false
+        default: ''
+      publish:
+        description: Publish a GitHub Release after verification
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Validate publish request
+        if: ${{ inputs.publish }}
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag != '' && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates cmake ninja-build g++ python3 pkg-config patch git meson nasm dpkg-dev \
+            qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-image-formats-plugins \
+            libopenjp2-7-dev libjpeg-turbo8-dev \
+            qt6-base-private-dev qt6-declarative-private-dev qt6-shadertools-dev \
+            qt6-multimedia-dev libpulse-dev libavcodec-dev libavformat-dev \
+            libavutil-dev libswresample-dev libswscale-dev libavdevice-dev libavfilter-dev \
+            qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript \
+            qml6-module-qttest qml6-module-qtquick-controls qml6-module-qtquick-templates \
+            qml6-module-qtquick-dialogs qml6-module-qtquick-layouts
+      - name: Build pinned private libraries and deb
+        run: python3 tools/build_ubuntu_deb.py --jobs 4
+      - name: Install deb on clean Ubuntu and decode samples
+        run: python3 tools/verify_deb_container.py build/qualification/deb/licasa_*.deb
+      - name: Check package checksum
+        run: cd build/qualification/deb && sha256sum --check licasa_*.deb.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: licasa-ubuntu-24.04-amd64
+          path: |
+            build/qualification/deb/licasa_*.deb
+            build/qualification/deb/licasa_*.deb.sha256
+            build/qualification/deb/install-smoke.json
+          if-no-files-found: error
+
+  publish:
+    if: ${{ inputs.publish }}
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gh
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-ubuntu-24.04-amd64
+          path: dist
+      - name: Require a matching existing version tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          version="$(dpkg-deb --field dist/licasa_*.deb Version)"
+          test "$RELEASE_TAG" = "v${version%-*}"
+          cd dist
+          sha256sum --check licasa_*.deb.sha256
+      - name: Publish release with deb and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/licasa_*.deb dist/licasa_*.deb.sha256 \
+            --verify-tag --generate-notes

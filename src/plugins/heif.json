@@ -1,0 +1,11 @@
+{
+  "Keys": ["heic", "heif", "hif", "heics", "heifs"],
+  "MimeTypes": ["image/heic", "image/heif", "image/heif", "image/heic-sequence", "image/heif-sequence"],
+  "Licasa": {
+    "Backend": "libheif",
+    "MinimumBackendVersion": "1.23.4",
+    "DimensionProbe": "metadata only",
+    "Preview": "embedded thumbnail, streamed grid tiles, single coded image, or bounded HEIF sequence frame",
+    "Animation": true
+  }
+}

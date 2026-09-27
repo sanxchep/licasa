@@ -1,0 +1,128 @@
+[
+  {
+    "file": "alpha.jxl",
+    "sha256": "1707cc6c9a1c3db38ca2a64b5a31e3ef41f0813600b39702a8afd03a0b826bca",
+    "bytes": 4127,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "alpha.jxl.png",
+    "sha256": "babc26ea3afb006d216ea56500b8241f2f3fccaa367c17e31b60c8b442c8a385",
+    "bytes": 699,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "animated.jxl",
+    "sha256": "2a211be998b682b34f86842735945f8449a022ff1f83ef08f161f37aead660a9",
+    "bytes": 1159,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "animation-100-4k.jxl",
+    "sha256": "ee6d493f318b80ded124c150b41c7859110355705b2e61e282a293199b00cc7d",
+    "bytes": 1485670,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "broken/truncated.jxl",
+    "sha256": "412f4b55bd439fe48e8217eedf3202555194f0e7071eca2d6dfec08183581c2a",
+    "bytes": 40,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": false
+  },
+  {
+    "file": "display-p3.jxl",
+    "sha256": "821292dc6fe4ca52c943b0b9bc6ca852334f2995c46eb65fd3eb43ceda596955",
+    "bytes": 4052,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "display-p3.jxl.png",
+    "sha256": "7f9616a225fac8083c363fda71371ac35a4c379c5f45a195654cb21f7a10deb8",
+    "bytes": 707,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "embedded-preview.jxl",
+    "sha256": "c723aff2396e1267296e194bf4608f12495093aa40c93491928f47934a7b495a",
+    "bytes": 35014,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_preview_fixture.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "full-hd.jxl",
+    "sha256": "2b0355b6beec032425b250b80a6318df879396e8becb03d14a7d24730258c892",
+    "bytes": 169893,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "full-hd.jxl.png",
+    "sha256": "aa7a0da3b354d962d992d1b0147474a065b36005fd3bfc784a05a0c38c621f3e",
+    "bytes": 14969,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "large-48mp.jxl",
+    "sha256": "59fb2b57f38bf7687e5c20bd04c59c89b5f7735c732a59b4e781b9fbfc3fe2f8",
+    "bytes": 2572280,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "rotated-preview.jxl",
+    "sha256": "667fb2117f4a760fc80b5bacc692a9487784a77339dd78936e0b7823a59ce482",
+    "bytes": 35014,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_preview_fixture.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "rotated.jxl",
+    "sha256": "9a7322a4e2f4ecf48adea323de9c75b47a40bea08ee91541f6b675e9630d181f",
+    "bytes": 4043,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  },
+  {
+    "file": "rotated.jxl.png",
+    "sha256": "c5876dd0d8e6dc3575695ec97f5a36dc1df1195979d4a1e1cfb73c913387c28d",
+    "bytes": 695,
+    "origin": "synthetic",
+    "license": "MIT",
+    "generator": "tools/make_jxl_fixtures.cpp",
+    "expected_decode": true
+  }
+]

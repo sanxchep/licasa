@@ -1,0 +1,186 @@
+{
+  "libde265": {
+    "version": "1.1.2",
+    "url": "https://github.com/strukturag/libde265/releases/download/v1.1.2/libde265-1.1.2.tar.gz",
+    "sha256": "eaacd1943ab0c452c19f6136a36ca227e6b761b39a81eaca8454d48c147e1f67",
+    "license": "LGPL-3.0-or-later",
+    "options": {
+      "ENABLE_DECODER": "OFF",
+      "ENABLE_SDL": "OFF",
+      "ENABLE_ENCODER": "OFF",
+      "ENABLE_SHERLOCK265": "OFF"
+    }
+  },
+  "libheif": {
+    "version": "1.23.4",
+    "url": "https://github.com/strukturag/libheif/releases/download/v1.23.4/libheif-1.23.4.tar.gz",
+    "sha256": "d0c02b4b0e978f34a1974b6f3eea7975a537bf7a9195ffeea38e7242ff316fdd",
+    "license": "LGPL-3.0-or-later",
+    "patches": [
+      "packaging/patches/libheif-1.23.4-tiles-and-thumbnails.patch"
+    ],
+    "options": {
+      "WITH_LIBDE265": "ON",
+      "WITH_LIBDE265_PLUGIN": "OFF",
+      "WITH_X265": "OFF",
+      "WITH_X264": "OFF",
+      "WITH_OpenH264_DECODER": "OFF",
+      "WITH_AOM_DECODER": "OFF",
+      "WITH_AOM_ENCODER": "OFF",
+      "WITH_DAV1D": "OFF",
+      "WITH_RAV1E": "OFF",
+      "WITH_SvtEnc": "OFF",
+      "WITH_UNCOMPRESSED_CODEC": "OFF",
+      "WITH_LIBSHARPYUV": "OFF",
+      "WITH_EXAMPLES": "OFF",
+      "WITH_GDK_PIXBUF": "OFF",
+      "BUILD_DOCUMENTATION": "OFF",
+      "BUILD_TESTING": "OFF",
+      "ENABLE_PLUGIN_LOADING": "OFF",
+      "ENABLE_PARALLEL_TILE_DECODING": "OFF"
+    }
+  },
+  "libjxl": {
+    "version": "0.12.0",
+    "url": "https://codeload.github.com/libjxl/libjxl/tar.gz/refs/tags/v0.12.0",
+    "sha256": "03e9be69a30be4011f559da75328b6d7cea8ad921fabfbd551ce10bf45cdc992",
+    "license": "BSD-3-Clause",
+    "patches": [
+      "packaging/patches/libjxl-0.12.0-private-brotli.patch",
+      "packaging/patches/libjxl-0.12.0-standard-constant-lifetimes.patch",
+      "packaging/patches/libjxl-0.12.0-initialize-output-encoding.patch"
+    ],
+    "options": {
+      "BUILD_TESTING": "OFF",
+      "JPEGXL_ENABLE_TOOLS": "OFF",
+      "JPEGXL_ENABLE_DEVTOOLS": "OFF",
+      "JPEGXL_ENABLE_DOXYGEN": "OFF",
+      "JPEGXL_ENABLE_MANPAGES": "OFF",
+      "JPEGXL_ENABLE_BENCHMARK": "OFF",
+      "JPEGXL_ENABLE_EXAMPLES": "OFF",
+      "JPEGXL_ENABLE_JNI": "OFF",
+      "JPEGXL_ENABLE_SJPEG": "OFF",
+      "JPEGXL_ENABLE_OPENEXR": "OFF",
+      "JPEGXL_ENABLE_VIEWERS": "OFF",
+      "JPEGXL_ENABLE_TCMALLOC": "OFF",
+      "JPEGXL_ENABLE_PLUGINS": "OFF",
+      "JPEGXL_ENABLE_FUZZERS": "OFF",
+      "JPEGXL_ENABLE_TRANSCODE_JPEG": "OFF",
+      "JPEGXL_ENABLE_BOXES": "ON",
+      "JPEGXL_ENABLE_SKCMS": "ON"
+    },
+    "dependencies": {
+      "brotli": {
+        "version": "028fb5a23661f123017c060daa546b55cf4bde29",
+        "url": "https://codeload.github.com/google/brotli/tar.gz/028fb5a23661f123017c060daa546b55cf4bde29",
+        "sha256": "0afe09a53c8bad9861c8dd1fc1284308d54f19d2979ba3541cfdcc9b05fe360f",
+        "path": "third_party/brotli",
+        "license": "MIT"
+      },
+      "highway": {
+        "version": "457c891775a7397bdb0376bb1031e6e027af1c48",
+        "url": "https://codeload.github.com/google/highway/tar.gz/457c891775a7397bdb0376bb1031e6e027af1c48",
+        "sha256": "5124b0501c98d9930dbb065bfa1a5bbbd59ce0f12facb7e1e33aaef01a5f1f1a",
+        "path": "third_party/highway",
+        "license": "Apache-2.0"
+      },
+      "skcms": {
+        "version": "96d9171c94b937a1b5f0293de7309ac16311b722",
+        "url": "https://codeload.github.com/google/skcms/tar.gz/96d9171c94b937a1b5f0293de7309ac16311b722",
+        "sha256": "9bb4b5bba0b7c04f6c2bce9ff713d61e23c9a20c4945161ae16290498ad74627",
+        "path": "third_party/skcms",
+        "license": "BSD-3-Clause"
+      }
+    }
+  },
+  "libraw": {
+    "version": "0.22.2",
+    "url": "https://www.libraw.org/data/LibRaw-0.22.2.tar.gz",
+    "sha256": "de86b035655accff8d4010f1a221fdf50d353cb7b1422ba26f14a0db92612cfa",
+    "license": "LGPL-2.1-only OR CDDL-1.0",
+    "rawspeed3": {
+      "url": "https://github.com/darktable-org/rawspeed",
+      "commit": "de70ef5fbc62cde91009c8cff7a206272abe631e",
+      "tree": "9a3db3e8be3bf097ca02ebb178f9fed6fd1bafda",
+      "pugixml_version": "1.9",
+      "pugixml_sha512": "853a9d985aae537391c6524d5413ef4de237d99d96cc58ea7fe7152f786df1e408cdacd2e4387697e23c3e67cdc1d42b29de554501309eae16d86edd0e24785f"
+    },
+    "build_system": "autotools",
+    "configure_options": [
+      "--enable-shared",
+      "--disable-static",
+      "--enable-openmp",
+      "--disable-examples",
+      "--disable-lcms",
+      "--enable-jpeg",
+      "--enable-zlib"
+    ],
+    "patches": [
+      "packaging/patches/libraw-0.22.2-lossless-jpeg-zero-diff.patch",
+      "packaging/patches/libraw-0.22.2-parallel-copy.patch"
+    ]
+  },
+  "libyuv": {
+    "version": "1924",
+    "source_type": "git",
+    "url": "https://chromium.googlesource.com/libyuv/libyuv",
+    "commit": "644251f252a84bf8ce91ff0aca86a9b16b069ab8",
+    "tree": "ba22b636166dc16532fcc9d5a9524117432d1782",
+    "license": "BSD-3-Clause",
+    "options": {
+      "UNIT_TEST": "OFF",
+      "CMAKE_DISABLE_FIND_PACKAGE_JPEG": "TRUE"
+    }
+  },
+  "dav1d": {
+    "version": "1.5.4",
+    "url": "https://download.videolan.org/pub/videolan/dav1d/1.5.4/dav1d-1.5.4.tar.xz",
+    "sha256": "686616b7c69eb88d44459391ab25cac13b6647a3b288835c5784e71c1514a5c5",
+    "license": "BSD-2-Clause",
+    "build_system": "meson",
+    "options": {
+      "enable_asm": "true",
+      "enable_tools": "false",
+      "enable_examples": "false",
+      "enable_tests": "false",
+      "enable_seek_stress": "false",
+      "enable_docs": "false",
+      "testdata_tests": "false",
+      "fuzzing_engine": "none",
+      "xxhash_muxer": "disabled"
+    }
+  },
+  "libavif": {
+    "version": "1.4.2",
+    "url": "https://github.com/AOMediaCodec/libavif/archive/refs/tags/v1.4.2.tar.gz",
+    "sha256": "2b645287340ba5a631d268b551dc2d72bd73ac33335962dd36dcdb6d8366921d",
+    "license": "BSD-2-Clause",
+    "requires": [
+      "libyuv",
+      "dav1d"
+    ],
+    "patches": [
+      "packaging/patches/libavif-1.4.2-metadata-preallocation-limits.patch"
+    ],
+    "options": {
+      "AVIF_CODEC_DAV1D": "SYSTEM",
+      "AVIF_CODEC_AOM": "OFF",
+      "AVIF_CODEC_LIBGAV1": "OFF",
+      "AVIF_CODEC_RAV1E": "OFF",
+      "AVIF_CODEC_SVT": "OFF",
+      "AVIF_CODEC_AVM": "OFF",
+      "AVIF_LIBYUV": "SYSTEM",
+      "AVIF_LIBSHARPYUV": "OFF",
+      "AVIF_LIBXML2": "OFF",
+      "AVIF_JPEG": "OFF",
+      "AVIF_ZLIBPNG": "OFF",
+      "AVIF_BUILD_APPS": "OFF",
+      "AVIF_BUILD_TESTS": "OFF",
+      "AVIF_BUILD_EXAMPLES": "OFF",
+      "AVIF_BUILD_MAN_PAGES": "OFF",
+      "AVIF_ENABLE_WERROR": "OFF",
+      "AVIF_ENABLE_EXPERIMENTAL_MINI": "OFF",
+      "AVIF_ENABLE_EXPERIMENTAL_EXTENDED_PIXI": "OFF"
+    }
+  }
+}

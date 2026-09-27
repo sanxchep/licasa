@@ -1,0 +1,15 @@
+--- a/third_party/CMakeLists.txt
++++ b/third_party/CMakeLists.txt
+@@ -80,7 +80,12 @@
+   if((NOT SANITIZER STREQUAL "asan") AND (NOT SANITIZER STREQUAL "msan"))
+     set(BROTLI_BUNDLED_MODE OFF CACHE INTERNAL "")
+   endif()
++  # Keep this pinned Brotli inside libjxl's hidden static dependencies. A
++  # process may already have loaded an older system Brotli with the same SONAME.
++  set(JXL_SAVED_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
++  set(BUILD_SHARED_LIBS OFF)
+   add_subdirectory(brotli)
++  set(BUILD_SHARED_LIBS ${JXL_SAVED_BUILD_SHARED_LIBS})
+   configure_file("${CMAKE_CURRENT_SOURCE_DIR}/brotli/LICENSE"
+                  ${PROJECT_BINARY_DIR}/LICENSE.brotli COPYONLY)
+   if(APPLE)

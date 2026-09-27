@@ -1,0 +1,18 @@
+{
+  "version": "6.4.2",
+  "url": "https://download.qt.io/archive/qt/6.4/6.4.2/submodules/qtmultimedia-everywhere-src-6.4.2.tar.xz",
+  "sha256": "7f2b70deeada911c8e660e2801286657f297a5d1d543d1f6bfa856f28972c776",
+  "ubuntu_patch_url": "https://archive.ubuntu.com/ubuntu/pool/universe/q/qt6-multimedia/qt6-multimedia_6.4.2-11build3.debian.tar.xz",
+  "ubuntu_patch_sha256": "11348fe1feaa1136897ef583b259e4f8a195a14f0aa55e105035366a821c943c",
+  "ubuntu_abi_patch": "debian/patches/provide_default_implementation_for_qplatformmediadevices.patch",
+  "patches": [
+    "packaging/patches/qt-6.4-ffmpeg-input-cleanup.patch",
+    "packaging/patches/qt-6.4-ffmpeg-decoding-device-override.patch",
+    "packaging/patches/qt-6.4-ffmpeg-frame-duration.patch"
+  ],
+  "references": [
+    "https://ffmpeg.org/doxygen/6.1/avio_read_callback_8c-example.html",
+    "https://github.com/qt/qtmultimedia/blob/v6.5.3/src/plugins/multimedia/ffmpeg/qffmpeghwaccel.cpp"
+  ],
+  "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"
+}

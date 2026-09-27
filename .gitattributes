@@ -1,0 +1,3 @@
+# Preserve meaningful whitespace in unified patch context.
+packaging/patches/*.patch -whitespace
+tests/test-assets/broken/png-signature-only.png binary

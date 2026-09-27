@@ -1,0 +1,41 @@
+# Local build trees and generated CMake state
+/build*/
+/cmake-build-*/
+/private-validation/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+_deps/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+CMakeLists.txt.user
+CMakeUserPresets.json
+
+# Compiler and linker outputs
+*.a
+*.app
+*.dll
+*.dylib
+*.exe
+*.la
+*.lib
+*.lo
+*.o
+*.obj
+*.out
+*.pdb
+*.so
+*.so.*
+
+# Editor and Python tooling
+.idea/
+__pycache__/
+*.py[cod]
+
+# Local recovery copies and generated reports
+*.before*
+/build-*.json

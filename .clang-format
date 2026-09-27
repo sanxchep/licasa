@@ -1,0 +1,19 @@
+BasedOnStyle: LLVM
+Standard: c++17
+ColumnLimit: 100
+IndentWidth: 4
+InsertBraces: true
+ContinuationIndentWidth: 4
+PointerAlignment: Left
+ReferenceAlignment: Left
+SortIncludes: CaseSensitive
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterFunction: true
+  AfterNamespace: false
+  BeforeCatch: false
+  BeforeElse: false
+  SplitEmptyFunction: false

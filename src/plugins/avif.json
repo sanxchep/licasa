@@ -1,0 +1,11 @@
+{
+  "Keys": ["avif"],
+  "MimeTypes": ["image/avif"],
+  "Licasa": {
+    "Backend": "libavif",
+    "MinimumBackendVersion": "1.4.2",
+    "DimensionProbe": "strict container metadata only",
+    "Preview": "single AV1 coded image; native raster decode is reported honestly",
+    "Animation": true
+  }
+}

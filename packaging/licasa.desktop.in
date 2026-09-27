@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Licasa
+Comment=Lightweight image viewer
+TryExec=licasa
+Exec=licasa %f
+Terminal=false
+Categories=Graphics;Viewer;
+MimeType=@LICASA_DESKTOP_MIME_TYPES@
+Icon=licasa
+StartupNotify=true

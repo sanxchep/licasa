@@ -1,0 +1,28 @@
+--- a/src/plugins/multimedia/ffmpeg/qffmpeghwaccel.cpp
++++ b/src/plugins/multimedia/ffmpeg/qffmpeghwaccel.cpp
+@@ -55,6 +55,25 @@
+ static AVBufferRef *hardwareContextForCodec(const AVCodec *codec)
+ {
+     qDebug() << "Checking HW acceleration for decoder" << codec->name;
++
++    // Backport Qt 6.5's decoder-device override. An empty list (e.g. ",")
++    // selects software decoding, allowing deterministic driver-free leak tests.
++    const QByteArray requested = qgetenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES");
++    if (!requested.isNull()) {
++        for (const auto &name : requested.toLower().split(',')) {
++            const auto type = av_hwdevice_find_type_by_name(name.constData());
++            if (type == AV_HWDEVICE_TYPE_NONE)
++                continue;
++            for (int i = 0; const auto *config = avcodec_get_hw_config(codec, i); ++i) {
++                if (config->device_type == type) {
++                    if (auto *context = loadHWContext(type))
++                        return context;
++                    break;
++                }
++            }
++        }
++        return nullptr;
++    }
+ 
+     // First try our preferred accelerators. Those are the ones where we can
+     // set up a zero copy pipeline

@@ -1,0 +1,11 @@
+{
+  "Keys": ["apng", "png"],
+  "MimeTypes": ["image/apng"],
+  "Licasa": {
+    "Backend": "Qt PNG frame decoder + Licasa APNG compositor",
+    "DimensionProbe": "strict PNG/APNG chunk metadata only",
+    "Preview": "full admitted APNG canvas; no false requested-size native decode claim",
+    "Animation": true,
+    "StaticPngFallback": "ordinary PNG remains on Qt's existing PNG reader"
+  }
+}
