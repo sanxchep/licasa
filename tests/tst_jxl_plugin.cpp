@@ -27,7 +27,8 @@ namespace Contract = Licasa::ImageDecodeContract;
 namespace {
 QString fixture(const char* name)
 {
-    return QStringLiteral(LICASA_SOURCE_DIR "/tests/test-assets/modern/jxl/") + QString::fromLatin1(name);
+    return QStringLiteral(LICASA_SOURCE_DIR "/tests/test-assets/modern/jxl/") +
+           QString::fromLatin1(name);
 }
 QString codecError(QImageReader& reader)
 {
