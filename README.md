@@ -13,6 +13,16 @@ Licasa is an image viewer and editor for the Linux desktop. It opens a photo fro
 
 **Licasa is an independent open-source project and is not affiliated with or endorsed by Google.**
 
+## Try Licasa
+
+**[Download the Ubuntu 24.04 package](https://github.com/sanxchep/licasa/releases/latest)** · [See the v0.1.0 release notes](https://github.com/sanxchep/licasa/releases/tag/v0.1.0)
+
+- View photos fullscreen or in a floating window, then crop, adjust, and export them.
+- Open JPEG, PNG, TIFF, WebP, HEIC/HEIF, JPEG XL, AVIF, JPEG 2000, and RAW previews.
+- Play Motion Photos and animated APNG files.
+
+Licasa is at its first release. If you try it, [report a bug or suggest a feature](https://github.com/sanxchep/licasa/issues/new).
+
 ## Requirements
 
 - Ubuntu 24.04 on amd64 for the current `.deb` package.
@@ -20,7 +30,7 @@ Licasa is an image viewer and editor for the Linux desktop. It opens a photo fro
 
 ## Install
 
-When a package is published, download `licasa_0.1.0-1_amd64.deb` from [Releases](https://github.com/sanxchep/licasa/releases) and install it with:
+Download `licasa_0.1.0-1_amd64.deb` from [Releases](https://github.com/sanxchep/licasa/releases) and install it with:
 
 ```sh
 sudo apt install ./licasa_0.1.0-1_amd64.deb
