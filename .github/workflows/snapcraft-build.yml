@@ -135,13 +135,10 @@ jobs:
           test "$(dpkg-deb --field "dist/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
           mkdir -p snap-input
           cp "dist/deb/licasa_${VERSION}-1_amd64.deb" snap-input/licasa.deb
-      - name: Package the same deb as a Snap
+      # Snapcraft runs its built-in linters during the build.
+      - name: Package and lint the same deb as a Snap
         id: snapcraft
         uses: snapcore/action-build@v1
-      - name: Lint built Snap
-        env:
-          SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
-        run: snapcraft lint "$SNAP_FILE"
       - name: Install and decode through strict Snap confinement
         env:
           SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
