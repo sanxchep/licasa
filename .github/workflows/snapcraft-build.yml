@@ -13,6 +13,7 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-24.04
+    environment: snap-beta
     timeout-minutes: 10
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -28,7 +29,7 @@ jobs:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: |
           if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
-            echo "Set the SNAPCRAFT_STORE_CREDENTIALS repository secret before starting a release" >&2
+            echo "Set SNAPCRAFT_STORE_CREDENTIALS in the snap-beta environment before starting a release" >&2
             exit 1
           fi
           version="$(python3 tools/check_release_version.py \
@@ -168,6 +169,7 @@ jobs:
   publish_snap:
     needs: [preflight, snap]
     runs-on: ubuntu-24.04
+    environment: snap-beta
     timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@v4
