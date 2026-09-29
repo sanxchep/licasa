@@ -1632,7 +1632,8 @@ Window {
             && (root.currentImageAnimated
                 ? gestureViewport.animatedFrameReady
                 : presentationSource.length > 0
-                    && gestureViewport.activeRequestKey === presentationSource)
+                    && root.nativeWindowOps.sameImageSource(
+                        gestureViewport.activeRequestKey, presentationSource))
         onReadyForHandoffChanged: root.nativeWindowOps.traceZoom(
             "gesture-ready-" + readyForHandoff, windowedZoom.scale)
 

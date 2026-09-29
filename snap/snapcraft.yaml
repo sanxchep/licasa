@@ -1,0 +1,134 @@
+name: licasa
+title: Licasa
+version: '0.1.0'
+summary: Fast, image-first photo viewer and editor
+description: |
+  Licasa opens photographs in a focused, image-sized window. Browse, zoom,
+  compare, edit and export images, including modern formats such as HEIF,
+  AVIF, JPEG XL and camera RAW. Motion Photo playback is included.
+contact: https://github.com/sanxchep/licasa/issues
+source-code: https://github.com/sanxchep/licasa
+issues: https://github.com/sanxchep/licasa/issues
+license: BSD-2-Clause
+icon: assets/licasa.png
+base: core24
+grade: devel
+confinement: strict
+
+# The qualified private Qt patches and codec builds currently target only
+# Ubuntu 24.04 on amd64. Add platforms after qualifying their runtime stacks.
+platforms:
+  amd64:
+
+apps:
+  licasa:
+    command: usr/bin/licasa
+    desktop: usr/share/applications/licasa.desktop
+    extensions: [gnome]
+    environment:
+      LD_LIBRARY_PATH: $SNAP/usr/lib/licasa/lib:$SNAP/usr/lib/x86_64-linux-gnu:$SNAP/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+      QT_PLUGIN_PATH: $SNAP/usr/lib/licasa/plugins:$SNAP/usr/lib/x86_64-linux-gnu/qt6/plugins
+      QML2_IMPORT_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/qml
+      QML_IMPORT_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/qml
+      QT_QPA_PLATFORM_PLUGIN_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/plugins/platforms
+    plugs:
+      - home
+      - removable-media
+      - audio-playback
+
+parts:
+  licasa:
+    plugin: nil
+    # Never pull workstation builds, private fixtures or repository metadata
+    # into the clean package build. Release tests use tests/test-assets/.
+    override-pull: |
+      set -eu
+      craftctl default
+      cd "$CRAFT_PROJECT_DIR"
+      cp -a CMakeLists.txt CMakePresets.json LICENSE "$CRAFT_PART_SRC/"
+      cp -a assets cmake packaging qml src tests tools "$CRAFT_PART_SRC/"
+    build-packages:
+      - ca-certificates
+      - cmake
+      - ninja-build
+      - g++
+      - python3
+      - pkg-config
+      - patch
+      - git
+      - meson
+      - nasm
+      - dpkg-dev
+      - binutils
+      - libx11-dev
+      - libxext-dev
+      - qt6-base-dev
+      - qt6-declarative-dev
+      - qt6-svg-dev
+      - qt6-image-formats-plugins
+      - libopenjp2-7-dev
+      - libjpeg-turbo8-dev
+      - qt6-base-private-dev
+      - qt6-declarative-private-dev
+      - qt6-shadertools-dev
+      - qt6-multimedia-dev
+      - libpulse-dev
+      - libavcodec-dev
+      - libavformat-dev
+      - libavutil-dev
+      - libswresample-dev
+      - libswscale-dev
+      - libavdevice-dev
+      - libavfilter-dev
+      - qml6-module-qtquick
+      - qml6-module-qtquick-window
+      - qml6-module-qtqml-workerscript
+      - qml6-module-qttest
+      - qml6-module-qtquick-controls
+      - qml6-module-qtquick-templates
+      - qml6-module-qtquick-dialogs
+      - qml6-module-qtquick-layouts
+    stage-packages:
+      - libavcodec60
+      - libavformat60
+      - libavutil58
+      - libgomp1
+      - libjpeg8
+      - libopenjp2-7
+      - libqt6core6t64
+      - libqt6gui6t64
+      - libqt6multimedia6
+      - libqt6network6t64
+      - libqt6opengl6t64
+      - libqt6qml6
+      - libqt6qmlmodels6
+      - libqt6quick6
+      - libqt6quickdialogs2-6
+      - libqt6svg6
+      - libswresample4
+      - libswscale7
+      - libtiff6
+      - libwebp7
+      - libwebpdemux2
+      - libwebpmux3
+      - libx11-6
+      - libxext6
+      - qt6-image-formats-plugins
+      - qml6-module-qtqml
+      - qml6-module-qtqml-workerscript
+      - qml6-module-qtquick
+      - qml6-module-qtquick-controls
+      - qml6-module-qtquick-dialogs
+      - qml6-module-qtquick-layouts
+      - qml6-module-qtquick-templates
+      - qml6-module-qtquick-window
+    override-build: |
+      set -eu
+      cd "$CRAFT_PART_SRC"
+      python3 tools/build_ubuntu_deb.py --jobs "${LICASA_MAX_JOBS:-4}"
+      deb="$(find build/qualification/deb -maxdepth 1 -name 'licasa_*.deb' -type f -print -quit)"
+      test -n "$deb"
+      dpkg-deb -x "$deb" "$CRAFT_PART_INSTALL"
+      test -x "$CRAFT_PART_INSTALL/usr/bin/licasa"
+      # Smooth floating zoom needs the X11 Shape extension at build time.
+      readelf -d "$CRAFT_PART_INSTALL/usr/bin/licasa" | grep -Fq 'libXext.so.6'

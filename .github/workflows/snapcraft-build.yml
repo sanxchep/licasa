@@ -1,0 +1,220 @@
+name: Verify and publish Snap and deb
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag at the selected branch tip, for example v0.1.1
+        type: string
+        required: true
+      channel:
+        description: Snap Store channel (stable/candidate require grade stable)
+        type: choice
+        options: [edge, beta, candidate, stable]
+        default: edge
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: licasa-release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Check selected tag, source, version, grade, and notes
+        id: version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+        run: |
+          version="$(python3 tools/check_release_version.py \
+            --tag "$RELEASE_TAG" --channel "$RELEASE_CHANNEL" \
+            --expected-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Require a new GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          status="$(curl --silent --show-error --retry 3 -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          if [ "$status" != 404 ]; then
+            echo "Expected no existing GitHub Release; API returned $status" >&2
+            exit 1
+          fi
+
+  verify:
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+    with:
+      source_ref: ${{ github.sha }}
+
+  deb:
+    needs: [preflight, verify]
+    uses: ./.github/workflows/ubuntu-deb-release.yml
+    with:
+      source_ref: ${{ github.sha }}
+      release_tag: ${{ inputs.release_tag }}
+
+  snap:
+    needs: [preflight, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Build Snap and run its Release CTest suite
+        id: snapcraft
+        uses: snapcore/action-build@v1
+      - name: Lint built Snap
+        env:
+          SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
+        run: snapcraft lint "$SNAP_FILE"
+      - name: Install and decode through strict Snap confinement
+        env:
+          SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          sudo snap install --dangerous "$SNAP_FILE"
+          python3 tools/verify_snap_install.py --version "$VERSION" \
+            --output build/qualification/snap-smoke.json
+      - name: Save checked Snap and checksum
+        env:
+          SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          test "$(basename "$SNAP_FILE")" = "licasa_${VERSION}_amd64.snap"
+          mkdir -p dist/snap
+          cp "$SNAP_FILE" dist/snap/
+          cp build/qualification/snap-smoke.json dist/snap/snap-smoke.json
+          cd dist/snap
+          sha256sum "licasa_${VERSION}_amd64.snap" > licasa.snap.sha256
+          sha256sum --check licasa.snap.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: licasa-snap-amd64
+          path: |
+            dist/snap/licasa_*.snap
+            dist/snap/licasa.snap.sha256
+            dist/snap/snap-smoke.json
+          if-no-files-found: error
+
+  release_ready:
+    needs: [preflight, deb, snap]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-snap-amd64
+          path: dist/snap
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-ubuntu-24.04-amd64
+          path: dist/deb
+      - name: Verify both exact package versions, checksums, and release notes
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          python3 tools/check_release_version.py --tag "$RELEASE_TAG" \
+            --channel "$RELEASE_CHANNEL" --expected-sha "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF"
+          test -f "dist/snap/licasa_${VERSION}_amd64.snap"
+          test -f "dist/deb/licasa_${VERSION}-1_amd64.deb"
+          (cd dist/snap && sha256sum --check licasa.snap.sha256)
+          (cd dist/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
+          test "$(dpkg-deb --field "dist/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
+          test -s "dist/deb/install-smoke.json"
+          test -s "dist/snap/snap-smoke.json"
+
+  publish_snap:
+    needs: [preflight, release_ready]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-snap-amd64
+          path: dist/snap
+      - name: Recheck package checksum and Store credential
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          test -n "$SNAPCRAFT_STORE_CREDENTIALS"
+          cd dist/snap
+          sha256sum --check licasa.snap.sha256
+      - name: Release checked Snap to the Store
+        uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: dist/snap/licasa_${{ needs.preflight.outputs.version }}_amd64.snap
+          release: ${{ inputs.channel }}
+
+  github_release:
+    needs: [preflight, publish_snap]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-ubuntu-24.04-amd64
+          path: dist/deb
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gh
+      - name: Recheck tag, deb version, and checksum
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          python3 tools/check_release_version.py --tag "$RELEASE_TAG" \
+            --channel "$RELEASE_CHANNEL" --expected-sha "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF"
+          cd dist/deb
+          sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256"
+          test "$(dpkg-deb --field "licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
+      - name: Publish GitHub Release with the checked deb
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          cp "packaging/release-notes/$RELEASE_TAG.md" dist/release-notes.md
+          printf '\n### Snap Store\n\nLicasa %s is released to `%s`.\n' \
+            "$VERSION" "$RELEASE_CHANNEL" >> dist/release-notes.md
+          printf '\n### Debian package SHA-256\n\n```text\n' >> dist/release-notes.md
+          cat "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256" >> dist/release-notes.md
+          printf '```\n' >> dist/release-notes.md
+          printf '\nSource commit: `%s`.\n' "$GITHUB_SHA" >> dist/release-notes.md
+          gh release create "$RELEASE_TAG" \
+            "dist/deb/licasa_${VERSION}-1_amd64.deb" \
+            "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256" \
+            --verify-tag --title "Licasa $RELEASE_TAG" \
+            --notes-file dist/release-notes.md

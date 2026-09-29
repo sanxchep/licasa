@@ -29,6 +29,7 @@ class NativeWindowOps final : public QObject {
     Q_INVOKABLE bool endGestureWindows(QObject* gestureObject, QObject* exactObject) const;
     Q_INVOKABLE bool requestWindowFrame(QObject* windowObject) const;
     Q_INVOKABLE void traceZoom(const QString& phase, qreal scale) const;
+    Q_INVOKABLE bool sameImageSource(const QString& actual, const QString& requested) const;
     Q_INVOKABLE bool releaseWindowResources(QObject* windowObject) const;
     Q_INVOKABLE bool trimProcessMemory() const;
 

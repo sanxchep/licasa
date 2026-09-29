@@ -4,6 +4,7 @@
 #include <QGuiApplication>
 #include <QQuickWindow>
 #include <QScreen>
+#include <QUrl>
 
 #include <algorithm>
 #include <chrono>
@@ -197,6 +198,13 @@ void NativeWindowOps::traceZoom(const QString& phase, qreal scale) const
         const QByteArray label = phase.toUtf8();
         std::fprintf(stderr, "ZOOMTRACE %lld %s %.6f\n", zoomTraceUs(), label.constData(), scale);
     }
+}
+
+bool NativeWindowOps::sameImageSource(const QString& actual, const QString& requested) const
+{
+    // QML Image.source exposes QUrl's display form, which decodes spaces in
+    // filenames. Compare parsed URLs rather than their string spellings.
+    return !actual.isEmpty() && !requested.isEmpty() && QUrl(actual) == QUrl(requested);
 }
 
 bool NativeWindowOps::setWindowPosition(QObject* windowObject, int x, int y) const

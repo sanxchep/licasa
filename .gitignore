@@ -39,3 +39,11 @@ __pycache__/
 # Local recovery copies and generated reports
 *.before*
 /build-*.json
+
+# Local Snapcraft build output
+/parts/
+/stage/
+/prime/
+/.snapcraft/
+/.craft/
+/*.snap
