@@ -41,6 +41,7 @@ __pycache__/
 /build-*.json
 
 # Local Snapcraft build output
+/snap-input/
 /parts/
 /stage/
 /prime/

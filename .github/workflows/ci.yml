@@ -7,6 +7,11 @@ on:
         description: Exact source commit to verify
         required: true
         type: string
+      presets:
+        description: JSON array of CMake presets to verify
+        required: false
+        type: string
+        default: '["release","asan","ubsan"]'
 
 permissions:
   contents: read
@@ -14,10 +19,11 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        preset: [release, asan, ubsan]
+        preset: ${{ fromJSON(inputs.presets || '["release","asan","ubsan"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,8 +31,9 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends cmake make ninja-build g++ python3 \
-            pkg-config patch meson nasm clang-format-18 libjpeg-turbo8-dev \
+          sudo apt-get install -y --no-install-recommends ca-certificates git cmake make ninja-build g++ python3 \
+            pkg-config patch meson nasm clang-format-18 binutils libjpeg-turbo8-dev \
+            libx11-dev libxext-dev \
             qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-image-formats-plugins \
             qt6-base-private-dev qt6-declarative-private-dev qt6-shadertools-dev \
             qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript \
