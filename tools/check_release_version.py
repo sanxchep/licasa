@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a manually selected main commit and derive its version tag."""
+"""Check a main release commit or matching tag and derive its version tag."""
 
 from __future__ import annotations
 
@@ -31,8 +31,9 @@ def match_one(pattern: str, content: str, label: str) -> str:
 def check(channel: str, expected_sha: str, source_ref: str) -> str:
     if channel not in CHANNELS:
         raise ValueError(f"Unsupported Snap channel: {channel}")
-    if source_ref != "refs/heads/main":
-        raise ValueError("Release must be started from main")
+    tagged = source_ref.startswith("refs/tags/")
+    if source_ref != "refs/heads/main" and not tagged:
+        raise ValueError("Release must be started from main or a version tag")
     head = git("rev-parse", "HEAD")
     if head != expected_sha:
         raise ValueError(f"Checkout {head} does not match selected branch tip {expected_sha}")
@@ -54,10 +55,20 @@ def check(channel: str, expected_sha: str, source_ref: str) -> str:
     tag = f"v{version}"
     if not TAG.fullmatch(tag):
         raise ValueError(f"Version must use vMAJOR.MINOR.PATCH without leading zeros: {tag}")
+    if tagged:
+        if source_ref != f"refs/tags/{tag}":
+            raise ValueError(f"Release tag {source_ref} does not match source version {tag}")
+        if git("rev-parse", f"{tag}^{{commit}}") != head:
+            raise ValueError(f"Release tag {tag} does not point to selected commit {head}")
+        result = subprocess.run(["git", "merge-base", "--is-ancestor", head,
+                                 "origin/main"], cwd=ROOT, capture_output=True)
+        if result.returncode:
+            raise ValueError(f"Release tag {tag} must point to a main commit")
     version_parts = tuple(map(int, version.split(".")))
     existing_versions = [
         tuple(map(int, match.groups()))
         for name in git("tag", "--list", "v*").splitlines()
+        if not (tagged and name == tag)
         if (match := TAG.fullmatch(name))
     ]
     if existing_versions and version_parts <= max(existing_versions):
