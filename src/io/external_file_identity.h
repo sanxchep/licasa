@@ -23,6 +23,7 @@ namespace Licasa {
 struct ExternalFileIdentity {
     quint64 device = 0;
     quint64 inode = 0;
+    quint64 linkCount = 0;
     quint64 size = 0;
     qint64 modifiedSeconds = 0;
     qint64 modifiedNanoseconds = 0;
@@ -32,7 +33,8 @@ struct ExternalFileIdentity {
 
 inline bool operator==(const ExternalFileIdentity& left, const ExternalFileIdentity& right) noexcept
 {
-    return left.device == right.device && left.inode == right.inode && left.size == right.size &&
+    return left.device == right.device && left.inode == right.inode &&
+           left.linkCount == right.linkCount && left.size == right.size &&
            left.modifiedSeconds == right.modifiedSeconds &&
            left.modifiedNanoseconds == right.modifiedNanoseconds &&
            left.changedSeconds == right.changedSeconds &&
@@ -76,9 +78,9 @@ inline std::optional<ExternalFileIdentity> externalFileIdentity(const QFile& fil
     const auto changed = status.st_ctim;
 #endif
     return ExternalFileIdentity{
-        quint64(status.st_dev),  quint64(status.st_ino),   quint64(status.st_size),
-        qint64(modified.tv_sec), qint64(modified.tv_nsec), qint64(changed.tv_sec),
-        qint64(changed.tv_nsec),
+        quint64(status.st_dev),  quint64(status.st_ino),  quint64(status.st_nlink),
+        quint64(status.st_size), qint64(modified.tv_sec), qint64(modified.tv_nsec),
+        qint64(changed.tv_sec),  qint64(changed.tv_nsec),
     };
 #else
     Q_UNUSED(file);

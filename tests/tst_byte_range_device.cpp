@@ -1,5 +1,6 @@
 #include "io/byte_range_device.h"
 
+#include <QDateTime>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -224,6 +225,10 @@ class ByteRangeDeviceTest final : public QObject {
         QVERIFY(mutate.seek(4));
         QCOMPARE(mutate.write("XX", 2), qint64(2));
         QVERIFY(mutate.flush());
+        // The hosted builder can report coarse timestamps for rapid writes.
+        // Force a distinct mtime so this test checks identity revalidation.
+        QVERIFY(mutate.setFileTime(QDateTime::fromSecsSinceEpoch(identity->modifiedSeconds - 10),
+                                   QFileDevice::FileModificationTime));
         mutate.close();
 
         char byte = '\0';

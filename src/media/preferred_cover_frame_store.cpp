@@ -117,6 +117,16 @@ bool PreferredCoverFrameStore::persistedIdentityMatches(const QSettings& setting
                                                         const ExternalFileIdentity& identity)
 {
     ExternalFileIdentity persisted;
+    // Existing preferences predate link-count pinning. Their other identity
+    // fields still guard the stored choice, so keep them readable.
+    const QString linkCountKey = QStringLiteral("identity/linkCount");
+    if (settings.contains(linkCountKey)) {
+        if (!readUnsigned(settings, linkCountKey, &persisted.linkCount)) {
+            return false;
+        }
+    } else {
+        persisted.linkCount = identity.linkCount;
+    }
     if (!readUnsigned(settings, QStringLiteral("identity/device"), &persisted.device) ||
         !readUnsigned(settings, QStringLiteral("identity/inode"), &persisted.inode) ||
         !readUnsigned(settings, QStringLiteral("identity/size"), &persisted.size) ||
@@ -139,6 +149,7 @@ void PreferredCoverFrameStore::writeIdentity(QSettings& settings,
 {
     settings.setValue(QStringLiteral("identity/device"), decimal(identity.device));
     settings.setValue(QStringLiteral("identity/inode"), decimal(identity.inode));
+    settings.setValue(QStringLiteral("identity/linkCount"), decimal(identity.linkCount));
     settings.setValue(QStringLiteral("identity/size"), decimal(identity.size));
     settings.setValue(QStringLiteral("identity/modifiedSeconds"),
                       decimal(identity.modifiedSeconds));

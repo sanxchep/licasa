@@ -82,7 +82,17 @@ def main() -> None:
         f"-DLICASA_QT_EXTRA_IMAGEFORMATS_DIR={image_plugins}",
         f"-DLICASA_QT_EXTRA_IMAGEFORMATS_LICENSE={image_license}")
     run("cmake", "--build", str(build), "--parallel", jobs)
-    run("ctest", "--test-dir", str(build), "--output-on-failure")
+    # Snapcraft's SDK can put its own (older) libheif ahead of the private
+    # codec build. Run the build tests with the same private codecs that are
+    # installed into the package, without changing package dependency scans.
+    test_environment = os.environ.copy()
+    test_environment["LD_LIBRARY_PATH"] = os.pathsep.join(filter(None, (
+        str(quick.parent), str(codec_prefix / "lib"),
+        test_environment.get("LD_LIBRARY_PATH"),
+    )))
+    print("+ ctest --test-dir " + str(build) + " --output-on-failure", flush=True)
+    subprocess.run(["ctest", "--test-dir", str(build), "--output-on-failure"],
+                   cwd=ROOT, env=test_environment, check=True)
     run(python, "tools/package_deb.py", "--build-dir", str(build),
         "--output-dir", str(output))
 

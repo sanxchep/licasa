@@ -112,36 +112,27 @@ jobs:
   store_snap:
     needs: preflight
     runs-on: ubuntu-24.04
-    timeout-minutes: 300
+    timeout-minutes: 15
     outputs:
       revision: ${{ steps.verify.outputs.revision }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-      - name: Wait for the matching Snapcraft-hosted edge build
+      - name: Require the matching Snapcraft-hosted edge build
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           sudo snap set system experimental.user-daemons=true
-          for attempt in $(seq 1 48); do
-            if snap list licasa >/dev/null 2>&1; then
-              sudo snap refresh --channel=edge licasa || true
-            else
-              sudo snap install --channel=edge licasa || true
-            fi
-            source_file=/snap/licasa/current/usr/share/licasa/source-commit
-            installed_version="$(snap list licasa 2>/dev/null | awk 'NR == 2 {print $2}')"
-            if [ "$installed_version" = "$VERSION" ] && \
-               [ -f "$source_file" ] && \
-               [ "$(cat "$source_file")" = "$GITHUB_SHA" ]; then
-              exit 0
-            fi
-            echo "Waiting for hosted edge build of $GITHUB_SHA (attempt $attempt/48)"
-            sleep 300
-          done
-          echo 'Matching hosted edge build did not arrive. Check the snapcraft.io Builds tab.' >&2
-          exit 1
+          sudo snap install --channel=edge licasa
+          source_file=/snap/licasa/current/usr/share/licasa/source-commit
+          installed_version="$(snap list licasa | awk 'NR == 2 {print $2}')"
+          if [ "$installed_version" != "$VERSION" ] || \
+             [ ! -f "$source_file" ] || \
+             [ "$(cat "$source_file" 2>/dev/null)" != "$GITHUB_SHA" ]; then
+            echo 'Matching hosted edge build is not available. Check the snapcraft.io Builds tab before running this release workflow.' >&2
+            exit 1
+          fi
       - name: Check hosted source and decode through strict Snap confinement
         id: verify
         env:

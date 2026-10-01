@@ -76,6 +76,16 @@ void PreferredCoverFrameStoreTest::motionTimestampPersistsAcrossStoreInstances()
         QVERIFY2(store.storeMotionTimestampUs(source, 1'234'567, &error), qPrintable(error));
     }
 
+    // Choices saved before link-count pinning should remain readable.
+    QSettings legacySettings;
+    const QStringList keys = legacySettings.allKeys();
+    const auto linkCount = std::find_if(keys.cbegin(), keys.cend(), [](const QString& key) {
+        return key.endsWith(QStringLiteral("/identity/linkCount"));
+    });
+    QVERIFY(linkCount != keys.cend());
+    legacySettings.remove(*linkCount);
+    legacySettings.sync();
+
     PreferredCoverFrameStore reopened;
     QString error;
     const auto preference = reopened.load(source, &error);
