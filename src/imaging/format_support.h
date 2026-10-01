@@ -18,6 +18,7 @@ class FormatSupport final : public QObject {
     QStringList nameFilters() const;
     QStringList saveNameFilters() const;
     Q_INVOKABLE bool canOpen(const QUrl& url) const;
+    Q_INVOKABLE QUrl adjacentImage(const QUrl& current, int direction) const;
 
   private:
     QSet<QString> readableExtensions_;

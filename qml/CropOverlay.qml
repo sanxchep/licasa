@@ -112,6 +112,21 @@ Item {
         )
     }
 
+    function keyboardAdjust(horizontal, vertical, resize) {
+        if (!root.visible)
+            return
+        const step = 12
+        if (resize) {
+            root.requestResizedCrop(4,
+                Qt.point(root.selectionX + root.selectionWidth + horizontal * step,
+                         root.selectionY + root.selectionHeight + vertical * step),
+                root.cropX, root.cropY, root.cropWidth, root.cropHeight)
+        } else {
+            root.requestMovedCrop(horizontal * step, vertical * step,
+                root.cropX, root.cropY, root.cropWidth, root.cropHeight)
+        }
+    }
+
     function requestResizedCrop(handleIndex, point,
                                 startX, startY, startWidth, startHeight) {
         const normalized = normalizedPoint(point)

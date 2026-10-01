@@ -7,6 +7,8 @@
 
 #include <atomic>
 
+class QUrlQuery;
+
 namespace Licasa {
 
 struct ImageEditParameters {
@@ -51,6 +53,7 @@ struct ImageEditExecution {
 
 int normalizedQuarterTurns(int value);
 ImageEditParameters editParametersFromQuery(const QString& queryString);
+ImageEditParameters editParametersFromQuery(const QUrlQuery& query);
 ImageEditParameters editParametersFromMap(const QVariantMap& values);
 ImageExportOptions exportOptionsFromMap(const QVariantMap& values);
 bool applyImageEdits(QImage& image, const ImageEditParameters& parameters,

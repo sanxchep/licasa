@@ -315,6 +315,58 @@ Item {
         compare(spy.count, 2)
     }
 
+    function test_settingsRowsRespondToKeyboard() {
+        const toggle = createControl(toggleComponent)
+        const toggleSpy = createSpy(toggle, "toggled")
+        toggle.forceActiveFocus()
+        keyClick(Qt.Key_Space)
+        compare(toggleSpy.count, 1)
+        compare(toggleSpy.signalArguments[0][0], true)
+
+        const value = createControl(valueRowComponent)
+        const valueSpy = createSpy(value, "valueChangedByUser")
+        value.forceActiveFocus()
+        keyClick(Qt.Key_Right)
+        compare(valueSpy.count, 1)
+        fuzzyCompare(valueSpy.signalArguments[0][0], 0.6, 0.000001)
+        keyClick(Qt.Key_Home)
+        compare(valueSpy.signalArguments[1][0], 0)
+    }
+
+    function test_timelineKeyboardUsesMediaControls() {
+        const timeline = createControl(temporalControlsComponent)
+        const stepSpy = createSpy(timeline, "stepRequested")
+        const seekSpy = createSpy(timeline, "seekRequested")
+        const previous = findChild(timeline, "temporalPreviousButton")
+        const scrubber = findChild(timeline, "temporalScrubberMouse").parent
+        verify(previous)
+        verify(scrubber)
+
+        previous.forceActiveFocus()
+        verify(timeline.keyboardFocusWithin)
+        keyClick(Qt.Key_Return)
+        compare(stepSpy.count, 1)
+        compare(stepSpy.signalArguments[0][0], -1)
+
+        scrubber.forceActiveFocus()
+        keyClick(Qt.Key_Right)
+        compare(seekSpy.count, 1)
+        fuzzyCompare(seekSpy.signalArguments[0][0], 0.52, 0.000001)
+    }
+
+    function test_cropKeyboardNudgesAndResizesSelection() {
+        const crop = createControl(cropOverlayComponent)
+        const spy = createSpy(crop, "cropRequested")
+        crop.keyboardAdjust(1, 0, false)
+        compare(spy.count, 1)
+        fuzzyCompare(spy.signalArguments[0][0], 0.28, 0.000001)
+        fuzzyCompare(spy.signalArguments[0][2], 0.5, 0.000001)
+
+        crop.keyboardAdjust(1, 0, true)
+        compare(spy.count, 2)
+        verify(spy.signalArguments[1][2] > 0.5)
+    }
+
     function test_valueRowButtonsAndTrackEmitValues() {
         const control = createControl(valueRowComponent)
         const spy = createSpy(control, "valueChangedByUser")
@@ -643,14 +695,17 @@ Item {
         compare(center.anyLoading, true)
         compare(center.toastVisible, true)
         compare(center.notificationCount, 1)
-        wait(2100)
+        wait(1000)
         compare(center.toastVisible, true)
+        tryCompare(center, "toastVisible", false, 2500)
 
         center.finish("image", "success", "Image ready", "large-photo.dng")
         compare(center.toastCategory, "success")
         compare(center.anyLoading, false)
-        compare(center.notificationCount, 2)
-        tryCompare(center, "toastVisible", false, 2500)
+        compare(center.notificationCount, 1)
+        compare(center.notifications[0].category, "success")
+        compare(center.notifications[0].title, "Image ready")
+        compare(center.toastVisible, false)
 
         const button = findChild(center, "notificationHistoryButton")
         verify(button)
@@ -661,12 +716,15 @@ Item {
         compare(indicator.width, 11)
         mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton)
         compare(center.historyOpen, true)
-        compare(center.notificationCount, 2)
+        compare(center.notificationCount, 1)
 
         center.finish("save", "error", "Image could not be saved", "Disk is full")
         compare(center.toastCategory, "error")
-        compare(center.notificationCount, 3)
+        compare(center.toastVisible, true)
+        compare(center.notificationCount, 2)
         compare(center.historyOpen, true)
+        center.historyOpen = false
+        tryCompare(center, "toastVisible", false, 2500)
 
         center.endSession()
         compare(center.sessionActive, false)
@@ -685,6 +743,62 @@ Item {
         center.clear()
         compare(center.notificationCount, 0)
         compare(center.toastVisible, false)
+    }
+
+    function test_notificationsReplaceToastsAndDelayImageOpening() {
+        const center = createControl(notificationCenterComponent)
+
+        center.begin("image", "Opening image", "small.jpg", 300)
+        compare(center.toastVisible, false)
+        center.finish("image", "success", "Image ready", "small.jpg · 40 ms")
+        wait(350)
+        compare(center.toastVisible, false)
+        compare(center.notificationCount, 1)
+        compare(center.notifications[0].category, "success")
+        compare(center.notifications[0].detail, "small.jpg · 40 ms")
+
+        center.begin("image", "Opening image", "large.dng", 100)
+        compare(center.toastVisible, false)
+        tryCompare(center, "toastVisible", true, 500)
+        compare(center.toastCategory, "warning")
+        center.update("image", "Opening image", "large.dng · Loading full resolution…")
+        compare(center.toastDetail, "large.dng · Loading full resolution…")
+        compare(center.notificationCount, 2)
+
+        center.finish("image", "success", "Image ready", "large.dng · 980 ms")
+        compare(center.toastVisible, false)
+        compare(center.notificationCount, 2)
+        compare(center.notifications[0].category, "success")
+        compare(center.notifications[0].detail, "large.dng · 980 ms")
+
+        center.begin("save", "Saving image", "large.dng")
+        compare(center.toastVisible, true)
+        center.finish("background", "error", "Background process error", "Failed")
+        compare(center.toastCategory, "error")
+        compare(center.toastTitle, "Background process error")
+        compare(center.toastVisible, true)
+        center.stop("save")
+        compare(center.toastVisible, true)
+        center.begin("image", "Opening image", "next.jpg", 300)
+        compare(center.toastVisible, false)
+        center.finish("settings", "success", "Settings saved", "")
+        compare(center.toastVisible, false)
+        wait(350)
+        compare(center.toastVisible, false)
+    }
+
+    function test_notificationHistoryIsBounded() {
+        const center = createControl(notificationCenterComponent)
+        center.begin("save", "Saving image", "large.dng")
+        for (let index = 0; index < 120; ++index)
+            center.finish("event" + index, "success", "Event " + index, "")
+
+        compare(center.notificationCount, 101)
+        compare(center.notifications[0].title, "Event 119")
+        compare(center.notifications[100].operationKey, "save")
+        center.stop("save")
+        compare(center.notificationCount, 100)
+        compare(center.notifications[99].title, "Event 20")
     }
 
     function test_failedFullResolutionRequestKeepsReadyPreview() {

@@ -113,6 +113,34 @@ Item {
         flick.contentY = 0
     }
 
+    function scrollByPage(direction) {
+        flick.contentY = Math.max(0, Math.min(
+            Math.max(0, flick.contentHeight - flick.height),
+            flick.contentY + direction * flick.height * 0.8
+        ))
+    }
+
+    function revealFocusedItem(item) {
+        let ancestor = item
+        while (ancestor && ancestor !== flick)
+            ancestor = ancestor.parent
+        if (!ancestor || !item)
+            return
+        const position = item.mapToItem(flick.contentItem, 0, 0)
+        const top = position.y
+        const bottom = top + item.height
+        const target = top < flick.contentY ? top - 8
+            : bottom > flick.contentY + flick.height
+                ? bottom - flick.height + 8 : flick.contentY
+        flick.contentY = Math.max(0, Math.min(
+            Math.max(0, flick.contentHeight - flick.height), target))
+    }
+
+    onPanelOpenChanged: {
+        if (panelOpen && toolTabRepeater.count > 0)
+            toolTabRepeater.itemAt(0).forceActiveFocus()
+    }
+
     function scrollEditorByWheel(wheel) {
         const maximumContentY = Math.max(0, flick.contentHeight - flick.height)
         const pixelDelta = wheel.pixelDelta.y
@@ -273,6 +301,7 @@ Item {
                 spacing: 4
 
                 Repeater {
+                    id: toolTabRepeater
                     model: [
                         { "key": "adjust", "label": "Adjust" },
                         { "key": "crop", "label": "Crop" },
@@ -304,6 +333,18 @@ Item {
                         Accessible.onPressAction: root.activateTool(modelData.key)
 
                         Keys.onPressed: function(event) {
+                            if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+                                const tools = ["adjust", "crop", "looks", "export"]
+                                const next = (tools.indexOf(modelData.key)
+                                    + (event.key === Qt.Key_Right ? 1 : -1) + tools.length)
+                                    % tools.length
+                                if (!root.cropMode || tools[next] === "crop") {
+                                    root.activateTool(tools[next])
+                                    toolTabRepeater.itemAt(next).forceActiveFocus()
+                                }
+                                event.accepted = true
+                                return
+                            }
                             if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
                                     && event.key !== Qt.Key_Enter) {
                                 return

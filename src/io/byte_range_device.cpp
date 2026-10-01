@@ -157,15 +157,11 @@ qint64 ByteRangeDevice::readData(char* data, qint64 maximumSize)
 
     const qint64 remaining = validatedLength_ - logicalPosition;
     const qint64 requested = std::min(maximumSize, remaining);
-    if (requested <= 0) {
-        return 0;
-    }
 
     // Both terms are non-negative and validatedOffset_ + validatedLength_ was
     // bounded by QFile::size() at open and again above. This subtraction-based
     // invariant guarantees the addition is representable in qint64.
-    if (logicalPosition > validatedLength_ ||
-        validatedOffset_ > std::numeric_limits<qint64>::max() - logicalPosition) {
+    if (validatedOffset_ > std::numeric_limits<qint64>::max() - logicalPosition) {
         fail(QStringLiteral("Byte-range offset overflow"));
         return -1;
     }

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Keep the user service active when a separately launched viewer already owns
+# Licasa's single-instance endpoint. A later exit then starts a fresh shell.
+trap 'exit 0' TERM INT
+while :; do
+    "$SNAP/usr/bin/licasa" --background
+    sleep 2
+done

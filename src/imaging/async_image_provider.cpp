@@ -184,14 +184,16 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                         bool parallelPreview, bool speculativeFull,
                         std::shared_ptr<ParallelDecodePair> parallelPair,
                         ImageResourcePolicy& resourcePolicy,
-                        std::shared_ptr<DecodedImageCache> decodedImageCache)
+                        std::shared_ptr<DecodedImageCache> decodedImageCache,
+                        std::function<void()> discardFailedPreview)
         : filePath_(std::move(filePath)), requestedSize_(requestedSize),
           editParameters_(std::move(editParameters)), colorManagedRendering_(colorManagedRendering),
           fullDetail_(fullDetail), rawFastDevelopment_(rawFastDevelopment),
           rawInteractiveDevelopment_(rawInteractiveDevelopment),
           editWarmupRequested_(editWarmupRequested), parallelPreview_(parallelPreview),
           speculativeFull_(speculativeFull), parallelPair_(std::move(parallelPair)),
-          resourcePolicy_(resourcePolicy), decodedImageCache_(std::move(decodedImageCache))
+          resourcePolicy_(resourcePolicy), decodedImageCache_(std::move(decodedImageCache)),
+          discardFailedPreview_(std::move(discardFailedPreview))
     {
         setAutoDelete(false);
     }
@@ -258,6 +260,10 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
         // completion: a consumer may start the next heavy operation immediately.
         const bool prewarm = prewarmAfterRawDecode_ && !isCancelled() &&
                              !qEnvironmentVariableIsSet("LICASA_DISABLE_RAW_EDIT_PREWARM");
+        if (discardFailedPreview_ && (isCancelled() || !error_.isEmpty())) {
+            parallelPair_->previewPresented.store(true, std::memory_order_release);
+            discardFailedPreview_();
+        }
         emit finished();
         if (prewarm) {
             // Keep driver setup off the serial decoder and the full-detail
@@ -485,6 +491,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
     bool prewarmAfterRawDecode_ = false;
     ImageResourcePolicy& resourcePolicy_;
     std::shared_ptr<DecodedImageCache> decodedImageCache_;
+    std::function<void()> discardFailedPreview_;
     QImage image_;
     QString error_;
     std::atomic_bool cancelled_ = false;
@@ -593,11 +600,23 @@ QQuickImageResponse* AsyncImageProvider::requestImageResponse(const QString& id,
     bool warmupOk = false;
     const int editWarmupRevision = query.queryItemValue(QStringLiteral("ew")).toInt(&warmupOk);
     const bool editWarmupRequested = warmupOk && editWarmupRevision > 0;
+    std::function<void()> discardFailedPreview;
+    if (parallelPreview && pair) {
+        // A failed or cancelled preview never reaches the frame-swapped signal.
+        // Remove its registry entry so repeated attempts cannot retain pairs.
+        // The provider drains both worker pools before its members are destroyed.
+        discardFailedPreview = [this, pairId, pair] {
+            QMutexLocker pairLock(&pairsMutex_);
+            if (pendingPairs_.value(pairId) == pair) {
+                pendingPairs_.remove(pairId);
+            }
+        };
+    }
     auto* response = new AsyncDecodeResponse(
-        filePath, requestedSize, editParametersFromQuery(queryString), colorManagedRendering,
-        fullDetail, rawFastDevelopment, rawInteractiveDevelopment, editWarmupRequested,
+        filePath, requestedSize, editParametersFromQuery(query), colorManagedRendering, fullDetail,
+        rawFastDevelopment, rawInteractiveDevelopment, editWarmupRequested,
         parallelPreview && bool(pair), speculativeFull && bool(pair), pair, resourcePolicy_,
-        decodedImageCache_);
+        decodedImageCache_, std::move(discardFailedPreview));
     if (speculativeFull && pair) {
         speculativeFullPool_.start(response);
     } else if (parallelPreview && pair) {

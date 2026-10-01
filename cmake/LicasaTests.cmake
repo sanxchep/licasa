@@ -13,6 +13,30 @@ set(LICASA_RAW_TEST_TARGETS)
 set(LICASA_AVIF_TEST_TARGETS)
 set(LICASA_APNG_TEST_TARGETS)
 
+add_executable(licasa_background_mode_tests
+        tests/tst_background_mode.cpp
+        src/app/application_settings.cpp)
+target_include_directories(licasa_background_mode_tests PRIVATE src)
+target_link_libraries(licasa_background_mode_tests PRIVATE Qt6::Core Qt6::Test)
+licasa_enable_warnings(licasa_background_mode_tests)
+list(APPEND LICASA_TEST_TARGETS licasa_background_mode_tests)
+list(APPEND LICASA_CORE_TEST_TARGETS licasa_background_mode_tests)
+add_test(NAME licasa_background_mode_tests COMMAND licasa_background_mode_tests)
+set_tests_properties(licasa_background_mode_tests PROPERTIES
+        TIMEOUT 15 LABELS "core;startup;fast")
+
+add_executable(licasa_format_navigation_tests
+        tests/tst_format_navigation.cpp
+        src/imaging/format_support.cpp)
+target_include_directories(licasa_format_navigation_tests PRIVATE src)
+target_link_libraries(licasa_format_navigation_tests PRIVATE Qt6::Gui Qt6::Test)
+licasa_enable_warnings(licasa_format_navigation_tests)
+list(APPEND LICASA_TEST_TARGETS licasa_format_navigation_tests)
+list(APPEND LICASA_CORE_TEST_TARGETS licasa_format_navigation_tests)
+add_test(NAME licasa_format_navigation_tests COMMAND licasa_format_navigation_tests)
+set_tests_properties(licasa_format_navigation_tests PROPERTIES
+        TIMEOUT 20 LABELS "core;navigation;fast")
+
 if(LICASA_ENABLE_EARLY_PROGRESSIVE_JPEG)
     add_executable(licasa_progressive_jpeg_preview_tests
             tests/tst_progressive_jpeg_preview.cpp

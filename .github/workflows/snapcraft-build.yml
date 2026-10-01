@@ -1,4 +1,4 @@
-name: Verify and publish Snap and deb
+name: Verify and release hosted Snap and deb
 
 on:
   workflow_dispatch:
@@ -13,7 +13,6 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-24.04
-    environment: snap-beta
     timeout-minutes: 10
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -23,15 +22,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Check source, new version, beta grade, notes, and Store credential
+      - name: Check source, new version, beta grade, and notes
         id: version
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: |
-          if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
-            echo "Set SNAPCRAFT_STORE_CREDENTIALS in the snap-beta environment before starting a release" >&2
-            exit 1
-          fi
           version="$(python3 tools/check_release_version.py \
             --channel beta \
             --expected-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF")"
@@ -52,14 +45,14 @@ jobs:
           fi
 
   verify_sanitizers:
-    needs: preflight
+    needs: [preflight, store_snap]
     uses: ./.github/workflows/ci.yml
     with:
       source_ref: ${{ github.sha }}
       presets: '["asan","ubsan"]'
 
   build_and_test:
-    needs: [preflight, verify_sanitizers]
+    needs: [preflight, verify_sanitizers, store_snap]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -113,91 +106,61 @@ jobs:
           path: dist/deb/
           if-no-files-found: error
 
-  snap:
-    needs: [preflight, build_and_test]
+  store_snap:
+    needs: preflight
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 30
+    outputs:
+      revision: ${{ steps.verify.outputs.revision }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: licasa-deb-amd64
-          path: dist/deb
-      - name: Verify and hand the same deb to Snapcraft
+      - name: Install the Snapcraft-hosted edge build
+        run: |
+          sudo snap set system experimental.user-daemons=true
+          if ! sudo snap install --channel=edge licasa; then
+            echo 'No installable Snapcraft-hosted edge build is ready. Check the snapcraft.io Builds tab, then rerun this release action.' >&2
+            exit 1
+          fi
+      - name: Check hosted source and decode through strict Snap confinement
+        id: verify
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          test -s dist/deb/install-smoke.json
-          test -s dist/deb/release-smoke.json
-          (cd dist/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
-          test "$(dpkg-deb --field "dist/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
-          mkdir -p snap-input
-          cp "dist/deb/licasa_${VERSION}-1_amd64.deb" snap-input/licasa.deb
-      # Snapcraft runs its built-in linters during the build.
-      - name: Package and lint the same deb as a Snap
-        id: snapcraft
-        uses: snapcore/action-build@v1
-      - name: Install and decode through strict Snap confinement
-        env:
-          SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          sudo snap install --dangerous "$SNAP_FILE"
           python3 tools/verify_snap_install.py --version "$VERSION" \
+            --source-sha "$GITHUB_SHA" \
             --output build/qualification/snap-smoke.json
-      - name: Save checked Snap and checksum
-        env:
-          SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          test "$(basename "$SNAP_FILE")" = "licasa_${VERSION}_amd64.snap"
-          mkdir -p dist/snap
-          cp "$SNAP_FILE" dist/snap/
-          cp build/qualification/snap-smoke.json dist/snap/snap-smoke.json
-          (cd dist/snap && sha256sum "licasa_${VERSION}_amd64.snap" > licasa.snap.sha256 && sha256sum --check licasa.snap.sha256)
+          revision="$(snap list licasa | awk 'NR == 2 {print $3}')"
+          test "$revision" -gt 0
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: licasa-snap-amd64
-          path: dist/snap/
+          name: licasa-store-snap-smoke
+          path: build/qualification/snap-smoke.json
           if-no-files-found: error
 
   publish_snap:
-    needs: [preflight, snap]
+    needs: [preflight, store_snap, build_and_test]
     runs-on: ubuntu-24.04
     environment: snap-beta
     timeout-minutes: 30
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: licasa-deb-amd64
-          path: dist/deb
-      - uses: actions/download-artifact@v4
-        with:
-          name: licasa-snap-amd64
-          path: dist/snap
-      - name: Recheck package checksum and Store credential
+      - name: Require Store publishing credentials
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           test -n "$SNAPCRAFT_STORE_CREDENTIALS"
-          test -s dist/deb/install-smoke.json
-          test -s dist/deb/release-smoke.json
-          test -s dist/snap/snap-smoke.json
-          (cd dist/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
-          (cd dist/snap && sha256sum --check licasa.snap.sha256)
-      - name: Release checked Snap to the Store
-        uses: snapcore/action-publish@v1
+      - name: Install Snapcraft
+        run: sudo snap install snapcraft --classic
+      - name: Promote the verified hosted revision to beta
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-        with:
-          snap: dist/snap/licasa_${{ needs.preflight.outputs.version }}_amd64.snap
-          release: beta
+          REVISION: ${{ needs.store_snap.outputs.revision }}
+        run: snapcraft release licasa "$REVISION" beta
 
   github_release:
-    needs: [preflight, publish_snap]
+    needs: [preflight, store_snap, publish_snap]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -230,11 +193,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+          SNAP_REVISION: ${{ needs.store_snap.outputs.revision }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           {
             cat "packaging/release-notes/$RELEASE_TAG.md"
-            printf "\n### Snap Store\n\nLicasa %s is released to \`beta\`.\n" "$VERSION"
+            printf '\n### Snap Store\n\n'
+            printf 'Snapcraft hosted build revision %s (Licasa %s) was installed, tested, and promoted to beta.\n' "$SNAP_REVISION" "$VERSION"
             printf "\n### Debian package SHA-256\n\n\`\`\`text\n"
             cat "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256"
             printf "\`\`\`\n"

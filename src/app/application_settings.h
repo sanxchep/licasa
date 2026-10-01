@@ -8,34 +8,26 @@ namespace Licasa {
 
 class BackgroundModeManager final : public QObject {
     Q_OBJECT
-    Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY enabledChanged)
-    Q_PROPERTY(bool supported READ supported CONSTANT)
-    Q_PROPERTY(QString autostartEntryPath READ autostartEntryPath CONSTANT)
+    Q_PROPERTY(bool enabled READ enabled CONSTANT)
 
   public:
     explicit BackgroundModeManager(QObject* parent = nullptr);
 
     bool supported() const;
     bool enabled() const;
-    QString autostartEntryPath() const;
-
-  public slots:
-    void setEnabled(bool value);
+    void syncAutostart();
 
   signals:
-    void enabledChanged();
     void errorOccurred(const QString& message);
 
   private:
     static QString quoteDesktopExecArgument(QString argument);
 
+    QString autostartEntryPath() const;
     QString executablePath() const;
     void reportError(const QString& message);
-    bool autostartStateMatches(bool shouldBeEnabled) const;
-    void syncAutostartToState();
-    bool applyAutostart(bool enable);
-
-    QSettings settings_;
+    bool writeAutostart();
+    void removeLegacySnapAutostart();
 };
 
 class ViewerPreferences final : public QObject {

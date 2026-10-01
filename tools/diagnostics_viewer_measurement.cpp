@@ -93,7 +93,7 @@ class ViewerMeasurement final : public QObject, public DiagnosticCheck {
             if (closedCycles_ >= cycles_) {
                 result_["final_process"] = processMetrics();
                 printJson(result_);
-                QCoreApplication::quit();
+                QCoreApplication::exit(0);
             } else {
                 QTimer::singleShot(1000, this, &ViewerMeasurement::releaseImage);
             }
@@ -137,13 +137,15 @@ class ViewerMeasurement final : public QObject, public DiagnosticCheck {
             result_["image"] = imageUrl_.toLocalFile();
             if (imageUrl_.isEmpty() || result_.value("image_failed").toBool()) {
                 printJson(result_);
-                QCoreApplication::quit();
+                QCoreApplication::exit(0);
                 return;
             }
             warming_ = true;
             warmStarted_ = monotonicNs();
             QMetaObject::invokeMethod(window_, "loadImageUrl", Qt::DirectConnection,
-                                      Q_ARG(QVariant, QVariant::fromValue(imageUrl_)));
+                                      Q_ARG(QVariant, QVariant::fromValue(imageUrl_)),
+                                      Q_ARG(QVariant, QVariant(true)));
+            window_->show();
         });
     }
 

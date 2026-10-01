@@ -50,6 +50,12 @@ Window {
             windowManager.markParallelPreviewPresented(lastPresentedParallelPairId)
         }
     }
+    onActiveFocusItemChanged: {
+        if (fullscreenSideMenu.panelOpen)
+            fullscreenSideMenu.revealFocusedItem(activeFocusItem)
+        else if (root.editPanelOpen)
+            editorSidePanel.revealFocusedItem(activeFocusItem)
+    }
 
     readonly property bool persistentShell: windowSession.persistentShell
 
@@ -66,6 +72,7 @@ Window {
     property string motionProbeRequestedUrl: ""
     property string renderedProviderSource: ""
     property string lastPresentedParallelPairId: ""
+    property double imageOpenStartedMs: -1
 
     readonly property real fullscreenBackdropOpacity: viewerPreferences.fullscreenBackgroundOpacity
     readonly property bool transparencyCheckerboardEnabled: viewerPreferences.transparencyCheckerboardEnabled
@@ -658,6 +665,7 @@ Window {
             cropAspectRatio = 0.0
         } else {
             fullscreenSideMenu.panelOpen = false
+            notificationCenter.historyOpen = false
         }
         const openingEditor = shouldOpen && !editPanelOpen
         editPanelOpen = shouldOpen
@@ -1063,6 +1071,7 @@ Window {
     }
 
     function clearImageState() {
+        imageOpenStartedMs = -1
         pendingSaveKind = ""
         stopMotionPhotoPlaybackForLifecycle()
         fullResTimer.stop()
@@ -1221,9 +1230,15 @@ Window {
         readImageMetadata(probeUrl, true)
         rawMetadataProbeDurationMs = Math.max(0, Date.now() - probeStartedMs)
 
-        if (imageLimitedToPreview && imageViewport.imageStatus === Image.Ready)
+        if (imageLimitedToPreview && imageViewport.imageStatus === Image.Ready) {
+            const openingDurationMs = imageOpenStartedMs >= 0
+                ? Math.max(0, Date.now() - imageOpenStartedMs) : -1
+            imageOpenStartedMs = -1
             notificationCenter.finish("image", "success", "Preview ready",
-                                      currentFileName + " · Full resolution exceeds the image memory limit")
+                                      currentFileName + (openingDurationMs >= 0
+                                          ? " · " + openingDurationMs + " ms" : "")
+                                          + " · Full resolution exceeds the image memory limit")
+        }
 
         if (fitMode) {
             if (fullScreenMode)
@@ -1233,21 +1248,25 @@ Window {
         }
     }
 
-    function loadImageUrl(u) {
+    function loadImageUrl(u, replaceCurrent) {
         if (!FileUrls.isLocal(u) || !formatSupport.canOpen(u))
             return
 
-        if (hasAssignedImage() && imageViewport.imageStatus !== Image.Error) {
+        if (!replaceCurrent && hasAssignedImage() && imageViewport.imageStatus !== Image.Error) {
             windowManager.openInNewWindow(u)
             return
         }
 
-        if (hasAssignedImage())
+        if (hasAssignedImage()) {
+            stopMotionPhotoPlaybackForLifecycle()
             windowManager.releasePictureResources()
+        }
 
         notificationCenter.startSession()
-        notificationCenter.begin("image", "Opening image", FileUrls.fileName(u))
-        prepareForImageOpen()
+        imageOpenStartedMs = Date.now()
+        notificationCenter.begin("image", "Opening image", FileUrls.fileName(u), 300)
+        if (!replaceCurrent)
+            prepareForImageOpen()
 
         residentImageUrl = u
         if (looksLikeRaw(u)) {
@@ -1300,6 +1319,30 @@ Window {
         photoAssetProbe.cancel()
         imageRevision += 1
         refreshEditedPreviewSource()
+    }
+
+    function browseImage(direction) {
+        if (!root.fullScreenMode || root.editPanelOpen || fullscreenSideMenu.panelOpen
+                || !FileUrls.isLocal(root.residentImageUrl) || imageSaveService.busy)
+            return
+        const adjacent = formatSupport.adjacentImage(root.residentImageUrl, direction)
+        if (FileUrls.isLocal(adjacent))
+            loadImageUrl(adjacent, true)
+    }
+
+    function moveImage(dx, dy) {
+        if (!root.fullScreenMode || !hasImage())
+            return
+        cancelZoomAnimations()
+        fitMode = false
+        panX += dx
+        panY += dy
+        panX = contentAreaLeft() + ViewerMath.freeImagePosition(
+            imageX() - contentAreaLeft(), imageWidth() * currentScale,
+            contentAreaWidth(), fullscreenRecoveryGrip) - centeredX()
+        panY = contentAreaTop() + ViewerMath.freeImagePosition(
+            imageY() - contentAreaTop(), imageHeight() * currentScale,
+            contentAreaHeight(), fullscreenRecoveryGrip) - centeredY()
     }
 
     function requestPhotoAssetProbeIfNeeded() {
@@ -1567,7 +1610,7 @@ Window {
     }
 
     function quitApp() {
-        Qt.quit()
+        windowManager.quitApplication()
     }
 
     EditorSession {
@@ -2026,6 +2069,10 @@ Window {
     Shortcut {
         sequence: "Esc"
         onActivated: {
+            if (notificationCenter.historyOpen) {
+                notificationCenter.historyOpen = false
+                return
+            }
             if (root.editorCropMode) {
                 root.cancelCropMode()
                 return
@@ -2050,8 +2097,8 @@ Window {
         }
     }
 
-    Shortcut { sequence: "F"; onActivated: root.fitToWindow() }
-    Shortcut { sequence: "1"; onActivated: root.actualSize() }
+    Shortcut { sequence: "F"; enabled: !fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen; onActivated: root.fitToWindow() }
+    Shortcut { sequence: "1"; enabled: !fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen; onActivated: root.actualSize() }
     Shortcut {
         sequence: "C"
         onActivated: {
@@ -2061,6 +2108,7 @@ Window {
     }
     Shortcut {
         sequence: "Return"
+        enabled: root.editorCropMode
         onActivated: {
             if (root.editorCropMode)
                 root.applyDraftCrop()
@@ -2082,17 +2130,142 @@ Window {
         }
     }
     Shortcut { sequence: "F11"; onActivated: root.toggleFullScreen() }
-    Shortcut { sequence: "+"; onActivated: root.zoomFromKeyboard(1.15) }
-    Shortcut { sequence: "="; onActivated: root.zoomFromKeyboard(1.15) }
-    Shortcut { sequence: "-"; onActivated: root.zoomFromKeyboard(1.0 / 1.15) }
+    Shortcut { sequence: "+"; enabled: !fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen; onActivated: root.zoomFromKeyboard(1.15) }
+    Shortcut { sequence: "="; enabled: !fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen; onActivated: root.zoomFromKeyboard(1.15) }
+    Shortcut { sequence: "-"; enabled: !fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen; onActivated: root.zoomFromKeyboard(1.0 / 1.15) }
 
     Shortcut {
-        sequence: "Tab"
+        sequence: "E"
+        enabled: !root.editorCropMode
         onActivated: {
             if (root.fullScreenMode && root.hasAssignedImage())
                 root.setEditPanelOpen(!root.editPanelOpen)
         }
     }
+    Shortcut {
+        sequence: "M"
+        enabled: !root.editorCropMode
+        onActivated: {
+            if (root.fullScreenMode) {
+                if (root.editPanelOpen)
+                    root.setEditPanelOpen(false)
+                notificationCenter.historyOpen = false
+                fullscreenSideMenu.panelOpen = !fullscreenSideMenu.panelOpen
+            }
+        }
+    }
+    Shortcut {
+        sequence: "N"
+        enabled: root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
+        onActivated: notificationCenter.historyOpen = !notificationCenter.historyOpen
+    }
+    Shortcut {
+        sequence: "PageDown"
+        enabled: root.fullScreenMode && (root.editPanelOpen || fullscreenSideMenu.panelOpen
+            || notificationCenter.historyOpen)
+        onActivated: {
+            if (notificationCenter.historyOpen)
+                notificationCenter.scrollHistoryByPage(1)
+            else if (fullscreenSideMenu.panelOpen)
+                fullscreenSideMenu.scrollByPage(1)
+            else
+                editorSidePanel.scrollByPage(1)
+        }
+    }
+    Shortcut {
+        sequence: "PageUp"
+        enabled: root.fullScreenMode && (root.editPanelOpen || fullscreenSideMenu.panelOpen
+            || notificationCenter.historyOpen)
+        onActivated: {
+            if (notificationCenter.historyOpen)
+                notificationCenter.scrollHistoryByPage(-1)
+            else if (fullscreenSideMenu.panelOpen)
+                fullscreenSideMenu.scrollByPage(-1)
+            else
+                editorSidePanel.scrollByPage(-1)
+        }
+    }
+    Shortcut {
+        sequence: "Ctrl+1"
+        enabled: root.fullScreenMode && root.editPanelOpen
+        onActivated: editorSidePanel.activateTool("adjust")
+    }
+    Shortcut {
+        sequence: "Ctrl+2"
+        enabled: root.fullScreenMode && root.editPanelOpen
+        onActivated: editorSidePanel.activateTool("crop")
+    }
+    Shortcut {
+        sequence: "Ctrl+3"
+        enabled: root.fullScreenMode && root.editPanelOpen
+        onActivated: editorSidePanel.activateTool("looks")
+    }
+    Shortcut {
+        sequence: "Ctrl+4"
+        enabled: root.fullScreenMode && root.editPanelOpen
+        onActivated: editorSidePanel.activateTool("export")
+    }
+
+    Shortcut {
+        sequence: "Left"
+        enabled: root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
+            && !notificationCenter.historyOpen
+            && !(temporalControlsLoader.item && temporalControlsLoader.item.keyboardFocusWithin)
+        onActivated: root.browseImage(-1)
+    }
+    Shortcut {
+        sequence: "Right"
+        enabled: root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
+            && !notificationCenter.historyOpen
+            && !(temporalControlsLoader.item && temporalControlsLoader.item.keyboardFocusWithin)
+        onActivated: root.browseImage(1)
+    }
+    Shortcut {
+        sequence: "Up"
+        enabled: root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
+            && !notificationCenter.historyOpen
+            && !(temporalControlsLoader.item && temporalControlsLoader.item.keyboardFocusWithin)
+        onActivated: root.zoomFromKeyboard(1.15)
+    }
+    Shortcut {
+        sequence: "Down"
+        enabled: root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
+            && !notificationCenter.historyOpen
+            && !(temporalControlsLoader.item && temporalControlsLoader.item.keyboardFocusWithin)
+        onActivated: root.zoomFromKeyboard(1.0 / 1.15)
+    }
+    Shortcut {
+        sequence: "Ctrl+Left"
+        enabled: root.fullScreenMode && !fullscreenSideMenu.panelOpen
+            && !notificationCenter.historyOpen
+        onActivated: root.moveImage(-48, 0)
+    }
+    Shortcut {
+        sequence: "Ctrl+Right"
+        enabled: root.fullScreenMode && !fullscreenSideMenu.panelOpen
+            && !notificationCenter.historyOpen
+        onActivated: root.moveImage(48, 0)
+    }
+    Shortcut {
+        sequence: "Ctrl+Up"
+        enabled: root.fullScreenMode && !fullscreenSideMenu.panelOpen
+            && !notificationCenter.historyOpen
+        onActivated: root.moveImage(0, -48)
+    }
+    Shortcut {
+        sequence: "Ctrl+Down"
+        enabled: root.fullScreenMode && !fullscreenSideMenu.panelOpen
+            && !notificationCenter.historyOpen
+        onActivated: root.moveImage(0, 48)
+    }
+    Shortcut { sequence: "Alt+Left"; enabled: root.editorCropMode; onActivated: cropOverlay.keyboardAdjust(-1, 0, false) }
+    Shortcut { sequence: "Alt+Right"; enabled: root.editorCropMode; onActivated: cropOverlay.keyboardAdjust(1, 0, false) }
+    Shortcut { sequence: "Alt+Up"; enabled: root.editorCropMode; onActivated: cropOverlay.keyboardAdjust(0, -1, false) }
+    Shortcut { sequence: "Alt+Down"; enabled: root.editorCropMode; onActivated: cropOverlay.keyboardAdjust(0, 1, false) }
+    Shortcut { sequence: "Alt+Shift+Left"; enabled: root.editorCropMode; onActivated: cropOverlay.keyboardAdjust(-1, 0, true) }
+    Shortcut { sequence: "Alt+Shift+Right"; enabled: root.editorCropMode; onActivated: cropOverlay.keyboardAdjust(1, 0, true) }
+    Shortcut { sequence: "Alt+Shift+Up"; enabled: root.editorCropMode; onActivated: cropOverlay.keyboardAdjust(0, -1, true) }
+    Shortcut { sequence: "Alt+Shift+Down"; enabled: root.editorCropMode; onActivated: cropOverlay.keyboardAdjust(0, 1, true) }
 
     Shortcut {
         sequence: "Ctrl+R"
@@ -2201,13 +2374,6 @@ Window {
             root.promoteFullRes()
         }
 
-        onDecodePendingChanged: {
-            if (decodePending && root.hasAssignedImage()
-                    && !root.animatedPlaybackActive
-                    && !notificationCenter.isLoading("image"))
-                notificationCenter.begin("image", "Updating image", "Applying image changes…")
-        }
-
         onImageRequestFailed: {
             // If the embedded preview cannot be decoded, the already-running
             // full reader is the shortest route to pixels. Avoid queueing a
@@ -2243,11 +2409,18 @@ Window {
                 return
             }
             const previewAvailable = root.hasImage()
+            const openingImage = root.imageOpenStartedMs >= 0
+                && notificationCenter.isLoading("image")
+            root.imageOpenStartedMs = -1
             notificationCenter.finish("image", "error",
-                                      previewAvailable ? "Full resolution could not load"
-                                                       : "Image could not be opened",
-                                      previewAvailable ? "The preview is still available."
-                                                       : root.currentFileName)
+                                      openingImage
+                                          ? (previewAvailable ? "Full resolution could not load"
+                                                              : "Image could not be opened")
+                                          : "Image update failed",
+                                      previewAvailable
+                                          ? (openingImage ? "The preview is still available."
+                                                          : "The current image is still available.")
+                                          : root.currentFileName)
             if (root.pendingImageReveal)
                 root.revealLoadedImage()
         }
@@ -2298,21 +2471,24 @@ Window {
                     && root.fullResolutionRenderingEnabled)
                 fullResTimer.restart()
 
-            if (notificationCenter.isLoading("image")) {
+            if (root.imageOpenStartedMs >= 0 && notificationCenter.isLoading("image")) {
                 if (root.rawMetadataProbePending
                         || ((root.previewPhase || root.rawFastPhase)
                             && !root.imageLimitedToPreview
                             && !root.animatedPlaybackActive
                             && root.fullResolutionRenderingEnabled)) {
-                    notificationCenter.update("image", "Preview ready",
-                                              "Loading the full-resolution image…")
+                    notificationCenter.update("image", "Opening image",
+                                              root.currentFileName + " · Loading full resolution…")
                 } else {
+                    const openingDurationMs = Math.max(0, Date.now() - root.imageOpenStartedMs)
+                    root.imageOpenStartedMs = -1
+                    const detail = root.currentFileName + " · " + openingDurationMs + " ms"
+                        + (root.imageLimitedToPreview
+                            ? " · Full resolution exceeds the image memory limit" : "")
                     notificationCenter.finish("image", "success",
                                               root.imageLimitedToPreview
                                                   ? "Preview ready" : "Image ready",
-                                              root.imageLimitedToPreview
-                                                  ? root.currentFileName + " · Full resolution exceeds the image memory limit"
-                                                  : root.currentFileName)
+                                              detail)
                 }
             }
 
@@ -2332,6 +2508,7 @@ Window {
     }
 
     CropOverlay {
+        id: cropOverlay
         anchors.fill: parent
         z: 1050
 
@@ -2543,8 +2720,6 @@ Window {
         cornerControlSize: root.cornerControlSize
         cornerControlMargin: root.cornerControlMargin
 
-        backgroundProcessSupported: root.backgroundModeManager.supported
-        backgroundProcessEnabled: root.backgroundModeManager.enabled
         infoOverlayEnabled: root.infoOverlayEnabled
         smoothMotionEnabled: root.smoothMenuMotionEnabled
         startInFullscreenEnabled: root.viewerPreferences.startInFullscreen
@@ -2574,11 +2749,6 @@ Window {
         currentImageMegapixels: root.currentImageMegapixels()
         currentImageLimitedToPreview: root.imageLimitedToPreview
         cropShieldOpacity: root.viewerPreferences.cropShieldOpacity
-
-        onBackgroundProcessChanged: function(enabled) {
-            if (root.backgroundModeManager.supported)
-                root.backgroundModeManager.enabled = enabled
-        }
 
         onInfoOverlayChanged: function(enabled) {
             root.infoOverlayEnabled = enabled

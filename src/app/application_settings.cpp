@@ -16,7 +16,6 @@
 namespace Licasa {
 namespace {
 
-const QString backgroundEnabledKey = QStringLiteral("backgroundProcess/enabled");
 const QString startInFullscreenKey = QStringLiteral("viewer/startInFullscreen");
 const QString fullscreenBackgroundOpacityKey = QStringLiteral("viewer/fullscreenBackgroundOpacity");
 const QString transparencyCheckerboardEnabledKey =
@@ -59,10 +58,7 @@ int clampMaximumImageMegapixels(int value)
 
 } // namespace
 
-BackgroundModeManager::BackgroundModeManager(QObject* parent) : QObject(parent)
-{
-    syncAutostartToState();
-}
+BackgroundModeManager::BackgroundModeManager(QObject* parent) : QObject(parent) {}
 
 bool BackgroundModeManager::supported() const
 {
@@ -73,10 +69,7 @@ bool BackgroundModeManager::supported() const
 #endif
 }
 
-bool BackgroundModeManager::enabled() const
-{
-    return settings_.value(backgroundEnabledKey, false).toBool();
-}
+bool BackgroundModeManager::enabled() const { return supported(); }
 
 QString BackgroundModeManager::autostartEntryPath() const
 {
@@ -92,26 +85,19 @@ QString BackgroundModeManager::autostartEntryPath() const
     return QDir(configRoot).filePath(QStringLiteral("autostart/licasa.desktop"));
 }
 
-void BackgroundModeManager::setEnabled(bool value)
+void BackgroundModeManager::syncAutostart()
 {
     if (!supported()) {
-        reportError(QStringLiteral("Background mode is not supported on this platform."));
         return;
     }
-
-    if (enabled() == value && autostartStateMatches(value)) {
+    if (qEnvironmentVariableIsSet("SNAP_NAME")) {
+        // Snapd owns the per-user background service and restarts it on refresh.
+        // Remove the desktop entry written by older Licasa revisions so login
+        // cannot launch a second copy through the old revision-specific path.
+        removeLegacySnapAutostart();
         return;
     }
-    if (!applyAutostart(value)) {
-        return;
-    }
-
-    settings_.setValue(backgroundEnabledKey, value);
-    settings_.sync();
-    if (settings_.status() != QSettings::NoError) {
-        reportError(QStringLiteral("Failed to save the background-mode setting."));
-    }
-    emit enabledChanged();
+    writeAutostart();
 }
 
 QString BackgroundModeManager::quoteDesktopExecArgument(QString argument)
@@ -137,68 +123,70 @@ void BackgroundModeManager::reportError(const QString& message)
     emit errorOccurred(message);
 }
 
-bool BackgroundModeManager::autostartStateMatches(bool shouldBeEnabled) const
+void BackgroundModeManager::removeLegacySnapAutostart()
 {
-    const QFileInfo fileInfo(autostartEntryPath());
-    return shouldBeEnabled ? fileInfo.exists() && fileInfo.isFile() : !fileInfo.exists();
-}
-
-void BackgroundModeManager::syncAutostartToState()
-{
-    if (supported()) {
-        applyAutostart(enabled());
+    const QString path = autostartEntryPath();
+    const QFileInfo entryInfo(path);
+    if (!entryInfo.isFile() || entryInfo.size() > 4096) {
+        return;
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return;
+    }
+    const QByteArray entry = file.read(4097);
+    if (entry.size() > 4096 || !entry.contains("Comment=Start Licasa in background at login")) {
+        return;
+    }
+    file.close();
+    if (!file.remove()) {
+        reportError(QStringLiteral("Failed to remove old Snap autostart file: %1").arg(path));
     }
 }
 
-bool BackgroundModeManager::applyAutostart(bool enable)
+bool BackgroundModeManager::writeAutostart()
 {
     const QString path = autostartEntryPath();
     const QString directoryPath = QFileInfo(path).absolutePath();
 
-    if (enable) {
-        QDir directory;
-        if (!directory.mkpath(directoryPath)) {
-            reportError(
-                QStringLiteral("Failed to create autostart directory: %1").arg(directoryPath));
-            return false;
-        }
+    const QString content = QStringLiteral("[Desktop Entry]\n"
+                                           "Type=Application\n"
+                                           "Version=1.0\n"
+                                           "Name=Licasa\n"
+                                           "Comment=Start Licasa in background at login\n"
+                                           "Exec=%1 --background\n"
+                                           "Terminal=false\n"
+                                           "NoDisplay=true\n"
+                                           "StartupNotify=false\n")
+                                .arg(quoteDesktopExecArgument(executablePath()));
 
-        const QString content = QStringLiteral("[Desktop Entry]\n"
-                                               "Type=Application\n"
-                                               "Version=1.0\n"
-                                               "Name=Licasa\n"
-                                               "Comment=Start Licasa in background at login\n"
-                                               "Exec=%1 --background\n"
-                                               "Terminal=false\n"
-                                               "NoDisplay=true\n"
-                                               "StartupNotify=false\n")
-                                    .arg(quoteDesktopExecArgument(executablePath()));
-
-        QSaveFile file(path);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            reportError(QStringLiteral("Failed to open autostart file for writing: %1").arg(path));
-            return false;
+    const QByteArray bytes = content.toUtf8();
+    const QFileInfo existingInfo(path);
+    if (existingInfo.isFile() && existingInfo.size() == bytes.size()) {
+        QFile existing(path);
+        if (existing.open(QIODevice::ReadOnly) && existing.read(bytes.size() + 1) == bytes) {
+            return true;
         }
-
-        const QByteArray bytes = content.toUtf8();
-        if (file.write(bytes) != bytes.size()) {
-            file.cancelWriting();
-            reportError(QStringLiteral("Failed to write autostart file: %1").arg(path));
-            return false;
-        }
-        if (!file.commit()) {
-            reportError(QStringLiteral("Failed to commit autostart file: %1").arg(path));
-            return false;
-        }
-        return true;
     }
 
-    QFile file(path);
-    if (!file.exists()) {
-        return true;
+    QDir directory;
+    if (!directory.mkpath(directoryPath)) {
+        reportError(QStringLiteral("Failed to create autostart directory: %1").arg(directoryPath));
+        return false;
     }
-    if (!file.remove()) {
-        reportError(QStringLiteral("Failed to remove autostart file: %1").arg(path));
+
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        reportError(QStringLiteral("Failed to open autostart file for writing: %1").arg(path));
+        return false;
+    }
+    if (file.write(bytes) != bytes.size()) {
+        file.cancelWriting();
+        reportError(QStringLiteral("Failed to write autostart file: %1").arg(path));
+        return false;
+    }
+    if (!file.commit()) {
+        reportError(QStringLiteral("Failed to commit autostart file: %1").arg(path));
         return false;
     }
     return true;

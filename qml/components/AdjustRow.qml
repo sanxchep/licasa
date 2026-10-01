@@ -160,7 +160,7 @@ Item {
         anchors.left: sliderTrack.left
         anchors.right: sliderTrack.right
         anchors.verticalCenter: sliderTrack.verticalCenter
-        height: 28
+        height: 32
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
 

@@ -9,4 +9,4 @@ Terminal=false
 Categories=Graphics;Viewer;
 MimeType=@LICASA_DESKTOP_MIME_TYPES@
 Icon=licasa
-StartupNotify=true
+StartupNotify=false

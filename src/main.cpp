@@ -43,6 +43,7 @@ int main(int argc, char* argv[])
     }
 
     Licasa::BackgroundModeManager backgroundModeManager;
+    backgroundModeManager.syncAutostart();
     Licasa::ViewerPreferences viewerPreferences;
     Licasa::ImageResourcePolicy imageResourcePolicy(viewerPreferences);
     Licasa::ImageProbe imageProbe(imageResourcePolicy);

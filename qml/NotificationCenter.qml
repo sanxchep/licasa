@@ -18,9 +18,12 @@ Item {
     property bool toastVisible: false
     property string latestCategory: ""
     property string toastCategory: ""
+    property string toastOperationKey: ""
     property string toastTitle: ""
     property string toastDetail: ""
+    property string delayedToastKey: ""
     property var notifications: []
+    readonly property int maximumHistoryEntries: 100
     readonly property int notificationCount: notifications.length
     readonly property bool anyLoading: {
         for (let index = 0; index < notifications.length; ++index) {
@@ -51,13 +54,26 @@ Item {
         return pendingIndex(key) >= 0
     }
 
+    function retainRecent(entries) {
+        let completed = 0
+        return entries.filter(function(entry) {
+            if (entry.ongoing)
+                return true
+            completed += 1
+            return completed <= maximumHistoryEntries
+        })
+    }
+
     function clear() {
         hideTimer.stop()
+        delayedToastTimer.stop()
+        delayedToastKey = ""
         notifications = []
         historyOpen = false
         toastVisible = false
         latestCategory = ""
         toastCategory = ""
+        toastOperationKey = ""
         toastTitle = ""
         toastDetail = ""
     }
@@ -74,19 +90,30 @@ Item {
         sessionActive = true
     }
 
-    function showToast(category, title, detail, ongoing) {
+    function hideToast() {
+        hideTimer.stop()
+        toastVisible = false
+        toastOperationKey = ""
+    }
+
+    function showToast(key, category, title, detail) {
+        hideToast()
         toastCategory = category
         toastTitle = title
         toastDetail = detail
+        if (category === "success")
+            return
+        toastOperationKey = key
         toastVisible = true
-        hideTimer.stop()
-        if (!ongoing)
-            hideTimer.start()
+        hideTimer.restart()
     }
 
-    function begin(key, title, detail) {
+    function begin(key, title, detail, toastDelayMs) {
         if (!sessionActive)
             return
+        delayedToastTimer.stop()
+        delayedToastKey = ""
+        hideToast()
         const index = pendingIndex(key)
         if (index >= 0) {
             const entries = notifications.slice()
@@ -105,7 +132,13 @@ Item {
             notifications = entries
         }
         latestCategory = "warning"
-        showToast("warning", title, detail, true)
+        if (toastDelayMs > 0) {
+            delayedToastKey = key
+            delayedToastTimer.interval = toastDelayMs
+            delayedToastTimer.restart()
+        } else {
+            showToast(key, "warning", title, detail)
+        }
     }
 
     function update(key, title, detail) {
@@ -117,7 +150,10 @@ Item {
         const entries = notifications.slice()
         entries[index] = Object.assign({}, entries[index], { "title": title, "detail": detail })
         notifications = entries
-        showToast("warning", title, detail, true)
+        if (toastVisible && toastOperationKey === key) {
+            toastTitle = title
+            toastDetail = detail
+        }
     }
 
     function finish(key, category, title, detail) {
@@ -126,18 +162,20 @@ Item {
         const index = pendingIndex(key)
         const entries = notifications.slice()
         if (index >= 0)
-            entries[index] = Object.assign({}, entries[index], { "ongoing": false })
+            entries.splice(index, 1)
         entries.unshift({
-            "operationKey": "",
+            "operationKey": key,
             "category": category,
             "title": title,
             "detail": detail,
             "timeText": Qt.formatTime(new Date(), "hh:mm"),
             "ongoing": false
         })
-        notifications = entries
+        notifications = retainRecent(entries)
         latestCategory = category
-        showToast(category, title, detail, false)
+        delayedToastTimer.stop()
+        delayedToastKey = ""
+        showToast(key, category, title, detail)
     }
 
     function stop(key) {
@@ -146,29 +184,41 @@ Item {
             return
         const entries = notifications.slice()
         entries[index] = Object.assign({}, entries[index], { "ongoing": false })
-        notifications = entries
-        if (toastCategory === "warning") {
-            hideTimer.stop()
-            toastVisible = false
+        notifications = retainRecent(entries)
+        if (delayedToastKey === key) {
+            delayedToastTimer.stop()
+            delayedToastKey = ""
         }
+        if (toastOperationKey === key)
+            hideToast()
     }
 
-    function showPendingOrHide() {
-        for (let index = 0; index < notifications.length; ++index) {
-            const entry = notifications[index]
-            if (entry.ongoing) {
-                showToast("warning", entry.title, entry.detail, true)
-                return
-            }
-        }
-        toastVisible = false
+    function scrollHistoryByPage(direction) {
+        historyList.contentY = Math.max(0, Math.min(
+            Math.max(0, historyList.contentHeight - historyList.height),
+            historyList.contentY + direction * historyList.height * 0.8
+        ))
     }
 
     Timer {
         id: hideTimer
         interval: 2000
         repeat: false
-        onTriggered: root.showPendingOrHide()
+        onTriggered: root.hideToast()
+    }
+
+    Timer {
+        id: delayedToastTimer
+        repeat: false
+        onTriggered: {
+            const key = root.delayedToastKey
+            root.delayedToastKey = ""
+            const index = root.pendingIndex(key)
+            if (index >= 0) {
+                const entry = root.notifications[index]
+                root.showToast(key, "warning", entry.title, entry.detail)
+            }
+        }
     }
 
     RoundIconButton {

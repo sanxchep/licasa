@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--source-sha", help="Expected Git commit embedded by Snapcraft")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -28,6 +29,14 @@ def main() -> None:
     if len(rows) != 2 or rows[1].split()[0:2] != ["licasa", args.version]:
         raise RuntimeError(f"Installed Snap version differs from {args.version}: {listed.stdout}")
     snap_root = Path("/snap/licasa/current").resolve(strict=True)
+    commit_file = snap_root / "usr/share/licasa/source-commit"
+    if not commit_file.is_file():
+        raise RuntimeError("Installed Snap has no source commit; the hosted build for this "
+                           "release is not available on the selected Store channel")
+    source_commit = commit_file.read_text().strip()
+    if args.source_sha and source_commit != args.source_sha:
+        raise RuntimeError(f"Installed Snap source commit {source_commit} differs from "
+                           f"{args.source_sha}")
     diagnostic = snap_root / "usr/bin/licasa_diagnostics"
     if not diagnostic.is_file():
         raise RuntimeError(f"Installed Snap has no diagnostics binary: {diagnostic}")
@@ -76,6 +85,7 @@ def main() -> None:
                 raise RuntimeError(f"Codec library escaped the Snap: {library}")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    report["source_commit"] = source_commit
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(f"Confined Snap decoded {len(expected)} samples: {args.output}")
 

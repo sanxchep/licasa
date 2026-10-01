@@ -70,6 +70,7 @@ class WindowManager final : public QObject {
     Q_INVOKABLE void markParallelPreviewPresented(const QString& pairId);
     Q_INVOKABLE void destroyWindow(QObject* object);
     Q_INVOKABLE void destroyAllWindows();
+    Q_INVOKABLE void quitApplication();
 
     void showAnyWindow();
 

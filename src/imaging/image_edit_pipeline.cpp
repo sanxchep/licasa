@@ -333,13 +333,18 @@ int normalizedQuarterTurns(int value)
 
 ImageEditParameters editParametersFromQuery(const QString& queryString)
 {
-    ImageEditParameters parameters;
     if (queryString.isEmpty()) {
-        return parameters;
+        return {};
     }
 
     QUrlQuery query;
     query.setQuery(queryString);
+    return editParametersFromQuery(query);
+}
+
+ImageEditParameters editParametersFromQuery(const QUrlQuery& query)
+{
+    ImageEditParameters parameters;
     parameters.exposure = query.queryItemValue(QStringLiteral("b")).toDouble();
     parameters.contrast = query.queryItemValue(QStringLiteral("c")).toDouble();
     parameters.highlights = query.queryItemValue(QStringLiteral("hi")).toDouble();

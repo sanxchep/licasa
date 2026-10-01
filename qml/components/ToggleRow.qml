@@ -16,6 +16,32 @@ Item {
         : rowTitle.y + rowTitle.height
 
     height: Math.max(58, textBottom + 8)
+    activeFocusOnTab: enabled && visible
+
+    Accessible.role: Accessible.CheckBox
+    Accessible.name: title
+    Accessible.description: subtitle
+    Accessible.checked: checked
+    Accessible.focusable: enabled && visible
+    Accessible.focused: activeFocus
+    Accessible.onPressAction: root.toggled(!root.checked)
+
+    Keys.onPressed: function(event) {
+        if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
+                && event.key !== Qt.Key_Enter)
+            return
+        if (!event.isAutoRepeat)
+            root.toggled(!root.checked)
+        event.accepted = true
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        radius: 12
+        color: "transparent"
+        border.width: root.activeFocus ? 2 : 0
+        border.color: "#C8FFFFFF"
+    }
 
     Text {
         id: rowTitle
@@ -89,6 +115,7 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
+        onPressed: root.forceActiveFocus()
         onClicked: root.toggled(!root.checked)
     }
 }

@@ -17,8 +17,6 @@ Item {
     property bool panelOpen: false
     property real cornerControlSize: 48
     property real cornerControlMargin: 24
-    property bool backgroundProcessSupported: true
-    property bool backgroundProcessEnabled: false
     property bool infoOverlayEnabled: true
     property bool smoothMotionEnabled: true
     property bool startInFullscreenEnabled: true
@@ -46,7 +44,6 @@ Item {
     readonly property bool pointerInsidePanel: root.panelOpen
         && (panelHover.hovered || settingsScrollBar.dragging)
 
-    signal backgroundProcessChanged(bool enabled)
     signal infoOverlayChanged(bool enabled)
     signal smoothMotionChanged(bool enabled)
     signal startInFullscreenChanged(bool enabled)
@@ -89,6 +86,29 @@ Item {
         wheel.accepted = true
     }
 
+    function scrollByPage(direction) {
+        settingsFlick.contentY = Math.max(0, Math.min(
+            Math.max(0, settingsFlick.contentHeight - settingsFlick.height),
+            settingsFlick.contentY + direction * settingsFlick.height * 0.8
+        ))
+    }
+
+    function revealFocusedItem(item) {
+        let ancestor = item
+        while (ancestor && ancestor !== settingsFlick)
+            ancestor = ancestor.parent
+        if (!ancestor || !item)
+            return
+        const position = item.mapToItem(settingsFlick.contentItem, 0, 0)
+        const top = position.y
+        const bottom = top + item.height
+        const target = top < settingsFlick.contentY
+            ? top - 8 : bottom > settingsFlick.contentY + settingsFlick.height
+                ? bottom - settingsFlick.height + 8 : settingsFlick.contentY
+        settingsFlick.contentY = Math.max(0, Math.min(
+            Math.max(0, settingsFlick.contentHeight - settingsFlick.height), target))
+    }
+
     function estimatedLargeImageMemoryText() {
         const gibibytes = maximumImageMemoryMiB / 1024.0
         return "Estimated per-image budget: " + gibibytes.toFixed(2) + " GiB"
@@ -106,6 +126,10 @@ Item {
     onFullscreenChanged: {
         if (!fullscreen)
             panelOpen = false
+    }
+    onPanelOpenChanged: {
+        if (panelOpen)
+            menuButton.forceActiveFocus()
     }
 
     Rectangle {
@@ -220,20 +244,6 @@ Item {
                     id: settingsColumn
                     width: settingsFlick.width
                     spacing: 12
-
-                    ToggleRow {
-                        visible: root.backgroundProcessSupported
-                        width: parent.width
-                        title: "Background process"
-                        subtitle: "Start at login and stay running when closed"
-                        checked: root.backgroundProcessEnabled
-                        buttonMotionDuration: root.buttonMotionDuration
-                        switchMotionDuration: root.switchMotionDuration
-
-                        onToggled: function(value) {
-                            root.backgroundProcessChanged(value)
-                        }
-                    }
 
                     ToggleRow {
                         width: parent.width

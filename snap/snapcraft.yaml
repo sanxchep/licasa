@@ -1,6 +1,6 @@
 name: licasa
 title: Licasa
-version: '0.1.1'
+version: '0.2.1'
 summary: Fast, image-first photo viewer and editor
 description: |
   Licasa opens photographs in a focused, image-sized window. Browse, zoom,
@@ -14,6 +14,7 @@ icon: assets/licasa.png
 base: core24
 grade: devel
 confinement: strict
+assumes: [snapd2.66]
 
 # The qualified private Qt patches and codec builds currently target only
 # Ubuntu 24.04 on amd64. Add platforms after qualifying their runtime stacks.
@@ -25,27 +26,76 @@ apps:
     command: usr/bin/licasa
     desktop: usr/share/applications/licasa.desktop
     extensions: [gnome]
-    environment:
+    environment: &licasa_environment
       LD_LIBRARY_PATH: $SNAP/usr/lib/licasa/lib:$SNAP/usr/lib/x86_64-linux-gnu:$SNAP/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
       QT_PLUGIN_PATH: $SNAP/usr/lib/licasa/plugins:$SNAP/usr/lib/x86_64-linux-gnu/qt6/plugins
       QML2_IMPORT_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/qml
       QML_IMPORT_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/qml
       QT_QPA_PLATFORM_PLUGIN_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/plugins/platforms
-    plugs:
+    plugs: &licasa_plugs
       - home
       - removable-media
       - audio-playback
+  background:
+    command: usr/lib/licasa/background-service
+    daemon: simple
+    # Snapd currently requires experimental.user-daemons=true to install this service.
+    daemon-scope: user
+    install-mode: enable
+    refresh-mode: restart
+    restart-condition: always
+    restart-delay: 2s
+    stop-mode: sigterm-all
+    extensions: [gnome]
+    environment: *licasa_environment
+    plugs: *licasa_plugs
 
 parts:
   licasa:
     plugin: nil
-    override-pull: |
-      set -eu
-      craftctl default
-      cp "$CRAFT_PROJECT_DIR/snap-input/licasa.deb" "$CRAFT_PART_SRC/licasa.deb"
+    # Hosted Snapcraft builds check out this repository without GitHub Actions
+    # artifacts, so build the qualified Debian payload from its own source.
+    source: .
     build-packages:
+      - ca-certificates
+      - cmake
+      - ninja-build
+      - g++
+      - python3
+      - pkg-config
+      - patch
+      - git
+      - meson
+      - nasm
       - dpkg-dev
       - binutils
+      - qt6-base-dev
+      - qt6-declarative-dev
+      - qt6-svg-dev
+      - qt6-image-formats-plugins
+      - libopenjp2-7-dev
+      - libjpeg-turbo8-dev
+      - libxext-dev
+      - qt6-base-private-dev
+      - qt6-declarative-private-dev
+      - qt6-shadertools-dev
+      - qt6-multimedia-dev
+      - libpulse-dev
+      - libavcodec-dev
+      - libavformat-dev
+      - libavutil-dev
+      - libswresample-dev
+      - libswscale-dev
+      - libavdevice-dev
+      - libavfilter-dev
+      - qml6-module-qtquick
+      - qml6-module-qtquick-window
+      - qml6-module-qtqml-workerscript
+      - qml6-module-qttest
+      - qml6-module-qtquick-controls
+      - qml6-module-qtquick-templates
+      - qml6-module-qtquick-dialogs
+      - qml6-module-qtquick-layouts
     stage-packages:
       - libavcodec60
       - libavformat60
@@ -82,8 +132,19 @@ parts:
       - qml6-module-qtquick-window
     override-build: |
       set -eu
-      deb="$CRAFT_PART_SRC/licasa.deb"
+      cd "$CRAFT_PART_BUILD"
+      python3 tools/build_ubuntu_deb.py --jobs 4
+      deb="build/qualification/deb/licasa_${SNAPCRAFT_PROJECT_VERSION}-1_amd64.deb"
+      (cd build/qualification/deb && sha256sum --check "licasa_${SNAPCRAFT_PROJECT_VERSION}-1_amd64.deb.sha256")
       test "$(dpkg-deb --field "$deb" Version)" = "${SNAPCRAFT_PROJECT_VERSION}-1"
       dpkg-deb -x "$deb" "$CRAFT_PART_INSTALL"
       test -x "$CRAFT_PART_INSTALL/usr/bin/licasa"
       readelf -d "$CRAFT_PART_INSTALL/usr/bin/licasa" | grep -Fq 'libXext.so.6'
+      source_commit="$(git -C "$CRAFT_PROJECT_DIR" rev-parse HEAD)"
+      if [ -n "$(git -C "$CRAFT_PROJECT_DIR" status --porcelain)" ]; then
+        source_commit="${source_commit}-dirty"
+      fi
+      install -d "$CRAFT_PART_INSTALL/usr/share/licasa"
+      printf '%s\n' "$source_commit" > "$CRAFT_PART_INSTALL/usr/share/licasa/source-commit"
+      install -Dm755 "$CRAFT_PART_BUILD/snap/background-service" \
+        "$CRAFT_PART_INSTALL/usr/lib/licasa/background-service"

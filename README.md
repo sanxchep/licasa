@@ -15,13 +15,13 @@ Licasa is an image viewer and editor for the Linux desktop. It opens a photo fro
 
 ## Try Licasa
 
-**[Download the Ubuntu 24.04 package](https://github.com/sanxchep/licasa/releases/latest)** · [See the v0.1.0 release notes](https://github.com/sanxchep/licasa/releases/tag/v0.1.0)
+**[Download published packages](https://github.com/sanxchep/licasa/releases)** · [Read the 0.2.1 release notes](packaging/release-notes/v0.2.1.md)
 
 - View photos fullscreen or in a floating window, then crop, adjust, and export them.
 - Open JPEG, PNG, TIFF, WebP, HEIC/HEIF, JPEG XL, AVIF, JPEG 2000, and RAW previews.
 - Play Motion Photos and animated APNG files.
 
-Licasa is at its first release. If you try it, [report a bug or suggest a feature](https://github.com/sanxchep/licasa/issues/new).
+If you try it, [report a bug or suggest a feature](https://github.com/sanxchep/licasa/issues/new).
 
 ## Requirements
 
@@ -30,10 +30,10 @@ Licasa is at its first release. If you try it, [report a bug or suggest a featur
 
 ## Install
 
-Download `licasa_0.1.0-1_amd64.deb` from [Releases](https://github.com/sanxchep/licasa/releases) and install it with:
+When 0.2.1 is published, download `licasa_0.2.1-1_amd64.deb` from [Releases](https://github.com/sanxchep/licasa/releases) and install it with:
 
 ```sh
-sudo apt install ./licasa_0.1.0-1_amd64.deb
+sudo apt install ./licasa_0.2.1-1_amd64.deb
 ```
 
 You can then open Licasa from your application menu or run `licasa /path/to/photo.jpg`.
@@ -52,8 +52,8 @@ docker run --rm -v "$PWD:/source:ro" -v "$PWD/build/deb-output:/output" \
 The `.deb` and its SHA-256 file appear in `build/deb-output/`. To install the local build:
 
 ```sh
-(cd build/deb-output && sha256sum -c licasa_0.1.0-1_amd64.deb.sha256)
-sudo apt install ./build/deb-output/licasa_0.1.0-1_amd64.deb
+(cd build/deb-output && sha256sum -c licasa_0.2.1-1_amd64.deb.sha256)
+sudo apt install ./build/deb-output/licasa_0.2.1-1_amd64.deb
 ```
 
 ## Update
@@ -61,8 +61,8 @@ sudo apt install ./build/deb-output/licasa_0.1.0-1_amd64.deb
 Download the newer `.deb` and its `.sha256` file from [Releases](https://github.com/sanxchep/licasa/releases), then check and install them. Replace the filename with the published version:
 
 ```sh
-sha256sum -c licasa_0.1.0-1_amd64.deb.sha256
-sudo apt install ./licasa_0.1.0-1_amd64.deb
+sha256sum -c licasa_0.2.1-1_amd64.deb.sha256
+sudo apt install ./licasa_0.2.1-1_amd64.deb
 ```
 
 ## Uninstall
@@ -70,6 +70,17 @@ sudo apt install ./licasa_0.1.0-1_amd64.deb
 ```sh
 sudo apt remove licasa
 ```
+
+## Local Snap builds
+
+The Snap starts a per-user background service on install and restarts it on refresh. Snapd currently requires its experimental user-daemons setting for this service. Enable the setting once before installing a local Licasa Snap:
+
+```sh
+sudo snap set system experimental.user-daemons=true
+sudo snap install --dangerous ./licasa_0.2.1_amd64.snap
+```
+
+Removing the Snap stops its service. The system-wide Snapd setting remains enabled after removal.
 
 ## License
 

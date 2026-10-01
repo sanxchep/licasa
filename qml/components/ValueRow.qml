@@ -39,6 +39,37 @@ Item {
         : valueTitle.y + valueTitle.height
 
     height: Math.max(72, textBottom + 12 + controls.height)
+    activeFocusOnTab: enabled && visible
+
+    Accessible.role: Accessible.Slider
+    Accessible.name: title
+    Accessible.description: formattedValue()
+    Accessible.focusable: enabled && visible
+    Accessible.focused: activeFocus
+
+    Keys.onPressed: function(event) {
+        let nextValue = root.value
+        if (event.key === Qt.Key_Left || event.key === Qt.Key_Down)
+            nextValue -= root.step
+        else if (event.key === Qt.Key_Right || event.key === Qt.Key_Up)
+            nextValue += root.step
+        else if (event.key === Qt.Key_Home)
+            nextValue = root.from
+        else if (event.key === Qt.Key_End)
+            nextValue = root.to
+        else
+            return
+        root.valueChangedByUser(root.clampedValue(nextValue))
+        event.accepted = true
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        radius: 12
+        color: "transparent"
+        border.width: root.activeFocus ? 2 : 0
+        border.color: "#C8FFFFFF"
+    }
 
     Text {
         id: valueTitle
@@ -105,6 +136,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                onPressed: root.forceActiveFocus()
                 onClicked: {
                     const nextValue = root.clampedValue(root.value - root.step)
                     root.valueChangedByUser(nextValue)
@@ -167,6 +199,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                onPressed: root.forceActiveFocus()
                 onClicked: {
                     const nextValue = root.clampedValue(root.value + root.step)
                     root.valueChangedByUser(nextValue)
@@ -187,6 +220,7 @@ Item {
             }
 
             onPressed: function(mouse) {
+                root.forceActiveFocus()
                 updateValue(mouse.x)
             }
 

@@ -46,6 +46,22 @@ Item {
     signal coverFrameRequested()
 
     readonly property real clampedPosition: Math.max(0.0, Math.min(1.0, position))
+    readonly property bool keyboardFocusWithin: previousButton.activeFocus
+        || playButton.activeFocus || nextButton.activeFocus || scrubArea.activeFocus
+        || exportMotionButton.activeFocus || saveFrameButton.activeFocus
+        || coverFrameButton.activeFocus
+
+    Keys.onPressed: function(event) {
+        if (!root.canStep)
+            return
+        if (event.key === Qt.Key_Left)
+            root.stepRequested(-1)
+        else if (event.key === Qt.Key_Right)
+            root.stepRequested(1)
+        else
+            return
+        event.accepted = true
+    }
 
     function formatTimeMs(value) {
         const safeMs = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
@@ -88,6 +104,20 @@ Item {
                 width: 34
                 height: 34
                 radius: 17
+                activeFocusOnTab: root.enabled && root.canStep
+                border.width: activeFocus ? 2 : 0
+                border.color: "#C8FFFFFF"
+                Accessible.role: Accessible.Button
+                Accessible.name: "Previous frame"
+                Accessible.focusable: activeFocusOnTab
+                Accessible.focused: activeFocus
+                Accessible.onPressAction: root.stepRequested(-1)
+                Keys.onPressed: function(event) {
+                    if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
+                            && event.key !== Qt.Key_Enter) return
+                    if (!event.isAutoRepeat) root.stepRequested(-1)
+                    event.accepted = true
+                }
                 color: previousMouse.pressed ? "#44FFFFFF"
                     : previousMouse.containsMouse ? "#2EFFFFFF" : "transparent"
 
@@ -106,6 +136,7 @@ Item {
                     enabled: root.enabled && root.canStep
                     hoverEnabled: true
                     cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onPressed: previousButton.forceActiveFocus()
                     onClicked: root.stepRequested(-1)
                 }
             }
@@ -116,10 +147,22 @@ Item {
                 width: 38
                 height: 38
                 radius: 19
+                activeFocusOnTab: root.enabled
+                Accessible.role: Accessible.Button
+                Accessible.name: root.playing ? "Pause" : "Play"
+                Accessible.focusable: activeFocusOnTab
+                Accessible.focused: activeFocus
+                Accessible.onPressAction: root.togglePlaybackRequested()
+                Keys.onPressed: function(event) {
+                    if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
+                            && event.key !== Qt.Key_Enter) return
+                    if (!event.isAutoRepeat) root.togglePlaybackRequested()
+                    event.accepted = true
+                }
                 color: playMouse.pressed ? "#58FFFFFF"
                     : playMouse.containsMouse ? "#3AFFFFFF" : "#24FFFFFF"
-                border.width: 1
-                border.color: "#28FFFFFF"
+                border.width: activeFocus ? 2 : 1
+                border.color: activeFocus ? "#C8FFFFFF" : "#28FFFFFF"
 
                 Text {
                     anchors.centerIn: parent
@@ -137,6 +180,7 @@ Item {
                     enabled: root.enabled
                     hoverEnabled: true
                     cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onPressed: playButton.forceActiveFocus()
                     onClicked: root.togglePlaybackRequested()
                 }
             }
@@ -147,6 +191,20 @@ Item {
                 width: 34
                 height: 34
                 radius: 17
+                activeFocusOnTab: root.enabled && root.canStep
+                border.width: activeFocus ? 2 : 0
+                border.color: "#C8FFFFFF"
+                Accessible.role: Accessible.Button
+                Accessible.name: "Next frame"
+                Accessible.focusable: activeFocusOnTab
+                Accessible.focused: activeFocus
+                Accessible.onPressAction: root.stepRequested(1)
+                Keys.onPressed: function(event) {
+                    if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
+                            && event.key !== Qt.Key_Enter) return
+                    if (!event.isAutoRepeat) root.stepRequested(1)
+                    event.accepted = true
+                }
                 color: nextMouse.pressed ? "#44FFFFFF"
                     : nextMouse.containsMouse ? "#2EFFFFFF" : "transparent"
 
@@ -165,6 +223,7 @@ Item {
                     enabled: root.enabled && root.canStep
                     hoverEnabled: true
                     cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onPressed: nextButton.forceActiveFocus()
                     onClicked: root.stepRequested(1)
                 }
             }
@@ -178,6 +237,31 @@ Item {
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
             height: 34
+            activeFocusOnTab: root.enabled && root.canScrub
+            Accessible.role: Accessible.Slider
+            Accessible.name: "Timeline"
+            Accessible.focusable: activeFocusOnTab
+            Accessible.focused: activeFocus
+            Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Left)
+                    root.seekRequested(Math.max(0, root.clampedPosition - 0.02))
+                else if (event.key === Qt.Key_Right)
+                    root.seekRequested(Math.min(1, root.clampedPosition + 0.02))
+                else if (event.key === Qt.Key_Home)
+                    root.seekRequested(0)
+                else if (event.key === Qt.Key_End)
+                    root.seekRequested(1)
+                else return
+                event.accepted = true
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                radius: 8
+                color: "transparent"
+                border.width: scrubArea.activeFocus ? 2 : 0
+                border.color: "#C8FFFFFF"
+            }
 
             Rectangle {
                 id: scrubTrack
@@ -219,7 +303,10 @@ Item {
                     root.seekRequested(width > 0 ? localX / width : 0.0)
                 }
 
-                onPressed: function(mouse) { requestAt(mouse.x) }
+                onPressed: function(mouse) {
+                    scrubArea.forceActiveFocus()
+                    requestAt(mouse.x)
+                }
                 onPositionChanged: function(mouse) {
                     if (pressed)
                         requestAt(mouse.x)
@@ -237,10 +324,22 @@ Item {
             height: 30
             radius: 15
             visible: root.exportMotionVisible
+            activeFocusOnTab: root.enabled && root.canExportMotion && visible
+            Accessible.role: Accessible.Button
+            Accessible.name: "Export motion"
+            Accessible.focusable: activeFocusOnTab
+            Accessible.focused: activeFocus
+            Accessible.onPressAction: root.exportMotionRequested()
+            Keys.onPressed: function(event) {
+                if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
+                        && event.key !== Qt.Key_Enter) return
+                if (!event.isAutoRepeat) root.exportMotionRequested()
+                event.accepted = true
+            }
             color: exportMotionMouse.pressed ? "#58FFFFFF"
                 : exportMotionMouse.containsMouse ? "#3AFFFFFF" : "#24FFFFFF"
-            border.width: 1
-            border.color: "#28FFFFFF"
+            border.width: activeFocus ? 2 : 1
+            border.color: activeFocus ? "#C8FFFFFF" : "#28FFFFFF"
 
             Text {
                 anchors.centerIn: parent
@@ -257,6 +356,7 @@ Item {
                 enabled: root.enabled && root.canExportMotion
                 hoverEnabled: true
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onPressed: exportMotionButton.forceActiveFocus()
                 onClicked: root.exportMotionRequested()
             }
         }
@@ -271,10 +371,22 @@ Item {
             height: 30
             radius: 15
             visible: root.saveFrameVisible
+            activeFocusOnTab: root.enabled && root.canSaveFrame && visible
+            Accessible.role: Accessible.Button
+            Accessible.name: "Save frame"
+            Accessible.focusable: activeFocusOnTab
+            Accessible.focused: activeFocus
+            Accessible.onPressAction: root.saveFrameRequested()
+            Keys.onPressed: function(event) {
+                if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
+                        && event.key !== Qt.Key_Enter) return
+                if (!event.isAutoRepeat) root.saveFrameRequested()
+                event.accepted = true
+            }
             color: saveFrameMouse.pressed ? "#58FFFFFF"
                 : saveFrameMouse.containsMouse ? "#3AFFFFFF" : "#24FFFFFF"
-            border.width: 1
-            border.color: "#28FFFFFF"
+            border.width: activeFocus ? 2 : 1
+            border.color: activeFocus ? "#C8FFFFFF" : "#28FFFFFF"
 
             Text {
                 anchors.centerIn: parent
@@ -291,6 +403,7 @@ Item {
                 enabled: root.enabled && root.canSaveFrame
                 hoverEnabled: true
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onPressed: saveFrameButton.forceActiveFocus()
                 onClicked: root.saveFrameRequested()
             }
         }
@@ -306,11 +419,24 @@ Item {
             height: 30
             radius: 15
             visible: root.coverFrameVisible
+            activeFocusOnTab: root.enabled && root.canSetCoverFrame && visible
+            Accessible.role: Accessible.Button
+            Accessible.name: "Set cover frame"
+            Accessible.focusable: activeFocusOnTab
+            Accessible.focused: activeFocus
+            Accessible.onPressAction: root.coverFrameRequested()
+            Keys.onPressed: function(event) {
+                if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
+                        && event.key !== Qt.Key_Enter) return
+                if (!event.isAutoRepeat) root.coverFrameRequested()
+                event.accepted = true
+            }
             color: coverFrameMouse.pressed ? "#58FFFFFF"
                 : coverFrameMouse.containsMouse ? "#3AFFFFFF"
                 : root.coverFramePreferred ? "#34FFFFFF" : "#24FFFFFF"
-            border.width: 1
-            border.color: root.coverFramePreferred ? "#70FFFFFF" : "#28FFFFFF"
+            border.width: activeFocus ? 2 : 1
+            border.color: activeFocus ? "#C8FFFFFF"
+                : root.coverFramePreferred ? "#70FFFFFF" : "#28FFFFFF"
 
             Text {
                 anchors.centerIn: parent
@@ -328,6 +454,7 @@ Item {
                 enabled: root.enabled && root.canSetCoverFrame
                 hoverEnabled: true
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onPressed: coverFrameButton.forceActiveFocus()
                 onClicked: root.coverFrameRequested()
             }
         }

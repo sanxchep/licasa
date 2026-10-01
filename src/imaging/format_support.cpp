@@ -1,4 +1,6 @@
 #include "imaging/format_support.h"
+#include <QDir>
+#include <QDirIterator>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QImageWriter>
@@ -112,6 +114,55 @@ bool FormatSupport::canOpen(const QUrl& url) const
     // admission above cannot decide.
     QImageReader reader(fileInfo.absoluteFilePath());
     return reader.canRead();
+}
+
+QUrl FormatSupport::adjacentImage(const QUrl& current, int direction) const
+{
+    if (!current.isLocalFile() || direction == 0) {
+        return {};
+    }
+
+    const QFileInfo currentFile(current.toLocalFile());
+    const QDir folder(currentFile.absolutePath());
+    const QString currentName = currentFile.fileName();
+    const auto less = [](const QString& left, const QString& right) {
+        const int comparison = left.localeAwareCompare(right);
+        return comparison < 0 || (comparison == 0 && left < right);
+    };
+    QString first, last, before, after;
+    bool foundCurrent = false;
+    int count = 0;
+    QDirIterator entries(folder.absolutePath(),
+                         QDir::Files | QDir::Readable | QDir::NoDotAndDotDot);
+    while (entries.hasNext()) {
+        entries.next();
+        const QFileInfo entry = entries.fileInfo();
+        const QString name = entry.fileName();
+        if (!readableExtensions_.contains(entry.suffix().toLower()) && name != currentName) {
+            continue;
+        }
+        foundCurrent = foundCurrent || name == currentName;
+        ++count;
+        if (first.isEmpty() || less(name, first)) {
+            first = name;
+        }
+        if (last.isEmpty() || less(last, name)) {
+            last = name;
+        }
+        if (less(name, currentName) && (before.isEmpty() || less(before, name))) {
+            before = name;
+        }
+        if (less(currentName, name) && (after.isEmpty() || less(name, after))) {
+            after = name;
+        }
+    }
+
+    if (!foundCurrent || count < 2) {
+        return {};
+    }
+    const QString next =
+        direction > 0 ? (after.isEmpty() ? first : after) : (before.isEmpty() ? last : before);
+    return QUrl::fromLocalFile(folder.absoluteFilePath(next));
 }
 
 } // namespace Licasa

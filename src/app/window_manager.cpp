@@ -14,6 +14,7 @@
 #include "media/preferred_cover_frame_coordinator.h"
 #include "platform/graphics_backend.h"
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -338,6 +339,8 @@ void WindowManager::destroyAllWindows()
         delete window.data();
     }
 }
+
+void WindowManager::quitApplication() { QCoreApplication::exit(0); }
 
 void WindowManager::showAnyWindow()
 {
