@@ -15,7 +15,7 @@ Licasa is an image viewer and editor for the Linux desktop. It opens a photo fro
 
 ## Try Licasa
 
-**[Download published packages](https://github.com/sanxchep/licasa/releases)** · [Read the 0.2.1 release notes](packaging/release-notes/v0.2.1.md)
+**[Download published packages](https://github.com/sanxchep/licasa/releases)** · [Read the 0.2.6 release notes](packaging/release-notes/v0.2.6.md)
 
 - View photos fullscreen or in a floating window, then crop, adjust, and export them.
 - Open JPEG, PNG, TIFF, WebP, HEIC/HEIF, JPEG XL, AVIF, JPEG 2000, and RAW previews.
@@ -30,10 +30,10 @@ If you try it, [report a bug or suggest a feature](https://github.com/sanxchep/l
 
 ## Install
 
-When 0.2.1 is published, download `licasa_0.2.1-1_amd64.deb` from [Releases](https://github.com/sanxchep/licasa/releases) and install it with:
+Download `licasa_0.2.6-1_amd64.deb` from [Releases](https://github.com/sanxchep/licasa/releases) and install it with:
 
 ```sh
-sudo apt install ./licasa_0.2.1-1_amd64.deb
+sudo apt install ./licasa_0.2.6-1_amd64.deb
 ```
 
 You can then open Licasa from your application menu or run `licasa /path/to/photo.jpg`.
@@ -52,8 +52,8 @@ docker run --rm -v "$PWD:/source:ro" -v "$PWD/build/deb-output:/output" \
 The `.deb` and its SHA-256 file appear in `build/deb-output/`. To install the local build:
 
 ```sh
-(cd build/deb-output && sha256sum -c licasa_0.2.1-1_amd64.deb.sha256)
-sudo apt install ./build/deb-output/licasa_0.2.1-1_amd64.deb
+(cd build/deb-output && sha256sum -c licasa_0.2.6-1_amd64.deb.sha256)
+sudo apt install ./build/deb-output/licasa_0.2.6-1_amd64.deb
 ```
 
 ## Update
@@ -61,8 +61,8 @@ sudo apt install ./build/deb-output/licasa_0.2.1-1_amd64.deb
 Download the newer `.deb` and its `.sha256` file from [Releases](https://github.com/sanxchep/licasa/releases), then check and install them. Replace the filename with the published version:
 
 ```sh
-sha256sum -c licasa_0.2.1-1_amd64.deb.sha256
-sudo apt install ./licasa_0.2.1-1_amd64.deb
+sha256sum -c licasa_0.2.6-1_amd64.deb.sha256
+sudo apt install ./licasa_0.2.6-1_amd64.deb
 ```
 
 ## Uninstall
@@ -77,7 +77,7 @@ The Snap starts a per-user background service on install and restarts it on refr
 
 ```sh
 sudo snap set system experimental.user-daemons=true
-sudo snap install --dangerous ./licasa_0.2.1_amd64.snap
+sudo snap install --dangerous ./licasa_0.2.6_amd64.snap
 ```
 
 Removing the Snap stops its service. The system-wide Snapd setting remains enabled after removal.
