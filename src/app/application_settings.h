@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QObject>
+#include <QProcess>
 #include <QSettings>
+#include <QTimer>
 #include <QVariant>
 
 namespace Licasa {
@@ -9,16 +11,22 @@ namespace Licasa {
 class BackgroundModeManager final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool enabled READ enabled CONSTANT)
+    Q_PROPERTY(bool snapService READ snapService CONSTANT)
+    Q_PROPERTY(QString snapServiceStatus READ snapServiceStatus NOTIFY snapServiceStatusChanged)
 
   public:
     explicit BackgroundModeManager(QObject* parent = nullptr);
 
     bool supported() const;
     bool enabled() const;
+    bool snapService() const;
+    QString snapServiceStatus() const;
     void syncAutostart();
+    Q_INVOKABLE void refreshSnapServiceStatus();
 
   signals:
     void errorOccurred(const QString& message);
+    void snapServiceStatusChanged();
 
   private:
     static QString quoteDesktopExecArgument(QString argument);
@@ -28,6 +36,11 @@ class BackgroundModeManager final : public QObject {
     void reportError(const QString& message);
     bool writeAutostart();
     void removeLegacySnapAutostart();
+    void setSnapServiceStatus(const QString& status);
+
+    QProcess serviceCheck_;
+    QTimer serviceCheckTimeout_;
+    QString snapServiceStatus_ = QStringLiteral("checking");
 };
 
 class ViewerPreferences final : public QObject {

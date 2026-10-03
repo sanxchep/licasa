@@ -33,6 +33,7 @@ Window {
     property var animationController: null
     required property var nativeWindowOps
     required property var backgroundModeManager
+    property var appInfo: ({ version: Qt.application.version, releaseDate: "" })
     required property var viewerPreferences
     required property var windowManager
 
@@ -60,13 +61,18 @@ Window {
     readonly property bool persistentShell: windowSession.persistentShell
 
     property bool pendingImageReveal: false
+    property bool pendingNavigationFit: false
     property bool fullScreenMode: true
 
     property var currentImageUrl: null
     property var residentImageUrl: null
     property size naturalImageSize: Qt.size(0, 0)
+    // Metadata for the next file can arrive while the previous file is still
+    // painted. Keep its displayed geometry until the replacement is ready.
+    property size displayedNaturalImageSize: Qt.size(0, 0)
     property int imageRevision: 0
     property string currentFileName: ""
+    property string displayedFileName: ""
     property bool currentImageAnimated: false
     property bool currentPhotoHasMotion: false
     property string motionProbeRequestedUrl: ""
@@ -128,7 +134,7 @@ Window {
     readonly property real fullScreenWheelSensitivity: 1.0015
     readonly property real windowedWheelSensitivity: 1.0009
     readonly property real openFitPadding: 0.70
-    readonly property real editorFitPadding: 0.96
+    readonly property real editorFitPadding: 0.88
     readonly property real editorViewportMargin: 24
     readonly property real fullscreenRecoveryGrip: 48
     readonly property int zoomAnimationDurationMs: 160
@@ -140,6 +146,8 @@ Window {
     property real panY: 0
     property bool fitMode: true
     property real fitPadding: openFitPadding
+    property real lastReadyImageWidth: 0
+    property real lastReadyImageHeight: 0
 
     property bool previewPhase: false
     property bool imageLimitedToPreview: false
@@ -297,9 +305,10 @@ Window {
     }
 
     function imageWidth() {
-        if (naturalImageSize.width > 0 && naturalImageSize.height > 0) {
+        if (displayedNaturalImageSize.width > 0 && displayedNaturalImageSize.height > 0) {
             return croppedPixelExtent(
-                transformedNaturalWidth(displayedQuarterTurns),
+                normalizedQuarterTurns(displayedQuarterTurns) % 2 === 0
+                    ? displayedNaturalImageSize.width : displayedNaturalImageSize.height,
                 displayedCropX,
                 displayedCropWidth
             )
@@ -308,9 +317,10 @@ Window {
     }
 
     function imageHeight() {
-        if (naturalImageSize.width > 0 && naturalImageSize.height > 0) {
+        if (displayedNaturalImageSize.width > 0 && displayedNaturalImageSize.height > 0) {
             return croppedPixelExtent(
-                transformedNaturalHeight(displayedQuarterTurns),
+                normalizedQuarterTurns(displayedQuarterTurns) % 2 === 0
+                    ? displayedNaturalImageSize.height : displayedNaturalImageSize.width,
                 displayedCropY,
                 displayedCropHeight
             )
@@ -650,57 +660,25 @@ Window {
         return open ? editorSidePanel.workspaceBoundaryX : 0.0
     }
 
-    function setEditPanelOpen(open) {
-        const shouldOpen = open && root.fullScreenMode && root.hasAssignedImage()
-        if (editPanelOpen === shouldOpen
-                && Math.abs(editorWorkspaceInset - targetEditorWorkspaceInset(shouldOpen)) < 0.5) {
-            return
-        }
-
+    function animateWorkspaceFit(open) {
         cancelZoomAnimations()
         editorLayoutAnimation.stop()
-        if (!shouldOpen) {
-            editorSession.cancelCrop()
-            cropAspectPreset = "free"
-            cropAspectRatio = 0.0
-        } else {
-            fullscreenSideMenu.panelOpen = false
-            notificationCenter.historyOpen = false
-        }
-        const openingEditor = shouldOpen && !editPanelOpen
-        editPanelOpen = shouldOpen
+
+        const targetInset = targetEditorWorkspaceInset(open)
+        const targetPadding = open ? editorFitPadding : openFitPadding
+        fitMode = true
+        fitPadding = targetPadding
 
         if (!hasImage()) {
-            editorWorkspaceInset = targetEditorWorkspaceInset(shouldOpen)
+            editorWorkspaceInset = targetInset
             return
         }
 
-        if (openingEditor) {
-            // The current ready slot remains visible while the provider warms
-            // CUDA/OpenCL on its decode worker. The first slider movement then
-            // avoids paying driver/context/JIT startup synchronously.
-            editorComputeWarmupRevision += 1
-            refreshEditedPreviewSource()
-        }
-
-        const targetInset = targetEditorWorkspaceInset(shouldOpen)
-        const targetPadding = shouldOpen ? editorFitPadding : openFitPadding
-        const targetMargin = shouldOpen ? editorViewportMargin : 0.0
-        const targetWidth = Math.max(
-            1.0,
-            imageViewport.width - targetInset - targetMargin
+        const targetScale = ViewerMath.fitScaleForInsetWorkspace(
+            imageWidth(), imageHeight(), imageViewport.width, imageViewport.height,
+            targetInset, open ? editorViewportMargin : 0.0, targetPadding,
+            minScale, maxScale
         )
-        const targetHeight = Math.max(
-            1.0,
-            imageViewport.height - targetMargin * 2
-        )
-        const targetScale = scaleForBoundingBox(
-            targetWidth * targetPadding,
-            targetHeight * targetPadding
-        )
-
-        fitMode = true
-        fitPadding = targetPadding
         fullscreenTargetScale = targetScale
 
         editorInsetAnimation.from = editorWorkspaceInset
@@ -712,6 +690,43 @@ Window {
         editorPanYAnimation.from = panY
         editorPanYAnimation.to = 0.0
         editorLayoutAnimation.start()
+    }
+
+    function refitEditorWorkspace() {
+        if (editPanelOpen && fullScreenMode)
+            animateWorkspaceFit(true)
+    }
+
+    function setEditPanelOpen(open) {
+        const shouldOpen = open && root.fullScreenMode && root.hasAssignedImage()
+        if (editPanelOpen === shouldOpen
+                && Math.abs(editorWorkspaceInset - targetEditorWorkspaceInset(shouldOpen)) < 0.5) {
+            return
+        }
+
+        if (!shouldOpen) {
+            editorSession.cancelCrop()
+            cropAspectPreset = "free"
+            cropAspectRatio = 0.0
+            if (compareOriginal) {
+                compareOriginal = false
+                scheduleEditedPreviewRefresh()
+            }
+        } else {
+            fullscreenSideMenu.panelOpen = false
+            notificationCenter.historyOpen = false
+        }
+        const openingEditor = shouldOpen && !editPanelOpen
+        animateWorkspaceFit(shouldOpen)
+        editPanelOpen = shouldOpen
+
+        if (openingEditor && hasImage()) {
+            // The current ready slot remains visible while the provider warms
+            // CUDA/OpenCL on its decode worker. The first slider movement then
+            // avoids paying driver/context/JIT startup synchronously.
+            editorComputeWarmupRevision += 1
+            refreshEditedPreviewSource()
+        }
     }
 
     function closeEditorImmediately() {
@@ -874,8 +889,6 @@ Window {
         if (!hasImage() || editorCropMode)
             return
 
-        fitMode = true
-        fitPadding = editorFitPadding
         cropAspectPreset = "free"
         cropAspectRatio = 0.0
         editorSession.beginCrop()
@@ -1052,10 +1065,12 @@ Window {
         editorSession.applyPreset(name)
     }
 
-    function clearEditorSessionState(resetExportSettings) {
+    function clearEditorSessionState(resetExportSettings, preserveDisplayedGeometry) {
         editorSession.clear(resetExportSettings)
         cropAspectPreset = "free"
         cropAspectRatio = 0.0
+        if (preserveDisplayedGeometry)
+            return
         displayedQuarterTurns = 0
         displayedCropX = 0.0
         displayedCropY = 0.0
@@ -1082,7 +1097,9 @@ Window {
         currentImageUrl = null
         residentImageUrl = null
         naturalImageSize = Qt.size(0, 0)
+        displayedNaturalImageSize = Qt.size(0, 0)
         currentFileName = ""
+        displayedFileName = ""
         currentImageAnimated = false
         currentPhotoHasMotion = false
         motionProbeRequestedUrl = ""
@@ -1099,6 +1116,8 @@ Window {
         imageViewport.releaseStaticImages()
 
         currentScale = 1.0
+        lastReadyImageWidth = 0
+        lastReadyImageHeight = 0
         panX = 0
         panY = 0
         fitMode = true
@@ -1113,6 +1132,7 @@ Window {
         fullscreenStateValid = false
         fullscreenTargetScale = 1.0
         pendingImageReveal = false
+        pendingNavigationFit = false
 
         clearEditorSessionState(true)
         editorLayoutAnimation.stop()
@@ -1257,6 +1277,10 @@ Window {
             return
         }
 
+        const previousImageReady = imageViewport.imageStatus === Image.Ready
+        const preserveVisibleView = replaceCurrent === true && fullScreenMode && previousImageReady
+        pendingNavigationFit = preserveVisibleView
+
         if (hasAssignedImage()) {
             stopMotionPhotoPlaybackForLifecycle()
             windowManager.releasePictureResources()
@@ -1295,10 +1319,14 @@ Window {
             || shouldUsePreview()
         fullResTimer.stop()
 
-        fitMode = true
-        fitPadding = openFitPadding
-        panX = 0
-        panY = 0
+        if (!preserveVisibleView) {
+            fitMode = true
+            fitPadding = openFitPadding
+            panX = 0
+            panY = 0
+        }
+        lastReadyImageWidth = 0
+        lastReadyImageHeight = 0
 
         cancelZoomAnimations()
         windowedZoom.invalidateState()
@@ -1306,7 +1334,8 @@ Window {
         fullscreenSavedFitMode = true
         fullscreenSavedFitPadding = openFitPadding
 
-        clearEditorSessionState(true)
+        clearEditorSessionState(true, previousImageReady)
+        editorPreviewTimer.stop()
         editorLayoutAnimation.stop()
         editPanelOpen = false
         editorWorkspaceInset = 0.0
@@ -1588,7 +1617,8 @@ Window {
         motionProbeRequestedUrl = ""
         photoAssetProbe.cancel()
 
-        clearEditorSessionState(false)
+        clearEditorSessionState(false, imageViewport.imageStatus === Image.Ready)
+        editorPreviewTimer.stop()
 
         previewPhase = imageLimitedToPreview
             || (rawPreviewFirst && !rawFastPhase)
@@ -2408,6 +2438,7 @@ Window {
                 root.promoteFullRes()
                 return
             }
+            root.pendingNavigationFit = false
             const previewAvailable = root.hasImage()
             const openingImage = root.imageOpenStartedMs >= 0
                 && notificationCenter.isLoading("image")
@@ -2445,18 +2476,36 @@ Window {
 
         onImageReady: {
             const shouldReveal = root.pendingImageReveal
+            if (root.pendingNavigationFit) {
+                root.pendingNavigationFit = false
+                root.fitMode = true
+                root.fitPadding = root.openFitPadding
+                root.panX = 0
+                root.panY = 0
+            }
+            root.displayedNaturalImageSize = root.naturalImageSize
+            root.displayedFileName = root.currentFileName
             root.displayedQuarterTurns = root.effectiveEditorQuarterTurns()
             root.displayedCropX = root.effectiveEditorCropX()
             root.displayedCropY = root.effectiveEditorCropY()
             root.displayedCropWidth = root.effectiveEditorCropWidth()
             root.displayedCropHeight = root.effectiveEditorCropHeight()
 
+            const readyWidth = root.imageWidth()
+            const readyHeight = root.imageHeight()
+            const geometryChanged = Math.abs(readyWidth - root.lastReadyImageWidth) > 0.5
+                || Math.abs(readyHeight - root.lastReadyImageHeight) > 0.5
+            root.lastReadyImageWidth = readyWidth
+            root.lastReadyImageHeight = readyHeight
+
             if (root.fitMode) {
-                if (root.fullScreenMode)
-                    root.applyFit(root.fitPadding)
-                else
+                if (root.fullScreenMode) {
+                    if (geometryChanged && !editorLayoutAnimation.running)
+                        root.applyFit(root.fitPadding)
+                } else if (geometryChanged || shouldReveal) {
                     windowedZoom.applyOpenScale(shouldReveal)
-            } else if (!root.fullScreenMode) {
+                }
+            } else if (!root.fullScreenMode && geometryChanged) {
                 windowedZoom.applyState()
             }
 
@@ -2543,7 +2592,7 @@ Window {
         imageReady: root.hasImage()
         limitedToPreview: root.imageLimitedToPreview
 
-        currentFileName: root.currentFileName
+        currentFileName: root.displayedFileName
         imageWidth: root.imageWidth()
         imageHeight: root.imageHeight()
         currentScale: root.currentScale
@@ -2713,6 +2762,9 @@ Window {
         anchors.fill: parent
         z: 1000
         fullscreen: root.fullScreenMode
+        backgroundModeManager: root.backgroundModeManager
+        appVersion: root.appInfo.version
+        releaseDate: root.appInfo.releaseDate
         onPanelOpenChanged: {
             if (panelOpen)
                 notificationCenter.historyOpen = false
@@ -2867,6 +2919,8 @@ Window {
         onPanelOpenChangedByUser: function(open) {
             root.setEditPanelOpen(open)
         }
+
+        onToolActivated: root.refitEditorWorkspace()
 
         onExposureRequested: function(value) {
             editorSession.setAdjustment("exposure", value)
@@ -3066,7 +3120,12 @@ Window {
         }
 
         onFinished: {
-            root.currentScale = root.fullscreenTargetScale
+            if (root.fitMode && root.hasImage()) {
+                root.currentScale = root.fitScaleFor(root.fitPadding)
+                root.fullscreenTargetScale = root.currentScale
+            } else {
+                root.currentScale = root.fullscreenTargetScale
+            }
             root.panX = 0.0
             root.panY = 0.0
             root.recoverFullscreenImageIfLost()

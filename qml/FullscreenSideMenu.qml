@@ -20,6 +20,9 @@ Item {
     property bool infoOverlayEnabled: true
     property bool smoothMotionEnabled: true
     property bool startInFullscreenEnabled: true
+    property var backgroundModeManager: null
+    property string appVersion: ""
+    property string releaseDate: ""
 
     property real fullscreenBackgroundOpacity: 0.70
     property bool transparencyCheckerboardEnabled: false
@@ -128,15 +131,27 @@ Item {
             panelOpen = false
     }
     onPanelOpenChanged: {
-        if (panelOpen)
+        if (panelOpen) {
             menuButton.forceActiveFocus()
+            if (backgroundModeManager && backgroundModeManager.snapService)
+                backgroundModeManager.refreshSnapServiceStatus()
+        }
+    }
+
+    Timer {
+        interval: 15000
+        repeat: true
+        running: root.panelOpen && root.backgroundModeManager
+            && root.backgroundModeManager.snapService
+        onTriggered: root.backgroundModeManager.refreshSnapServiceStatus()
     }
 
     Rectangle {
         id: scrim
+        objectName: "settingsScrim"
         anchors.fill: parent
         color: "#66000000"
-        visible: root.panelOpen
+        visible: root.panelOpen || opacity > 0
         opacity: root.panelOpen ? 1 : 0
 
         Behavior on opacity {
@@ -281,6 +296,72 @@ Item {
 
                         onToggled: function(value) {
                             root.startInFullscreenChanged(value)
+                        }
+                    }
+
+                    Rectangle {
+                        id: backgroundServiceRow
+                        objectName: "backgroundServiceRow"
+                        visible: root.backgroundModeManager
+                            && root.backgroundModeManager.snapService
+                        width: parent.width
+                        height: 62
+                        radius: 14
+                        color: "#1F1F1F"
+                        border.width: 1
+                        border.color: "#1EFFFFFF"
+
+                        readonly property string serviceStatus:
+                            root.backgroundModeManager
+                                ? root.backgroundModeManager.snapServiceStatus
+                                : "unavailable"
+                        readonly property color statusColor: serviceStatus === "active"
+                            ? "#34C759" : serviceStatus === "checking"
+                                ? "#99FFFFFF" : "#FF453A"
+
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: "Background service"
+                        Accessible.description: serviceStatusText.text
+
+                        Text {
+                            id: serviceTitle
+                            anchors.left: parent.left
+                            anchors.right: serviceDot.left
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 12
+                            anchors.top: parent.top
+                            anchors.topMargin: 11
+                            text: "Background service"
+                            color: "white"
+                            font.pixelSize: 14
+                            font.weight: Font.Medium
+                        }
+
+                        Text {
+                            id: serviceStatusText
+                            objectName: "backgroundServiceStatusText"
+                            anchors.left: serviceTitle.left
+                            anchors.top: serviceTitle.bottom
+                            anchors.topMargin: 3
+                            text: backgroundServiceRow.serviceStatus === "active"
+                                ? "Running" : backgroundServiceRow.serviceStatus === "inactive"
+                                    ? "Not running"
+                                    : backgroundServiceRow.serviceStatus === "checking"
+                                        ? "Checking…" : "Can't check status"
+                            color: backgroundServiceRow.statusColor
+                            font.pixelSize: 11
+                        }
+
+                        Rectangle {
+                            id: serviceDot
+                            objectName: "backgroundServiceStatusDot"
+                            width: 12
+                            height: 12
+                            radius: 6
+                            anchors.right: parent.right
+                            anchors.rightMargin: 16
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: backgroundServiceRow.statusColor
                         }
                     }
 
@@ -524,6 +605,23 @@ Item {
                             onValueChangedByUser: function(value) {
                                 root.animationSpeedRequested(value)
                             }
+                        }
+                    }
+
+                    SectionCard {
+                        objectName: "aboutSection"
+                        width: parent.width
+                        title: "About Licasa"
+                        subtitle: "Version " + root.appVersion
+                        contentTopSpacing: 4
+
+                        Text {
+                            objectName: "aboutReleaseDate"
+                            visible: root.releaseDate.length > 0
+                            width: parent.width
+                            text: "Released " + root.releaseDate
+                            color: "#B3FFFFFF"
+                            font.pixelSize: 12
                         }
                     }
                 }

@@ -5,6 +5,7 @@ Rectangle {
 
     required property string title
     property string subtitle: ""
+    property real contentTopSpacing: 14
     default property alias content: bodyColumn.data
 
     radius: 22
@@ -15,7 +16,7 @@ Rectangle {
     implicitHeight: 16
         + sectionTitle.implicitHeight
         + (sectionSubtitle.visible ? 3 + sectionSubtitle.implicitHeight : 0)
-        + 14
+        + contentTopSpacing
         + bodyColumn.implicitHeight
         + 16
 
@@ -51,8 +52,8 @@ Rectangle {
         id: bodyColumn
         x: 16
         y: sectionSubtitle.visible
-            ? sectionSubtitle.y + sectionSubtitle.implicitHeight + 14
-            : sectionTitle.y + sectionTitle.implicitHeight + 14
+            ? sectionSubtitle.y + sectionSubtitle.implicitHeight + root.contentTopSpacing
+            : sectionTitle.y + sectionTitle.implicitHeight + root.contentTopSpacing
         width: parent.width - 32
         spacing: 12
     }

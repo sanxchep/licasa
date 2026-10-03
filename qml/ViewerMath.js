@@ -17,6 +17,15 @@ function fitScale(imageWidth, imageHeight, maxWidth, maxHeight, minimumScale, ma
     return clamp(Math.min(horizontalScale, verticalScale), minimumScale, maximumScale)
 }
 
+function fitScaleForInsetWorkspace(imageWidth, imageHeight, viewportWidth, viewportHeight,
+                                   leftInset, margin, padding, minimumScale, maximumScale) {
+    const availableWidth = Math.max(1, viewportWidth - leftInset - margin)
+    const availableHeight = Math.max(1, viewportHeight - margin * 2)
+    return fitScale(imageWidth, imageHeight,
+        availableWidth * padding, availableHeight * padding,
+        minimumScale, maximumScale)
+}
+
 function wheelFactor(sensitivity, rawDelta, maximumDelta) {
     if (!Number.isFinite(sensitivity) || sensitivity <= 0
             || !Number.isFinite(rawDelta))

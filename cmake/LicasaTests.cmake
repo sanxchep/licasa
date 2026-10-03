@@ -530,6 +530,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_tests_properties(licasa_release_hardening PROPERTIES LABELS "security;packaging")
     if(LICASA_BUILD_DIAGNOSTICS)
         list(APPEND LICASA_TEST_TARGETS licasa_diagnostics)
+        add_test(NAME licasa_navigation_transition
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_navigation_transition.py
+                $<TARGET_FILE:licasa_diagnostics>
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test-assets/dimensions/odd-photo-997x613.png
+                ${CMAKE_CURRENT_SOURCE_DIR}/assets/licasa.png)
+        set_tests_properties(licasa_navigation_transition PROPERTIES
+                TIMEOUT 25 LABELS "integration;navigation;qml")
         if(LICASA_ENABLE_RAW)
             list(APPEND LICASA_RAW_TEST_TARGETS licasa_diagnostics)
             add_test(NAME licasa_raw_viewer_behavior

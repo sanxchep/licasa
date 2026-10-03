@@ -62,6 +62,7 @@ Item {
     property int outputHeight: 0
 
     signal panelOpenChangedByUser(bool open)
+    signal toolActivated(string tool)
     signal exposureRequested(real value)
     signal contrastRequested(real value)
     signal highlightsRequested(real value)
@@ -111,6 +112,7 @@ Item {
             return
         activeTool = tool
         flick.contentY = 0
+        toolActivated(tool)
     }
 
     function scrollByPage(direction) {
@@ -137,8 +139,10 @@ Item {
     }
 
     onPanelOpenChanged: {
-        if (panelOpen && toolTabRepeater.count > 0)
-            toolTabRepeater.itemAt(0).forceActiveFocus()
+        if (!panelOpen || toolTabRepeater.count === 0)
+            return
+        const toolIndex = ["adjust", "crop", "looks", "export"].indexOf(activeTool)
+        toolTabRepeater.itemAt(Math.max(0, toolIndex)).forceActiveFocus()
     }
 
     function scrollEditorByWheel(wheel) {
@@ -173,6 +177,7 @@ Item {
     RoundIconButton {
         id: editorButton
         visible: root.hasImage && !root.panelOpen
+            && panel.x <= -panel.width - 17
         width: root.cornerControlSize
         height: width
         anchors.left: parent.left
@@ -192,7 +197,7 @@ Item {
         x: panel.x - 6
         y: panel.y - 6
         radius: panel.radius + 6
-        visible: root.panelOpen
+        visible: root.panelOpen || panel.x > -panel.width - 17
         color: "#26000000"
     }
 
@@ -311,6 +316,7 @@ Item {
 
                     Rectangle {
                         required property var modelData
+                        objectName: "editorToolTab_" + modelData.key
 
                         readonly property bool selected: root.activeTool === modelData.key
                         readonly property bool available: !root.cropMode || modelData.key === "crop"
@@ -603,13 +609,63 @@ Item {
                     spacing: 8
 
                     Rectangle {
+                        id: originalCompareButton
+                        objectName: "editorOriginalCompareButton"
+                        property bool heldByKeyboard: false
                         width: 104
                         height: parent.height
                         radius: height / 2
                         color: originalMouse.pressed || root.compareOriginal
                             ? "#40FFFFFF" : "#18FFFFFF"
                         border.width: 1
-                        border.color: "#28FFFFFF"
+                        border.color: activeFocus ? "#C8FFFFFF" : "#28FFFFFF"
+                        activeFocusOnTab: root.panelOpen && !root.cropMode
+
+                        Accessible.role: Accessible.CheckBox
+                        Accessible.name: "Compare with original"
+                        Accessible.description: "Hold Space or Enter for a temporary comparison"
+                        Accessible.checked: root.compareOriginal
+                        Accessible.focusable: activeFocusOnTab
+                        Accessible.focused: activeFocus
+                        Accessible.onPressAction: {
+                            if (root.compareOriginal)
+                                root.compareOriginalReleased()
+                            else
+                                root.compareOriginalPressed()
+                        }
+
+                        Keys.onPressed: function(event) {
+                            if ((event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
+                                    && event.key !== Qt.Key_Enter) || event.isAutoRepeat)
+                                return
+                            heldByKeyboard = true
+                            root.compareOriginalPressed()
+                            event.accepted = true
+                        }
+
+                        Keys.onReleased: function(event) {
+                            if (!heldByKeyboard || (event.key !== Qt.Key_Space
+                                    && event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter)
+                                    || event.isAutoRepeat)
+                                return
+                            heldByKeyboard = false
+                            root.compareOriginalReleased()
+                            event.accepted = true
+                        }
+
+                        onActiveFocusChanged: {
+                            if (!activeFocus && heldByKeyboard) {
+                                heldByKeyboard = false
+                                root.compareOriginalReleased()
+                            }
+                        }
+
+                        onVisibleChanged: {
+                            if (!visible && heldByKeyboard) {
+                                heldByKeyboard = false
+                                root.compareOriginalReleased()
+                            }
+                        }
 
                         Text {
                             anchors.centerIn: parent
@@ -625,7 +681,10 @@ Item {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onPressed: root.compareOriginalPressed()
+                            onPressed: {
+                                originalCompareButton.forceActiveFocus()
+                                root.compareOriginalPressed()
+                            }
                             onReleased: root.compareOriginalReleased()
                             onCanceled: root.compareOriginalReleased()
                         }

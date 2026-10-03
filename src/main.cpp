@@ -19,8 +19,10 @@
 #include "platform/single_instance.h"
 
 #include <QCoreApplication>
+#include <QDate>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QLocale>
 #include <QQmlApplicationEngine>
 #include <QVariantMap>
 
@@ -36,6 +38,16 @@ int main(int argc, char* argv[])
     application.setOrganizationName(QString::fromLatin1(Licasa::Constants::organizationName));
     application.setDesktopFileName(QString::fromLatin1(Licasa::Constants::desktopFileName));
     application.setWindowIcon(QIcon(QStringLiteral(":/assets/licasa.png")));
+    const bool installedAsSnap = qEnvironmentVariableIsSet("SNAP_NAME");
+    const QString snapVersion = installedAsSnap ? qEnvironmentVariable("SNAP_VERSION") : QString{};
+    const QString installedVersion =
+        snapVersion.isEmpty() ? QStringLiteral(LICASA_VERSION) : snapVersion;
+    application.setApplicationVersion(installedVersion);
+    const QDate releaseDate = QDate::fromString(QStringLiteral(LICASA_RELEASE_DATE), Qt::ISODate);
+    const QVariantMap appInfo{
+        {QStringLiteral("version"), installedVersion},
+        {QStringLiteral("releaseDate"),
+         QLocale(QLocale::English).toString(releaseDate, QStringLiteral("d MMMM yyyy"))}};
 
     const Licasa::LaunchOptions options = Licasa::parseLaunchOptions(application.arguments());
     if (Licasa::forwardLaunchToExistingInstance(options)) {
@@ -57,6 +69,7 @@ int main(int argc, char* argv[])
                             imageAnimationService.createFrameProvider());
 
     const QVariantMap sharedWindowProperties{
+        {QStringLiteral("appInfo"), appInfo},
         {QStringLiteral("imageProbe"), QVariant::fromValue(static_cast<QObject*>(&imageProbe))},
         {QStringLiteral("formatSupport"),
          QVariant::fromValue(static_cast<QObject*>(&formatSupport))},

@@ -5,9 +5,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Licasa
-        VERSION 0.2.1
+        VERSION 0.2.6
         LANGUAGES CXX
 )
+set(LICASA_RELEASE_DATE "2026-10-02")
 
 # Qt 6 requires C++17 or newer.
 set(CMAKE_CXX_STANDARD 17)
@@ -468,6 +469,9 @@ set(LICASA_APPLICATION_SOURCES
         src/app/window_media_state.h
 )
 qt_add_executable(licasa src/main.cpp ${LICASA_APPLICATION_SOURCES})
+target_compile_definitions(licasa PRIVATE
+        "LICASA_VERSION=\"${PROJECT_VERSION}\""
+        "LICASA_RELEASE_DATE=\"${LICASA_RELEASE_DATE}\"")
 if(LICASA_ENABLE_MOTION_PLAYBACK)
     # Keep the already-qualified player implementation reusable by both its
     # direct integration tests and the private runtime module. The main viewer
@@ -652,6 +656,7 @@ if(LICASA_BUILD_DIAGNOSTICS)
             tools/diagnostics_common.cpp
             tools/diagnostics_raw_behavior.cpp
             tools/diagnostics_motion_controls.cpp
+            tools/diagnostics_navigation_transition.cpp
             tools/diagnostics_viewer_measurement.cpp
             ${LICASA_APPLICATION_SOURCES})
     target_include_directories(licasa_diagnostics PRIVATE src)

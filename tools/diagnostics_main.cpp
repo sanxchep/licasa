@@ -129,6 +129,7 @@ int main(int argc, char** argv)
     parser.addOption({"formats", "Report runtime formats and decode the supplied samples."});
     parser.addOption(
         {"viewer", "Measure the production QML viewer (use an isolated XDG_CONFIG_HOME)."});
+    parser.addOption({"navigation", "Check the visible image while browsing to a second image."});
     parser.addOption({"raw-behavior", "Verify progressive RAW preview and automatic full "
                                       "development in the production viewer."});
     parser.addOption(
@@ -156,7 +157,9 @@ int main(int argc, char** argv)
     if (parser.isSet("formats")) {
         return inspectFormats(parser.positionalArguments(), policy);
     }
-    if (!parser.isSet("viewer") || parser.positionalArguments().size() > 1 ||
+    const bool navigation = parser.isSet("navigation");
+    if (!parser.isSet("viewer") || parser.positionalArguments().size() > (navigation ? 2 : 1) ||
+        (navigation && parser.positionalArguments().size() != 2) ||
         (parser.isSet("raw-preview-only") && parser.isSet("raw-edit-only"))) {
         parser.showHelp(2);
     }
@@ -194,7 +197,11 @@ int main(int argc, char** argv)
     engine.addImageProvider(QString::fromLatin1(Licasa::Constants::imageProviderName),
                             decodeProvider);
     std::unique_ptr<LicasaDiagnostics::DiagnosticCheck> check;
-    if (parser.isSet("raw-behavior")) {
+    if (navigation) {
+        const QUrl nextUrl =
+            QUrl::fromLocalFile(QFileInfo(parser.positionalArguments().at(1)).absoluteFilePath());
+        check = LicasaDiagnostics::makeNavigationTransitionCheck(nextUrl);
+    } else if (parser.isSet("raw-behavior")) {
         check = LicasaDiagnostics::makeRawBehaviorCheck(parser.isSet("raw-preview-only"),
                                                         parser.isSet("raw-edit-only"));
     } else if (parser.isSet("motion-photo-controls")) {

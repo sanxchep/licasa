@@ -24,5 +24,6 @@ std::unique_ptr<DiagnosticCheck> makeRawBehaviorCheck(bool previewOnly, bool edi
 std::unique_ptr<DiagnosticCheck> makeMotionPhotoControlsCheck();
 std::unique_ptr<DiagnosticCheck> makeViewerMeasurement(qint64 started, const QUrl& imageUrl,
                                                        int cycles);
+std::unique_ptr<DiagnosticCheck> makeNavigationTransitionCheck(const QUrl& nextImageUrl);
 
 } // namespace LicasaDiagnostics

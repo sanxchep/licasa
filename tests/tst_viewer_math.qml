@@ -17,6 +17,28 @@ TestCase {
         compare(ViewerMath.fitScale(100, 100, 10000, 10000, 0.02, 16.0), 16.0)
     }
 
+    function test_editorFitStaysInsideSpaceBesidePanel() {
+        const viewportWidth = 1600
+        const viewportHeight = 900
+        const panelBoundary = 420
+        const margin = 24
+        const padding = 0.88
+        const availableWidth = viewportWidth - panelBoundary - margin
+        const availableHeight = viewportHeight - margin * 2
+
+        for (const size of [[4000, 3000], [3000, 4000], [6000, 2000]]) {
+            const scale = ViewerMath.fitScaleForInsetWorkspace(
+                size[0], size[1], viewportWidth, viewportHeight,
+                panelBoundary, margin, padding, 0.02, 16.0)
+            const scaledWidth = size[0] * scale
+            const scaledHeight = size[1] * scale
+            verify(scaledWidth <= availableWidth * padding + 0.01)
+            verify(scaledHeight <= availableHeight * padding + 0.01)
+            fuzzyCompare(Math.max(scaledWidth / availableWidth,
+                                  scaledHeight / availableHeight), padding, 0.000001)
+        }
+    }
+
     function test_wheelFactorIsBoundedAndSymmetric() {
         const zoomIn = ViewerMath.wheelFactor(1.001, 500, 120)
         const zoomOut = ViewerMath.wheelFactor(1.001, -500, 120)

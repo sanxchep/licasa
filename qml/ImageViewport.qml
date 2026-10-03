@@ -84,6 +84,7 @@ Item {
     property int activeImageSlot: -1
     property int pendingImageSlot: -1
     property int fadingImageSlot: -1
+    property rect fadingViewportRect: Qt.rect(0, 0, 0, 0)
     property string pendingRequestKey: ""
     property string speculativeFullKey: ""
     readonly property string parallelPairOrigin: String(Math.random()).slice(2)
@@ -283,6 +284,12 @@ Item {
         const targetSlot = activeImageSlot === 0 ? 1 : 0
         const target = targetSlot === 0 ? photoA : photoB
 
+        // A rapid second edit can reuse the slot that is still fading out.
+        // Finish that handoff before replacing its source; the current image
+        // remains fully visible underneath throughout the next decode.
+        if (targetSlot === fadingImageSlot)
+            retireFadingImage()
+
         pendingImageSlot = targetSlot
         pendingRequestKey = key
         imageLoadFailed = false
@@ -292,6 +299,10 @@ Item {
                 ? Qt.size(root.previewSourceWidth, root.previewSourceHeight)
                 : Qt.size(0, 0)
         target.source = key
+        // A superseded request can leave this slot already decoded for the
+        // same key. Reassigning an unchanged source emits no status change.
+        if (target.status === Image.Ready)
+            completeImageRequest(targetSlot)
     }
 
     function releaseStaticImages() {
@@ -311,11 +322,50 @@ Item {
         photoC.sourceSize = Qt.size(0, 0)
     }
 
+    function retireFadingImage() {
+        const slot = fadingImageSlot
+        if (slot < 0)
+            return
+        progressiveFadeCleanup.stop()
+        fadingImageSlot = -1
+        if (slot === activeImageSlot || slot === pendingImageSlot)
+            return
+        const image = slot === 0 ? photoA : slot === 1 ? photoB : photoC
+        image.source = ""
+        image.sourceSize = Qt.size(0, 0)
+    }
+
+    function pendingRequestIsCurrent(slot) {
+        if (pendingRequestKey.length === 0)
+            return true
+        if (pendingRequestKey === requestKey())
+            return true
+        return slot === 2 && !previewPhase && !rawFastPhase
+            && pendingRequestKey === fullRequestKey()
+    }
+
     function completeImageRequest(slot) {
         if (slot !== pendingImageSlot)
             return
+        if (!pendingRequestIsCurrent(slot)) {
+            pendingImageSlot = -1
+            pendingRequestKey = ""
+            imageRequestTimer.restart()
+            return
+        }
 
+        retireFadingImage()
         const previousSlot = activeImageSlot
+        if (previousSlot >= 0 && previousSlot !== slot) {
+            // The new image can have a different fit or aspect ratio. Keep the
+            // outgoing image at its last on-screen bounds during the fade.
+            fadingViewportRect = Qt.rect(
+                renderedImageX, renderedImageY,
+                fullScreenMode ? imageWidth * currentScale : width,
+                fullScreenMode ? imageHeight * currentScale : height
+            )
+            fadingImageSlot = previousSlot
+        }
         activeImageSlot = slot
         pendingImageSlot = -1
         pendingRequestKey = ""
@@ -323,12 +373,8 @@ Item {
         if (slot === 2)
             speculativeFullKey = ""
 
-        if (previousSlot >= 0 && previousSlot !== slot) {
-            fadingImageSlot = previousSlot
+        if (fadingImageSlot >= 0)
             progressiveFadeCleanup.restart()
-        } else {
-            fadingImageSlot = -1
-        }
 
         root.imageReady()
     }
@@ -336,6 +382,12 @@ Item {
     function failImageRequest(slot) {
         if (slot !== pendingImageSlot)
             return
+        if (!pendingRequestIsCurrent(slot)) {
+            pendingImageSlot = -1
+            pendingRequestKey = ""
+            imageRequestTimer.restart()
+            return
+        }
         pendingImageSlot = -1
         pendingRequestKey = ""
         imageLoadFailed = activeImageSlot < 0
@@ -377,15 +429,7 @@ Item {
         id: progressiveFadeCleanup
         interval: root.progressiveFadeDurationMs + 20
         repeat: false
-        onTriggered: {
-            const slot = root.fadingImageSlot
-            root.fadingImageSlot = -1
-            if (slot < 0 || slot === root.activeImageSlot || slot === root.pendingImageSlot)
-                return
-            const image = slot === 0 ? photoA : slot === 1 ? photoB : photoC
-            image.source = ""
-            image.sourceSize = Qt.size(0, 0)
-        }
+        onTriggered: root.retireFadingImage()
     }
 
     function imageRight() {
@@ -529,12 +573,25 @@ Item {
         scale: root.fullScreenMode ? root.currentScale : 1.0
         transformOrigin: Item.TopLeft
 
+        readonly property real fadingScale: Math.max(0.0001, scale)
+        readonly property real fadingX: (root.fadingViewportRect.x - x) / fadingScale
+        readonly property real fadingY: (root.fadingViewportRect.y - y) / fadingScale
+        readonly property real fadingWidth: root.fadingViewportRect.width / fadingScale
+        readonly property real fadingHeight: root.fadingViewportRect.height / fadingScale
+
         Image {
             id: photoA
-            anchors.fill: parent
+            objectName: "staticImageA"
+            x: root.fadingImageSlot === 0 && root.fullScreenMode ? imageStage.fadingX : 0
+            y: root.fadingImageSlot === 0 && root.fullScreenMode ? imageStage.fadingY : 0
+            width: root.fadingImageSlot === 0 && root.fullScreenMode
+                ? imageStage.fadingWidth : parent.width
+            height: root.fadingImageSlot === 0 && root.fullScreenMode
+                ? imageStage.fadingHeight : parent.height
             visible: (root.activeImageSlot === 0 || root.fadingImageSlot === 0)
                 && !root.animatedFrameReady
-            opacity: root.activeImageSlot === 0 ? 1.0 : 0.0
+            z: root.fadingImageSlot === 0 ? 1 : 0
+            opacity: root.fadingImageSlot === 0 && root.activeImageSlot !== 0 ? 0.0 : 1.0
             asynchronous: true
             cache: false
             smooth: root.smoothScalingEnabled
@@ -542,6 +599,7 @@ Item {
             fillMode: Image.Stretch
 
             Behavior on opacity {
+                enabled: root.fadingImageSlot === 0
                 NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
             }
 
@@ -555,10 +613,17 @@ Item {
 
         Image {
             id: photoB
-            anchors.fill: parent
+            objectName: "staticImageB"
+            x: root.fadingImageSlot === 1 && root.fullScreenMode ? imageStage.fadingX : 0
+            y: root.fadingImageSlot === 1 && root.fullScreenMode ? imageStage.fadingY : 0
+            width: root.fadingImageSlot === 1 && root.fullScreenMode
+                ? imageStage.fadingWidth : parent.width
+            height: root.fadingImageSlot === 1 && root.fullScreenMode
+                ? imageStage.fadingHeight : parent.height
             visible: (root.activeImageSlot === 1 || root.fadingImageSlot === 1)
                 && !root.animatedFrameReady
-            opacity: root.activeImageSlot === 1 ? 1.0 : 0.0
+            z: root.fadingImageSlot === 1 ? 1 : 0
+            opacity: root.fadingImageSlot === 1 && root.activeImageSlot !== 1 ? 0.0 : 1.0
             asynchronous: true
             cache: false
             smooth: root.smoothScalingEnabled
@@ -566,6 +631,7 @@ Item {
             fillMode: Image.Stretch
 
             Behavior on opacity {
+                enabled: root.fadingImageSlot === 1
                 NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
             }
 
@@ -579,10 +645,17 @@ Item {
 
         Image {
             id: photoC
-            anchors.fill: parent
+            objectName: "staticImageC"
+            x: root.fadingImageSlot === 2 && root.fullScreenMode ? imageStage.fadingX : 0
+            y: root.fadingImageSlot === 2 && root.fullScreenMode ? imageStage.fadingY : 0
+            width: root.fadingImageSlot === 2 && root.fullScreenMode
+                ? imageStage.fadingWidth : parent.width
+            height: root.fadingImageSlot === 2 && root.fullScreenMode
+                ? imageStage.fadingHeight : parent.height
             visible: (root.activeImageSlot === 2 || root.fadingImageSlot === 2)
                 && !root.animatedFrameReady
-            opacity: root.activeImageSlot === 2 ? 1.0 : 0.0
+            z: root.fadingImageSlot === 2 ? 1 : 0
+            opacity: root.fadingImageSlot === 2 && root.activeImageSlot !== 2 ? 0.0 : 1.0
             asynchronous: true
             cache: false
             smooth: root.smoothScalingEnabled
@@ -590,6 +663,7 @@ Item {
             fillMode: Image.Stretch
 
             Behavior on opacity {
+                enabled: root.fadingImageSlot === 2
                 NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
             }
 
@@ -672,11 +746,14 @@ Item {
 
     Rectangle {
         id: emptyState
+        objectName: "emptyImageState"
         anchors.centerIn: parent
+        readonly property bool compact: root.width < 320 || root.height < 200
         visible: !root.presentationOnly && root.imageStatus !== Image.Ready
+            && root.width >= 180 && root.height >= 110
         z: 20
-        width: Math.min(420, Math.max(280, parent.width - 32))
-        height: 176
+        width: Math.min(420, Math.max(0, parent.width - 24))
+        height: Math.min(parent.height - 24, compact ? 104 : 176)
         radius: 24
         color: Qt.rgba(18 / 255, 20 / 255, 24 / 255, 0.94)
         border.width: 1
@@ -685,25 +762,26 @@ Item {
 
         Column {
             anchors.centerIn: parent
-            spacing: 14
+            spacing: emptyState.compact ? 8 : 14
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 color: "#f2f2f2"
-                font.pixelSize: 20
+                font.pixelSize: emptyState.compact ? 16 : 20
                 font.weight: Font.DemiBold
                 renderType: Text.NativeRendering
                 horizontalAlignment: Text.AlignHCenter
                 text: root.imageStatus === Image.Loading
                     ? "Opening image…"
                     : root.imageStatus === Image.Error
-                        ? "That image could not be opened"
-                        : "Drop an image here"
+                        ? emptyState.compact ? "Open failed"
+                                             : "That image could not be opened"
+                        : emptyState.compact ? "Open an image" : "Drop an image here"
             }
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                visible: root.imageStatus !== Image.Loading
+                visible: !emptyState.compact && root.imageStatus !== Image.Loading
                 color: Qt.rgba(1, 1, 1, 0.68)
                 font.pixelSize: 12
                 renderType: Text.NativeRendering
@@ -713,14 +791,32 @@ Item {
             }
 
             Rectangle {
+                id: openImageButton
+                objectName: "emptyStateOpenButton"
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: root.imageStatus !== Image.Loading
                 width: 122
                 height: 38
                 radius: height / 2
                 color: openButton.pressed ? "#2466D8" : openButton.containsMouse ? "#347CF2" : "#2A72E8"
-                border.width: 1
-                border.color: "#50FFFFFF"
+                border.width: activeFocus ? 2 : 1
+                border.color: activeFocus ? "#D8FFFFFF" : "#50FFFFFF"
+                activeFocusOnTab: visible
+
+                Accessible.role: Accessible.Button
+                Accessible.name: "Open image"
+                Accessible.focusable: visible
+                Accessible.focused: activeFocus
+                Accessible.onPressAction: root.openDialogRequested()
+
+                Keys.onPressed: function(event) {
+                    if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
+                            && event.key !== Qt.Key_Enter)
+                        return
+                    if (!event.isAutoRepeat)
+                        root.openDialogRequested()
+                    event.accepted = true
+                }
 
                 Text {
                     anchors.centerIn: parent
@@ -736,6 +832,7 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
+                    onPressed: openImageButton.forceActiveFocus()
                     onClicked: root.openDialogRequested()
                 }
             }

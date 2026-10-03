@@ -58,7 +58,39 @@ int clampMaximumImageMegapixels(int value)
 
 } // namespace
 
-BackgroundModeManager::BackgroundModeManager(QObject* parent) : QObject(parent) {}
+BackgroundModeManager::BackgroundModeManager(QObject* parent) : QObject(parent)
+{
+    serviceCheckTimeout_.setSingleShot(true);
+    connect(&serviceCheckTimeout_, &QTimer::timeout, this, [this] {
+        serviceCheck_.kill();
+        setSnapServiceStatus(QStringLiteral("unavailable"));
+    });
+    connect(&serviceCheck_, &QProcess::finished, this,
+            [this](int exitCode, QProcess::ExitStatus exitStatus) {
+                serviceCheckTimeout_.stop();
+                if (exitStatus != QProcess::NormalExit || exitCode != 0) {
+                    setSnapServiceStatus(QStringLiteral("unavailable"));
+                    return;
+                }
+                const QByteArray output = serviceCheck_.readAllStandardOutput();
+                for (const QByteArray& line : output.split('\n')) {
+                    const QStringList fields = QString::fromUtf8(line).simplified().split(' ');
+                    if (fields.size() >= 3 && fields.at(0) == QStringLiteral("licasa.background")) {
+                        setSnapServiceStatus(fields.at(2) == QStringLiteral("active")
+                                                 ? QStringLiteral("active")
+                                                 : QStringLiteral("inactive"));
+                        return;
+                    }
+                }
+                setSnapServiceStatus(QStringLiteral("unavailable"));
+            });
+    connect(&serviceCheck_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            serviceCheckTimeout_.stop();
+            setSnapServiceStatus(QStringLiteral("unavailable"));
+        }
+    });
+}
 
 bool BackgroundModeManager::supported() const
 {
@@ -70,6 +102,31 @@ bool BackgroundModeManager::supported() const
 }
 
 bool BackgroundModeManager::enabled() const { return supported(); }
+
+bool BackgroundModeManager::snapService() const { return qEnvironmentVariableIsSet("SNAP_NAME"); }
+
+QString BackgroundModeManager::snapServiceStatus() const { return snapServiceStatus_; }
+
+void BackgroundModeManager::refreshSnapServiceStatus()
+{
+    if (!snapService() || serviceCheck_.state() != QProcess::NotRunning) {
+        return;
+    }
+    setSnapServiceStatus(QStringLiteral("checking"));
+    serviceCheckTimeout_.start(3000);
+    serviceCheck_.start(QStringLiteral("snapctl"),
+                        {QStringLiteral("services"), QStringLiteral("--user"),
+                         QStringLiteral("licasa.background")});
+}
+
+void BackgroundModeManager::setSnapServiceStatus(const QString& status)
+{
+    if (snapServiceStatus_ == status) {
+        return;
+    }
+    snapServiceStatus_ = status;
+    emit snapServiceStatusChanged();
+}
 
 QString BackgroundModeManager::autostartEntryPath() const
 {

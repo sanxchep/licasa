@@ -13,6 +13,7 @@ class BackgroundModeTests final : public QObject {
     void nativeLoginEntryIsEnabledByDefault();
     void snapRemovesOnlyItsLegacyLoginEntry();
     void snapLeavesOversizedLoginEntryUntouched();
+    void snapServiceStatusTracksSnapctl();
 };
 
 void BackgroundModeTests::nativeLoginEntryIsEnabledByDefault()
@@ -84,6 +85,51 @@ void BackgroundModeTests::snapLeavesOversizedLoginEntryUntouched()
     Licasa::BackgroundModeManager manager;
     manager.syncAutostart();
     QVERIFY(entry.exists());
+}
+
+void BackgroundModeTests::snapServiceStatusTracksSnapctl()
+{
+#if defined(Q_OS_UNIX)
+    QTemporaryDir tools;
+    QVERIFY(tools.isValid());
+    const QString statusPath = tools.filePath(QStringLiteral("service-status"));
+    QFile command(tools.filePath(QStringLiteral("snapctl")));
+    QVERIFY(command.open(QIODevice::WriteOnly | QIODevice::Text));
+    const QByteArray script = QByteArray("#!/bin/sh\ncat '") + statusPath.toUtf8() + "'\n";
+    QCOMPARE(command.write(script), qint64(script.size()));
+    command.close();
+    QVERIFY(command.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+
+    const QByteArray originalPath = qgetenv("PATH");
+    qputenv("PATH", tools.path().toUtf8() + ':' + originalPath);
+    qputenv("SNAP_NAME", "licasa");
+
+    auto writeStatus = [&statusPath](const QByteArray& output) {
+        QFile status(statusPath);
+        if (!status.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            return false;
+        }
+        return status.write(output) == output.size();
+    };
+
+    Licasa::BackgroundModeManager manager;
+    QVERIFY(manager.snapService());
+    QVERIFY(writeStatus("Service Startup Current Notes\nlicasa.background enabled active user\n"));
+    manager.refreshSnapServiceStatus();
+    QTRY_COMPARE(manager.snapServiceStatus(), QStringLiteral("active"));
+
+    QVERIFY(
+        writeStatus("Service Startup Current Notes\nlicasa.background enabled inactive user\n"));
+    manager.refreshSnapServiceStatus();
+    QTRY_COMPARE(manager.snapServiceStatus(), QStringLiteral("inactive"));
+
+    QVERIFY(writeStatus("Service Startup Current Notes\nother.background enabled active user\n"));
+    manager.refreshSnapServiceStatus();
+    QTRY_COMPARE(manager.snapServiceStatus(), QStringLiteral("unavailable"));
+    qputenv("PATH", originalPath);
+#else
+    QSKIP("Snap services are only available on Unix");
+#endif
 }
 
 QTEST_GUILESS_MAIN(BackgroundModeTests)

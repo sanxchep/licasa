@@ -8,6 +8,14 @@ Item {
     width: 640
     height: 480
 
+    QtObject {
+        id: fakeBackgroundService
+        property bool snapService: true
+        property string snapServiceStatus: "inactive"
+        property int refreshCount: 0
+        function refreshSnapServiceStatus() { refreshCount++ }
+    }
+
     TestCase {
         id: testCase
         name: "Controls"
@@ -423,6 +431,62 @@ Item {
         compare(menu.currentImageMegapixelsText(), "240 MP")
     }
 
+    function test_snapBackgroundServiceAppearsInSettings() {
+        const menu = createControl(settingsMenuComponent)
+        const row = findChild(menu, "backgroundServiceRow")
+        const status = findChild(menu, "backgroundServiceStatusText")
+        const dot = findChild(menu, "backgroundServiceStatusDot")
+        verify(row)
+        verify(status)
+        verify(dot)
+        verify(!row.visible)
+
+        fakeBackgroundService.refreshCount = 0
+        fakeBackgroundService.snapServiceStatus = "inactive"
+        menu.backgroundModeManager = fakeBackgroundService
+        menu.panelOpen = true
+        verify(row.visible)
+        compare(fakeBackgroundService.refreshCount, 1)
+        compare(status.text, "Not running")
+        compare(dot.color, "#ff453a")
+
+        fakeBackgroundService.snapServiceStatus = "active"
+        compare(status.text, "Running")
+        compare(dot.color, "#34c759")
+    }
+
+    function test_aboutSectionShowsInstalledBuild() {
+        const menu = createControl(settingsMenuComponent)
+        const about = findChild(menu, "aboutSection")
+        const releaseDate = findChild(menu, "aboutReleaseDate")
+        verify(about)
+        verify(releaseDate)
+
+        menu.appVersion = "0.2.1"
+        menu.releaseDate = "1 October 2026"
+        compare(about.subtitle, "Version 0.2.1")
+        compare(releaseDate.text, "Released 1 October 2026")
+        compare(about.contentTopSpacing, 4)
+    }
+
+    function test_settingsBackdropFadesOutWithPanel() {
+        const menu = createControl(settingsMenuComponent)
+        const scrim = findChild(menu, "settingsScrim")
+        verify(scrim)
+        menu.panelOpen = true
+        tryCompare(scrim, "opacity", 1, 400)
+        menu.panelOpen = false
+        wait(20)
+        verify(scrim.visible)
+        verify(scrim.opacity > 0)
+        tryCompare(scrim, "visible", false, 400)
+
+        menu.smoothMotionEnabled = false
+        menu.panelOpen = true
+        menu.panelOpen = false
+        compare(scrim.visible, false)
+    }
+
     function test_scrollBarHandleDragsTheFlickable() {
         const composition = createControl(scrollBarCompositionComponent)
         compare(composition.flickable.contentY, 0)
@@ -605,6 +669,87 @@ Item {
         jpeg.clicked()
         compare(formatSpy.count, 1)
         compare(formatSpy.signalArguments[0][0], "jpeg")
+    }
+
+    function test_editorTabsRequestWorkspaceRefit() {
+        const composition = createControl(editorCropCompositionComponent)
+        const editor = composition.editorPanel
+        editor.cropMode = false
+        const spy = createSpy(editor, "toolActivated")
+
+        for (const tool of ["adjust", "crop", "looks", "export"]) {
+            editor.activateTool(tool)
+            compare(editor.activeTool, tool)
+            compare(spy.signalArguments[spy.count - 1][0], tool)
+        }
+        compare(spy.count, 4)
+
+        editor.cropMode = true
+        compare(editor.activeTool, "crop")
+        compare(spy.count, 5)
+        editor.activateTool("looks")
+        compare(editor.activeTool, "crop")
+        compare(spy.count, 5)
+    }
+
+    function test_holdOriginalHasKeyboardPressReleaseAndFocusCancellation() {
+        const composition = createControl(editorCropCompositionComponent)
+        const editor = composition.editorPanel
+        editor.cropMode = false
+        editor.activeTool = "adjust"
+        const original = findChild(editor, "editorOriginalCompareButton")
+        verify(original)
+        const pressed = createSpy(editor, "compareOriginalPressed")
+        const released = createSpy(editor, "compareOriginalReleased")
+
+        original.forceActiveFocus()
+        keyPress(Qt.Key_Space)
+        compare(pressed.count, 1)
+        compare(released.count, 0)
+        keyRelease(Qt.Key_Space)
+        compare(released.count, 1)
+
+        keyPress(Qt.Key_Return)
+        compare(pressed.count, 2)
+        editor.forceActiveFocus()
+        compare(released.count, 2)
+    }
+
+    function test_editorReopenFocusesSelectedTool() {
+        const composition = createControl(editorCropCompositionComponent)
+        const editor = composition.editorPanel
+        editor.cropMode = false
+        editor.panelOpen = false
+        editor.activeTool = "export"
+        editor.panelOpen = true
+        const exportTab = findChild(editor, "editorToolTab_export")
+        verify(exportTab)
+        tryVerify(function() { return exportTab.activeFocus })
+    }
+
+    function test_emptyImageStateFitsAndOpensWithKeyboard() {
+        const viewport = createTemporaryObject(imageViewportComponent, visualRoot, {
+            "providerSource": "",
+            "hasImage": false,
+            "width": 190,
+            "height": 130
+        })
+        verify(viewport)
+        const card = findChild(viewport, "emptyImageState")
+        const button = findChild(viewport, "emptyStateOpenButton")
+        verify(card)
+        verify(button)
+        verify(card.visible)
+        verify(card.width <= viewport.width - 24)
+        verify(card.height <= viewport.height - 24)
+
+        const openRequested = createSpy(viewport, "openDialogRequested")
+        button.forceActiveFocus()
+        keyClick(Qt.Key_Return)
+        compare(openRequested.count, 1)
+
+        viewport.width = 100
+        compare(card.visible, false)
     }
 
     function test_buttonsEmitClicks() {
@@ -851,6 +996,151 @@ Item {
             return viewport.activeImageSlot !== previewSlot
         }, 5000)
         compare(viewport.imageStatus, Image.Ready)
+    }
+
+    function test_readyReplacementFadesOldImageOverFullyDrawnNewImage() {
+        const viewport = createTemporaryObject(imageViewportComponent, visualRoot, {
+            "providerSource": ""
+        })
+        verify(viewport)
+        const oldImage = findChild(viewport, "staticImageA")
+        const newImage = findChild(viewport, "staticImageB")
+        verify(oldImage)
+        verify(newImage)
+
+        wait(0)
+        const source = Qt.resolvedUrl("../assets/licasa.png")
+        oldImage.source = source
+        newImage.source = source
+        tryCompare(oldImage, "status", Image.Ready, 5000)
+        tryCompare(newImage, "status", Image.Ready, 5000)
+
+        viewport.activeImageSlot = 0
+        viewport.pendingImageSlot = 1
+        viewport.completeImageRequest(1)
+        compare(viewport.imageStatus, Image.Ready)
+        compare(viewport.activeImageSlot, 1)
+        compare(viewport.fadingImageSlot, 0)
+        compare(oldImage.visible, true)
+        compare(newImage.visible, true)
+        compare(newImage.opacity, 1)
+        verify(oldImage.z > newImage.z)
+
+        wait(40)
+        verify(oldImage.opacity > 0 && oldImage.opacity < 1)
+        compare(newImage.opacity, 1)
+        tryCompare(viewport, "fadingImageSlot", -1, 500)
+        compare(oldImage.visible, false)
+        compare(String(oldImage.source), "")
+    }
+
+    function test_outgoingImageKeepsItsBoundsWhenNextPhotoHasAnotherFit() {
+        const viewport = createTemporaryObject(imageViewportComponent, visualRoot, {
+            "providerSource": "",
+            "fullScreenMode": true,
+            "imageX": 80,
+            "imageY": 40,
+            "imageWidth": 1000,
+            "imageHeight": 600,
+            "currentScale": 0.2
+        })
+        verify(viewport)
+        const oldImage = findChild(viewport, "staticImageA")
+        const newImage = findChild(viewport, "staticImageB")
+        wait(0)
+        const source = Qt.resolvedUrl("../assets/licasa.png")
+        oldImage.source = source
+        newImage.source = source
+        tryCompare(oldImage, "status", Image.Ready, 5000)
+        tryCompare(newImage, "status", Image.Ready, 5000)
+
+        viewport.activeImageSlot = 0
+        viewport.pendingImageSlot = 1
+        viewport.completeImageRequest(1)
+        viewport.imageX = 40
+        viewport.imageY = 30
+        viewport.imageWidth = 3000
+        viewport.imageHeight = 1000
+        viewport.currentScale = 0.08
+
+        const oldPosition = oldImage.mapToItem(viewport, 0, 0)
+        const newPosition = newImage.mapToItem(viewport, 0, 0)
+        fuzzyCompare(oldPosition.x, 80, 0.01)
+        fuzzyCompare(oldPosition.y, 40, 0.01)
+        fuzzyCompare(oldImage.width * viewport.currentScale, 200, 0.01)
+        fuzzyCompare(oldImage.height * viewport.currentScale, 120, 0.01)
+        fuzzyCompare(newPosition.x, 40, 0.01)
+        fuzzyCompare(newPosition.y, 30, 0.01)
+        fuzzyCompare(newImage.width * viewport.currentScale, 240, 0.01)
+        fuzzyCompare(newImage.height * viewport.currentScale, 80, 0.01)
+    }
+
+    function test_rapidReplacementKeepsTheCurrentImageVisible() {
+        const viewport = createTemporaryObject(imageViewportComponent, visualRoot, {
+            "providerSource": ""
+        })
+        verify(viewport)
+        const firstImage = findChild(viewport, "staticImageA")
+        const secondImage = findChild(viewport, "staticImageB")
+        wait(0)
+        const source = Qt.resolvedUrl("../assets/licasa.png")
+        firstImage.source = source
+        secondImage.source = source
+        tryCompare(firstImage, "status", Image.Ready, 5000)
+        tryCompare(secondImage, "status", Image.Ready, 5000)
+
+        viewport.activeImageSlot = 0
+        viewport.pendingImageSlot = 1
+        viewport.completeImageRequest(1)
+        compare(viewport.fadingImageSlot, 0)
+
+        viewport.sourceOverride = source
+        viewport.requestCurrentImage()
+        compare(viewport.fadingImageSlot, -1)
+        compare(viewport.activeImageSlot, 1)
+        compare(secondImage.visible, true)
+        compare(secondImage.opacity, 1)
+        compare(String(firstImage.source), String(source))
+    }
+
+    function test_oldDecodeCannotReplacePhotoAfterNavigation() {
+        const viewport = createTemporaryObject(imageViewportComponent, visualRoot, {
+            "providerSource": ""
+        })
+        verify(viewport)
+        const oldImage = findChild(viewport, "staticImageA")
+        wait(0)
+        oldImage.source = Qt.resolvedUrl("../assets/licasa.png")
+        tryCompare(oldImage, "status", Image.Ready, 5000)
+        viewport.activeImageSlot = 0
+        viewport.pendingImageSlot = 1
+        viewport.pendingRequestKey = "image://licasa/previous-photo"
+
+        viewport.sourceOverride = Qt.resolvedUrl("../assets/licasa-128x128.png")
+        viewport.completeImageRequest(1)
+
+        compare(viewport.activeImageSlot, 0)
+        compare(viewport.pendingImageSlot, -1)
+        compare(viewport.imageStatus, Image.Ready)
+        compare(oldImage.visible, true)
+    }
+
+    function test_alreadyDecodedReplacementCompletesWithoutStatusChange() {
+        const viewport = createTemporaryObject(imageViewportComponent, visualRoot, {
+            "providerSource": ""
+        })
+        verify(viewport)
+        const image = findChild(viewport, "staticImageA")
+        wait(0)
+        const source = Qt.resolvedUrl("../assets/licasa.png")
+        image.source = source
+        tryCompare(image, "status", Image.Ready, 5000)
+
+        viewport.sourceOverride = source
+        viewport.requestCurrentImage()
+        compare(viewport.activeImageSlot, 0)
+        compare(viewport.imageStatus, Image.Ready)
+        compare(viewport.pendingImageSlot, -1)
     }
 
     function test_parallelFullImageWaitsForPreviewThenPromotes() {
