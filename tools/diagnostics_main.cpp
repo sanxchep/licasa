@@ -130,6 +130,19 @@ int main(int argc, char** argv)
     parser.addOption(
         {"viewer", "Measure the production QML viewer (use an isolated XDG_CONFIG_HOME)."});
     parser.addOption({"navigation", "Check the visible image while browsing to a second image."});
+    parser.addOption(
+        {"navigation-during-full",
+         "Browse while full-detail development is still running (with --navigation)."});
+    parser.addOption(
+        {"navigation-sequence", "Measure repeated arrow presses in the production viewer."});
+    parser.addOption({"sequence-presses", "Number of arrow presses.", "count", "5"});
+    parser.addOption({"sequence-interval-ms", "Time between presses.", "ms", "180"});
+    parser.addOption(
+        {"sequence-warmup-ms", "Time after first pixels before pressing.", "ms", "250"});
+    parser.addOption({"sequence-idle-ms", "Time to observe after the last frame.", "ms", "0"});
+    parser.addOption({"sequence-direction",
+                      "Arrow direction: right, left, left-right, or right-left.", "direction",
+                      "right"});
     parser.addOption({"raw-behavior", "Verify progressive RAW preview and automatic full "
                                       "development in the production viewer."});
     parser.addOption(
@@ -158,8 +171,30 @@ int main(int argc, char** argv)
         return inspectFormats(parser.positionalArguments(), policy);
     }
     const bool navigation = parser.isSet("navigation");
-    if (!parser.isSet("viewer") || parser.positionalArguments().size() > (navigation ? 2 : 1) ||
+    const bool navigationSequence = parser.isSet("navigation-sequence");
+    bool validPresses = false;
+    bool validInterval = false;
+    bool validWarmup = false;
+    bool validIdle = false;
+    const int sequencePresses = parser.value("sequence-presses").toInt(&validPresses);
+    const int sequenceIntervalMs = parser.value("sequence-interval-ms").toInt(&validInterval);
+    const int sequenceWarmupMs = parser.value("sequence-warmup-ms").toInt(&validWarmup);
+    const int sequenceIdleMs = parser.value("sequence-idle-ms").toInt(&validIdle);
+    const QString sequenceDirection = parser.value("sequence-direction");
+    if (!parser.isSet("viewer") || (parser.isSet("navigation-during-full") && !navigation) ||
+        (navigation && navigationSequence) ||
+        parser.positionalArguments().size() > (navigation ? 2 : 1) ||
         (navigation && parser.positionalArguments().size() != 2) ||
+        (navigationSequence && parser.positionalArguments().size() != 1) ||
+        (navigationSequence &&
+         (!validPresses || sequencePresses < 1 || sequencePresses > 100 || !validInterval ||
+          sequenceIntervalMs < 20 || sequenceIntervalMs > 10000 || !validWarmup ||
+          sequenceWarmupMs < 0 || sequenceWarmupMs > 10000 || !validIdle || sequenceIdleMs < 0 ||
+          sequenceIdleMs > 10000 ||
+          (sequenceDirection != QStringLiteral("right") &&
+           sequenceDirection != QStringLiteral("left") &&
+           sequenceDirection != QStringLiteral("left-right") &&
+           sequenceDirection != QStringLiteral("right-left")))) ||
         (parser.isSet("raw-preview-only") && parser.isSet("raw-edit-only"))) {
         parser.showHelp(2);
     }
@@ -197,10 +232,18 @@ int main(int argc, char** argv)
     engine.addImageProvider(QString::fromLatin1(Licasa::Constants::imageProviderName),
                             decodeProvider);
     std::unique_ptr<LicasaDiagnostics::DiagnosticCheck> check;
-    if (navigation) {
+    if (navigationSequence) {
+        check = LicasaDiagnostics::makeNavigationSequenceCheck(
+            decodeProvider, sequencePresses, sequenceIntervalMs, sequenceWarmupMs, sequenceIdleMs,
+            sequenceDirection == QStringLiteral("left")         ? -1
+            : sequenceDirection == QStringLiteral("left-right") ? -2
+            : sequenceDirection == QStringLiteral("right-left") ? 2
+                                                                : 1);
+    } else if (navigation) {
         const QUrl nextUrl =
             QUrl::fromLocalFile(QFileInfo(parser.positionalArguments().at(1)).absoluteFilePath());
-        check = LicasaDiagnostics::makeNavigationTransitionCheck(nextUrl);
+        check = LicasaDiagnostics::makeNavigationTransitionCheck(
+            nextUrl, parser.isSet("navigation-during-full"));
     } else if (parser.isSet("raw-behavior")) {
         check = LicasaDiagnostics::makeRawBehaviorCheck(parser.isSet("raw-preview-only"),
                                                         parser.isSet("raw-edit-only"));

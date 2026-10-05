@@ -4,16 +4,22 @@
 #include "imaging/image_edit_pipeline.h"
 #include "imaging/image_processing.h"
 #include "imaging/image_resource_policy.h"
+#ifdef LICASA_HAVE_FAST_TIFF_PREVIEW
+#include "imaging/fast_tiff_preview.h"
+#endif
+#include "io/external_file_identity.h"
 #ifdef LICASA_EARLY_PROGRESSIVE_JPEG
 #include "imaging/progressive_jpeg_preview.h"
 #endif
 #include <QColorSpace>
 #include <QDateTime>
 #include <QDebug>
+#include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QMutexLocker>
 #include <QQuickTextureFactory>
+#include <QSet>
 #include <QUrlQuery>
 #include <QWaitCondition>
 #include <algorithm>
@@ -22,6 +28,56 @@
 #include <utility>
 
 namespace Licasa {
+namespace {
+QSize boundedPreviewSize(const QSize& requestedSize, quint64 maximumPixels);
+
+struct NearbyFileStamp {
+    QString canonicalPath;
+    qint64 size = -1;
+    QDateTime modified;
+    QDateTime changed;
+    std::optional<ExternalFileIdentity> nativeIdentity;
+
+    bool isValid() const { return size >= 0 && !canonicalPath.isEmpty(); }
+};
+
+NearbyFileStamp nearbyFileStamp(const QString& path)
+{
+    const QFileInfo info(path);
+    if (!info.isFile()) {
+        return {};
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    return {info.canonicalFilePath(), info.size(), info.lastModified(), info.metadataChangeTime(),
+            externalFileIdentity(file)};
+}
+
+bool sameFileStamp(const NearbyFileStamp& left, const NearbyFileStamp& right)
+{
+    return left.isValid() && right.isValid() && left.canonicalPath == right.canonicalPath &&
+           left.size == right.size && left.modified == right.modified &&
+           left.changed == right.changed && left.nativeIdentity == right.nativeIdentity;
+}
+
+QSize admittedNativeJpegSize(const QSize& source, quint64 maximumPixels)
+{
+    if (!source.isValid() || source.isEmpty()) {
+        return {};
+    }
+    for (const quint64 divider : {quint64(1), quint64(2), quint64(4), quint64(8)}) {
+        const QSize nativeSize(int((quint64(source.width()) + divider - 1) / divider),
+                               int((quint64(source.height()) + divider - 1) / divider));
+        if (ImageDecodeContract::allows(nativeSize, maximumPixels)) {
+            return nativeSize;
+        }
+    }
+    return {};
+}
+} // namespace
+
 struct DecodedImageCache {
     static QSize normalizedRequestedSize(const QSize& requested)
     {
@@ -92,6 +148,234 @@ struct DecodedImageCache {
         fullDetail = false;
         rawFastDevelopment = false;
         image = {};
+    }
+};
+
+struct NearbyPreviewCache : std::enable_shared_from_this<NearbyPreviewCache> {
+    struct Entry {
+        QImage image;
+        NearbyFileStamp stamp;
+    };
+
+    QMutex mutex;
+    QStringList desired;
+    QHash<QString, Entry> entries;
+    QSet<QString> attempted;
+    QSize requestedSize;
+    qsizetype byteLimit = 0;
+    qsizetype slotLimit = 0;
+    qsizetype bytes = 0;
+    quint64 hitCount = 0;
+    std::shared_ptr<std::atomic_bool> activeCancellation;
+    bool workerRunning = false;
+
+    void cancelActive()
+    {
+        if (activeCancellation) {
+            activeCancellation->store(true, std::memory_order_relaxed);
+        }
+    }
+
+    void clear()
+    {
+        QMutexLocker lock(&mutex);
+        cancelActive();
+        desired.clear();
+        entries.clear();
+        attempted.clear();
+        bytes = 0;
+    }
+
+    void cancelForNavigation()
+    {
+        QMutexLocker lock(&mutex);
+        cancelActive();
+        // Keep the overlapping ready entries until the new center is known.
+        desired.clear();
+        attempted.clear();
+    }
+
+    QImage lookup(const QString& path)
+    {
+        QMutexLocker lock(&mutex);
+        auto it = entries.find(path);
+        if (it == entries.end()) {
+            return {};
+        }
+        if (!sameFileStamp(it->stamp, nearbyFileStamp(path))) {
+            bytes -= it->image.sizeInBytes();
+            entries.erase(it);
+            attempted.remove(path);
+            return {};
+        }
+        ++hitCount;
+        return it->image;
+    }
+
+    bool setWindow(const QList<QUrl>& urls, const QSize& requested, int memoryMiB)
+    {
+        QStringList paths;
+        paths.reserve(std::min<qsizetype>(urls.size(), 10));
+        for (const QUrl& url : urls) {
+            if (url.isLocalFile() && !paths.contains(url.toLocalFile())) {
+                paths.append(url.toLocalFile());
+            }
+            if (paths.size() == 10) {
+                break;
+            }
+        }
+        const qsizetype limit =
+            std::min<qsizetype>(96, std::max(0, memoryMiB) / 8) * qsizetype(1024 * 1024);
+        // Ten slots at this size cannot retain more than the cache limit.
+        const qsizetype perSlot = limit / 10;
+        QMutexLocker lock(&mutex);
+        if (desired == paths && requestedSize == requested && byteLimit == limit) {
+            return !workerRunning && !paths.isEmpty();
+        }
+        cancelActive();
+        desired = std::move(paths);
+        requestedSize = requested;
+        byteLimit = limit;
+        slotLimit = perSlot;
+        attempted.clear();
+        for (auto it = entries.begin(); it != entries.end();) {
+            if (!desired.contains(it.key()) || it->image.sizeInBytes() > slotLimit) {
+                bytes -= it->image.sizeInBytes();
+                it = entries.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        return !workerRunning && !desired.isEmpty();
+    }
+
+    void run(ImageResourcePolicy& policy, QThreadPool& pool)
+    {
+        QString path;
+        QSize target;
+        qsizetype maxBytes = 0;
+        auto cancellation = std::make_shared<std::atomic_bool>(false);
+        {
+            QMutexLocker lock(&mutex);
+            for (const QString& candidate : desired) {
+                if (!entries.contains(candidate) && !attempted.contains(candidate)) {
+                    path = candidate;
+                    break;
+                }
+            }
+            if (path.isEmpty()) {
+                workerRunning = false;
+                activeCancellation.reset();
+                return;
+            }
+            attempted.insert(path);
+            target = requestedSize;
+            maxBytes = slotLimit;
+            activeCancellation = cancellation;
+        }
+
+        QImage decoded;
+        const NearbyFileStamp before = nearbyFileStamp(path);
+        const QString suffix = QFileInfo(path).suffix().toLower();
+        const bool raw = suffix == QStringLiteral("dng") || suffix == QStringLiteral("raw") ||
+                         suffix == QStringLiteral("cr2") || suffix == QStringLiteral("cr3") ||
+                         suffix == QStringLiteral("nef") || suffix == QStringLiteral("nrw") ||
+                         suffix == QStringLiteral("arw") || suffix == QStringLiteral("srw") ||
+                         suffix == QStringLiteral("rw2") || suffix == QStringLiteral("pef") ||
+                         suffix == QStringLiteral("orf") || suffix == QStringLiteral("raf");
+        const bool stillOrSmall =
+            suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg") ||
+            suffix == QStringLiteral("png") || suffix == QStringLiteral("webp") ||
+            suffix == QStringLiteral("bmp") || suffix == QStringLiteral("tif") ||
+            suffix == QStringLiteral("tiff");
+        if ((stillOrSmall || raw) && before.isValid() && maxBytes > 0 && target.isValid()) {
+#ifdef LICASA_HAVE_FAST_TIFF_PREVIEW
+            if (suffix == QStringLiteral("tif") || suffix == QStringLiteral("tiff")) {
+                decoded = readFastTiffPreview(path, target, policy.maximumImagePixels(), maxBytes,
+                                              cancellation.get());
+            }
+#endif
+            if (decoded.isNull() && !cancellation->load(std::memory_order_relaxed)) {
+                const quint64 maximumPixels =
+                    std::min(policy.maximumImagePixels(), quint64(maxBytes) / 4);
+                QImageReader reader(path);
+                ImageDecodeContract::configure(reader, maximumPixels, cancellation.get(), false,
+                                               false, false);
+                reader.setAutoTransform(true);
+                if (reader.canRead()) {
+                    const QSize source = reader.size();
+                    const bool jpeg =
+                        suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg");
+                    const QSize nativeJpegSize =
+                        jpeg ? admittedNativeJpegSize(source, maximumPixels) : QSize();
+                    const bool nativeJpegScale =
+                        jpeg && nativeJpegSize.isValid() &&
+                        reader.supportsOption(QImageIOHandler::ScaledSize) &&
+                        ImageDecodeContract::allows(source, policy.maximumImagePixels());
+                    const QSize embeddedRawPreview =
+                        raw && reader.device()
+                            ? reader.device()
+                                  ->property(ImageDecodeContract::embeddedPreviewSizeProperty)
+                                  .toSize()
+                            : QSize();
+                    const bool scalableEmbeddedJpeg =
+                        raw && reader.device() &&
+                        reader.device()
+                            ->property(ImageDecodeContract::scalableEmbeddedJpegProperty)
+                            .toBool();
+                    const bool boundedRawPreview =
+                        raw && (ImageDecodeContract::allows(embeddedRawPreview, maximumPixels) ||
+                                scalableEmbeddedJpeg);
+                    // Only a bounded source or a codec-owned native scale may
+                    // run alongside the current full reader.
+                    if (boundedRawPreview ||
+                        (!raw && source.isValid() &&
+                         (ImageDecodeContract::allows(source, maximumPixels) || nativeJpegScale))) {
+                        const QSize bounded = boundedPreviewSize(target, maximumPixels);
+                        QSize scaled = raw ? embeddedRawPreview : source;
+                        scaled.scale(bounded, Qt::KeepAspectRatio);
+                        if (nativeJpegScale &&
+                            !ImageDecodeContract::allows(source, maximumPixels)) {
+                            scaled.scale(nativeJpegSize, Qt::KeepAspectRatio);
+                        }
+                        if (scaled.isValid() && scaled != (raw ? embeddedRawPreview : source)) {
+                            reader.setScaledSize(scaled);
+                        }
+                        if (!cancellation->load(std::memory_order_relaxed)) {
+                            decoded = reader.read();
+                            if (!ImageDecodeContract::allows(decoded.size(), maximumPixels)) {
+                                decoded = {};
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        const NearbyFileStamp after = nearbyFileStamp(path);
+        bool more = false;
+        {
+            QMutexLocker lock(&mutex);
+            if (!cancellation->load(std::memory_order_relaxed) && desired.contains(path) &&
+                !decoded.isNull() && decoded.sizeInBytes() > 0 &&
+                decoded.sizeInBytes() <= slotLimit && sameFileStamp(before, after)) {
+                bytes += decoded.sizeInBytes();
+                entries.insert(path, {std::move(decoded), after});
+            }
+            for (const QString& candidate : desired) {
+                if (!entries.contains(candidate) && !attempted.contains(candidate)) {
+                    more = true;
+                    break;
+                }
+            }
+            if (!more) {
+                workerRunning = false;
+                activeCancellation.reset();
+            }
+        }
+        if (more) {
+            pool.start([self = shared_from_this(), &policy, &pool] { self->run(policy, pool); },
+                       -1);
+        }
     }
 };
 
@@ -185,6 +469,8 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                         std::shared_ptr<ParallelDecodePair> parallelPair,
                         ImageResourcePolicy& resourcePolicy,
                         std::shared_ptr<DecodedImageCache> decodedImageCache,
+                        std::shared_ptr<NearbyPreviewCache> nearbyPreviewCache,
+                        std::shared_ptr<std::atomic_bool> cancelled, bool priorityNavigationPreview,
                         std::function<void()> discardFailedPreview)
         : filePath_(std::move(filePath)), requestedSize_(requestedSize),
           editParameters_(std::move(editParameters)), colorManagedRendering_(colorManagedRendering),
@@ -193,7 +479,9 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
           editWarmupRequested_(editWarmupRequested), parallelPreview_(parallelPreview),
           speculativeFull_(speculativeFull), parallelPair_(std::move(parallelPair)),
           resourcePolicy_(resourcePolicy), decodedImageCache_(std::move(decodedImageCache)),
-          discardFailedPreview_(std::move(discardFailedPreview))
+          nearbyPreviewCache_(std::move(nearbyPreviewCache)),
+          discardFailedPreview_(std::move(discardFailedPreview)), cancelled_(std::move(cancelled)),
+          priorityNavigationPreview_(priorityNavigationPreview)
     {
         setAutoDelete(false);
     }
@@ -205,14 +493,16 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
 
     QString errorString() const override { return error_; }
 
-    void cancel() override { cancelled_.store(true, std::memory_order_relaxed); }
+    void cancel() override { cancelled_->store(true, std::memory_order_relaxed); }
 
     void run() override
     {
-        if (!isCancelled() && parallelPreview_ && parallelPair_) {
+        const bool priorityPreviewReady =
+            !isCancelled() && priorityNavigationPreview_ && tryPriorityPreview();
+        if (parallelPreview_ && parallelPair_) {
             bool bypassGate = false;
             int pairedMaximumMegapixels = 0;
-            {
+            if (!priorityPreviewReady && !isCancelled()) {
                 QMutexLocker pairLock(&parallelPair_->mutex);
                 bypassGate = parallelPair_->fullOwnsGate;
                 if (bypassGate) {
@@ -220,11 +510,11 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                     parallelPair_->previewBypassedGate = true;
                 }
             }
-            if (bypassGate) {
+            if (!priorityPreviewReady && !isCancelled() && bypassGate) {
                 // The paired full reader owns the heavy-operation gate until
                 // this preview ends, including its decode-cache publication.
                 decodeImage(pairedMaximumMegapixels);
-            } else {
+            } else if (!priorityPreviewReady && !isCancelled()) {
                 QMutexLocker processingLock(&resourcePolicy_.processingMutex());
                 if (!isCancelled()) {
                     decodeImage(resourcePolicy_.prepareForProcessing());
@@ -236,6 +526,9 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                 parallelPair_->previewPresented.store(true, std::memory_order_release);
             }
             parallelPair_->previewFinishedCondition.wakeAll();
+        } else if (priorityPreviewReady) {
+            // A bounded selected preview can be shown while the cancelled old
+            // full reader is still retiring from LibRaw.
         } else if (!isCancelled() && speculativeFull_ && parallelPair_) {
             QMutexLocker processingLock(&resourcePolicy_.processingMutex());
             const int maximumMegapixels = resourcePolicy_.prepareForProcessing();
@@ -279,7 +572,79 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
     }
 
   private:
-    void decodeImage(int maximumMegapixels)
+    bool tryPriorityPreview()
+    {
+        // Prepared neighbors are already charged to the bounded nearby cache.
+        // Reusing one needs no decoder or heavy-operation gate.
+        QImage preparedNeighbor = nearbyPreviewCache_->lookup(filePath_);
+        if (!preparedNeighbor.isNull()) {
+            decodeImage(resourcePolicy_.maximumImageMegapixels(), std::move(preparedNeighbor));
+            return !image_.isNull();
+        }
+
+        constexpr int previewMegapixels = 2;
+        constexpr quint64 previewPixels = quint64(previewMegapixels) * 1000000;
+        const QString suffix = QFileInfo(filePath_).suffix().toLower();
+        const bool jpeg = suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg");
+        const bool smallRaster = suffix == QStringLiteral("png") ||
+                                 suffix == QStringLiteral("bmp") ||
+                                 suffix == QStringLiteral("webp");
+        const bool raw = suffix == QStringLiteral("dng") || suffix == QStringLiteral("cr2") ||
+                         suffix == QStringLiteral("cr3") || suffix == QStringLiteral("nef") ||
+                         suffix == QStringLiteral("arw") || suffix == QStringLiteral("rw2");
+#ifdef LICASA_HAVE_FAST_TIFF_PREVIEW
+        const bool tiff = suffix == QStringLiteral("tif") || suffix == QStringLiteral("tiff");
+        if (tiff) {
+            QImage fastPreview = readFastTiffPreview(filePath_, requestedSize_, previewPixels,
+                                                     8 * 1024 * 1024, cancelled_.get());
+            if (!fastPreview.isNull()) {
+                decodeImage(previewMegapixels, std::move(fastPreview));
+                return !image_.isNull();
+            }
+            return false;
+        }
+#endif
+        if (!jpeg && !smallRaster && !raw) {
+            return false;
+        }
+
+        bool safe = false;
+        {
+            QImageReader reader(filePath_);
+            ImageDecodeContract::configure(reader, previewPixels, cancelled_.get());
+            if (!reader.canRead() || isCancelled()) {
+                return false;
+            }
+            const QSize source = reader.size();
+            const QSize embedded = reader.device()
+                                       ->property(ImageDecodeContract::embeddedPreviewSizeProperty)
+                                       .toSize();
+            const bool scalableEmbeddedJpeg =
+                reader.device()
+                    ->property(ImageDecodeContract::scalableEmbeddedJpegProperty)
+                    .toBool();
+            const bool boundedSource = ImageDecodeContract::allows(source, previewPixels);
+            safe =
+                (jpeg && (boundedSource || reader.supportsOption(QImageIOHandler::ScaledSize))) ||
+                (smallRaster && boundedSource) ||
+                (raw &&
+                 (ImageDecodeContract::allows(embedded, previewPixels) || scalableEmbeddedJpeg));
+        }
+        if (!safe) {
+            return false;
+        }
+
+        decodeImage(previewMegapixels);
+        if (!image_.isNull() || isCancelled()) {
+            return !image_.isNull();
+        }
+        // If a codec declined the bounded route, retry through the normal
+        // resource gate with its usual policy and error reporting.
+        error_.clear();
+        return false;
+    }
+
+    void decodeImage(int maximumMegapixels, QImage preparedNeighbor = {})
     {
         const quint64 maximumPixels = ImageProcessing::pixelsForMegapixels(maximumMegapixels);
         const QFileInfo fileInfo(filePath_);
@@ -288,12 +653,24 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
             return;
         }
 
-        QImage image;
-        const bool decodedCacheHit =
-            !parallelPreview_ &&
-            !(image = decodedImageCache_->lookup(fileInfo, requestedSize_, maximumMegapixels,
-                                                 fullDetail_, rawFastDevelopment_))
-                 .isNull();
+        QImage image = std::move(preparedNeighbor);
+        if (image.isNull() && !fullDetail_) {
+            image = nearbyPreviewCache_->lookup(filePath_);
+        }
+        if (image.isNull() && !parallelPreview_) {
+            image = decodedImageCache_->lookup(fileInfo, requestedSize_, maximumMegapixels,
+                                               fullDetail_, rawFastDevelopment_);
+        }
+#ifdef LICASA_HAVE_FAST_TIFF_PREVIEW
+        if (image.isNull() && !fullDetail_ && !isCancelled()) {
+            const QString suffix = fileInfo.suffix().toLower();
+            if (suffix == QStringLiteral("tif") || suffix == QStringLiteral("tiff")) {
+                image = readFastTiffPreview(filePath_, requestedSize_, maximumPixels,
+                                            8 * 1024 * 1024, cancelled_.get());
+            }
+        }
+#endif
+        const bool decodedCacheHit = !image.isNull();
         if (decodedCacheHit) {
             if (traceDecodeCache()) {
                 qInfo().noquote()
@@ -312,7 +689,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                 decodedImageCache_->clear();
             }
             QImageReader reader(filePath_);
-            ImageDecodeContract::configure(reader, maximumPixels, &cancelled_, fullDetail_,
+            ImageDecodeContract::configure(reader, maximumPixels, cancelled_.get(), fullDetail_,
                                            rawFastDevelopment_, rawInteractiveDevelopment_);
             if (speculativeFull_ && parallelPair_ && reader.device()) {
                 reader.device()->setProperty(ImageDecodeContract::previewPresentedProperty,
@@ -355,7 +732,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                 reader.scaledSize().isValid() &&
                 reader.transformation() == QImageIOHandler::TransformationNone) {
                 image = readEarlyProgressiveJpegPreview(filePath_, reader.scaledSize(),
-                                                        maximumPixels, &cancelled_);
+                                                        maximumPixels, cancelled_.get());
             }
 #endif
             if (image.isNull()) {
@@ -409,7 +786,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
         }
 
         ImageEditExecution editExecution;
-        if (!applyImageEdits(image, editParameters_, &cancelled_, &editExecution)) {
+        if (!applyImageEdits(image, editParameters_, cancelled_.get(), &editExecution)) {
             image = {};
             if (!isCancelled()) {
                 error_ = QStringLiteral("The image could not be processed safely.");
@@ -475,7 +852,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
         return true;
     }
 
-    bool isCancelled() const noexcept { return cancelled_.load(std::memory_order_relaxed); }
+    bool isCancelled() const noexcept { return cancelled_->load(std::memory_order_relaxed); }
 
     QString filePath_;
     QSize requestedSize_;
@@ -491,21 +868,28 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
     bool prewarmAfterRawDecode_ = false;
     ImageResourcePolicy& resourcePolicy_;
     std::shared_ptr<DecodedImageCache> decodedImageCache_;
+    std::shared_ptr<NearbyPreviewCache> nearbyPreviewCache_;
     std::function<void()> discardFailedPreview_;
     QImage image_;
     QString error_;
-    std::atomic_bool cancelled_ = false;
+    std::shared_ptr<std::atomic_bool> cancelled_;
+    bool priorityNavigationPreview_ = false;
 };
 
 } // namespace
 
 AsyncImageProvider::AsyncImageProvider(ImageResourcePolicy& resourcePolicy)
-    : resourcePolicy_(resourcePolicy), decodedImageCache_(std::make_shared<DecodedImageCache>())
+    : resourcePolicy_(resourcePolicy), decodedImageCache_(std::make_shared<DecodedImageCache>()),
+      nearbyPreviewCache_(std::make_shared<NearbyPreviewCache>())
 {
     // Ordinary edits/animation work remain serial. Only an explicitly paired
     // bounded preview and admitted full read may overlap.
     pool_.setMaxThreadCount(1);
     pool_.setExpiryTimeout(1000);
+    navigationPreviewPool_.setMaxThreadCount(1);
+    navigationPreviewPool_.setExpiryTimeout(1000);
+    nearbyPreviewPool_.setMaxThreadCount(1);
+    nearbyPreviewPool_.setExpiryTimeout(1000);
     speculativeFullPool_.setMaxThreadCount(1);
     speculativeFullPool_.setExpiryTimeout(1000);
     parallelPreviewPool_.setMaxThreadCount(1);
@@ -523,14 +907,36 @@ AsyncImageProvider::~AsyncImageProvider()
 void AsyncImageProvider::waitForPendingWork()
 {
     pool_.waitForDone();
+    navigationPreviewPool_.waitForDone();
+    nearbyPreviewPool_.waitForDone();
     parallelPreviewPool_.waitForDone();
     speculativeFullPool_.waitForDone();
 }
 
 void AsyncImageProvider::enqueueWork(std::function<void()> work) { pool_.start(std::move(work)); }
 
-void AsyncImageProvider::releasePictureResources()
+void AsyncImageProvider::releasePictureResources(bool retainNearbyPreviews, const QUrl& nextImage)
 {
+    // Navigation can happen while a full RAW reader still owns the processing
+    // gate. Cancel its native decode before the next image requests a preview.
+    // Keep the already-presented QML texture; only in-flight readers stop.
+    {
+        QMutexLocker requestsLock(&requestsMutex_);
+        for (const auto& request : activeRequests_) {
+            if (const auto cancelled = request.lock()) {
+                cancelled->store(true, std::memory_order_relaxed);
+            }
+        }
+        activeRequests_.clear();
+        nextNavigationPreview_ = retainNearbyPreviews;
+        nextNavigationPath_ =
+            retainNearbyPreviews && nextImage.isLocalFile() ? nextImage.toLocalFile() : QString();
+    }
+    if (retainNearbyPreviews) {
+        nearbyPreviewCache_->cancelForNavigation();
+    } else {
+        nearbyPreviewCache_->clear();
+    }
     {
         QMutexLocker pairLock(&pairsMutex_);
         pendingPairs_.clear();
@@ -542,6 +948,43 @@ void AsyncImageProvider::releasePictureResources()
         releaseGpuImageEditBuffers();
     });
     speculativeFullPool_.start([cache = decodedImageCache_] { cache->clear(); });
+}
+
+void AsyncImageProvider::prepareNearbyPreviews(const QList<QUrl>& urls, const QSize& requestedSize,
+                                               int maximumImageMemoryMiB)
+{
+    if (nearbyPreviewCache_->setWindow(urls, requestedSize, maximumImageMemoryMiB)) {
+        {
+            QMutexLocker lock(&nearbyPreviewCache_->mutex);
+            nearbyPreviewCache_->workerRunning = true;
+        }
+        nearbyPreviewPool_.start([cache = nearbyPreviewCache_,
+                                  this] { cache->run(resourcePolicy_, nearbyPreviewPool_); },
+                                 -1);
+    }
+}
+
+qsizetype AsyncImageProvider::nearbyPreviewCount() const
+{
+    QMutexLocker lock(&nearbyPreviewCache_->mutex);
+    return nearbyPreviewCache_->entries.size();
+}
+
+qsizetype AsyncImageProvider::nearbyPreviewBytes() const
+{
+    QMutexLocker lock(&nearbyPreviewCache_->mutex);
+    return nearbyPreviewCache_->bytes;
+}
+
+quint64 AsyncImageProvider::nearbyPreviewHitCount() const
+{
+    QMutexLocker lock(&nearbyPreviewCache_->mutex);
+    return nearbyPreviewCache_->hitCount;
+}
+
+bool AsyncImageProvider::hasNearbyPreview(const QUrl& url) const
+{
+    return url.isLocalFile() && !nearbyPreviewCache_->lookup(url.toLocalFile()).isNull();
 }
 
 void AsyncImageProvider::markParallelPreviewPresented(const QString& pairId)
@@ -612,13 +1055,34 @@ QQuickImageResponse* AsyncImageProvider::requestImageResponse(const QString& id,
             }
         };
     }
+    auto cancelled = std::make_shared<std::atomic_bool>(false);
+    bool navigationPriority = false;
+    {
+        QMutexLocker requestsLock(&requestsMutex_);
+        activeRequests_.erase(std::remove_if(activeRequests_.begin(), activeRequests_.end(),
+                                             [](const auto& request) { return request.expired(); }),
+                              activeRequests_.end());
+        activeRequests_.push_back(cancelled);
+        const bool selectedImage = nextNavigationPath_.isEmpty() || filePath == nextNavigationPath_;
+        if (!fullDetail && nextNavigationPreview_ && selectedImage) {
+            navigationPriority = true;
+            nextNavigationPreview_ = false;
+        } else if (fullDetail && !speculativeFull && selectedImage) {
+            // A direct full request is the selected image. Do not save the
+            // one-shot preview slot for an unrelated later edit request.
+            nextNavigationPreview_ = false;
+        }
+    }
     auto* response = new AsyncDecodeResponse(
         filePath, requestedSize, editParametersFromQuery(query), colorManagedRendering, fullDetail,
         rawFastDevelopment, rawInteractiveDevelopment, editWarmupRequested,
         parallelPreview && bool(pair), speculativeFull && bool(pair), pair, resourcePolicy_,
-        decodedImageCache_, std::move(discardFailedPreview));
+        decodedImageCache_, nearbyPreviewCache_, std::move(cancelled), navigationPriority,
+        std::move(discardFailedPreview));
     if (speculativeFull && pair) {
         speculativeFullPool_.start(response);
+    } else if (navigationPriority) {
+        navigationPreviewPool_.start(response);
     } else if (parallelPreview && pair) {
         parallelPreviewPool_.start(response);
     } else {

@@ -67,6 +67,9 @@ class WindowManager final : public QObject {
     Q_INVOKABLE QObject* ensureAnimationExportService(QObject* windowObject);
     Q_INVOKABLE QObject* ensurePreferredCoverFrameCoordinator(QObject* windowObject);
     Q_INVOKABLE void releasePictureResources();
+    Q_INVOKABLE void releasePictureResourcesForNavigation(const QUrl& nextImage);
+    Q_INVOKABLE void prepareNearbyPreviews(const QList<QUrl>& urls, const QSize& requestedSize,
+                                           int maximumImageMemoryMiB);
     Q_INVOKABLE void markParallelPreviewPresented(const QString& pairId);
     Q_INVOKABLE void destroyWindow(QObject* object);
     Q_INVOKABLE void destroyAllWindows();

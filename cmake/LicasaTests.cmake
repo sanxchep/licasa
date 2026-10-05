@@ -461,10 +461,15 @@ endif()
 
 add_executable(licasa_async_image_provider_tests tests/tst_async_image_provider.cpp)
 target_link_libraries(licasa_async_image_provider_tests PRIVATE licasa_image_services Qt6::Test)
+if(LICASA_HAVE_FAST_TIFF_PREVIEW)
+    target_compile_definitions(licasa_async_image_provider_tests PRIVATE
+            LICASA_HAVE_FAST_TIFF_PREVIEW=1)
+endif()
 licasa_enable_warnings(licasa_async_image_provider_tests)
 list(APPEND LICASA_TEST_TARGETS licasa_async_image_provider_tests)
 list(APPEND LICASA_CORE_TEST_TARGETS licasa_async_image_provider_tests)
-add_test(NAME licasa_async_image_provider_tests COMMAND licasa_async_image_provider_tests)
+add_test(NAME licasa_async_image_provider_tests
+        COMMAND licasa_async_image_provider_tests -platform offscreen)
 set_tests_properties(licasa_async_image_provider_tests PROPERTIES
         TIMEOUT 15 LABELS "core;async;lifecycle;fast")
 

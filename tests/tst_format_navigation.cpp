@@ -10,6 +10,7 @@ class FormatNavigationTest final : public QObject {
   private slots:
     void browsesReadableImagesInFilenameOrder();
     void handlesLargeDirectoriesAndMissingCurrentFile();
+    void keepsFiveNeighborsOnEitherSide();
 };
 
 void FormatNavigationTest::browsesReadableImagesInFilenameOrder()
@@ -30,6 +31,10 @@ void FormatNavigationTest::browsesReadableImagesInFilenameOrder()
     QCOMPARE(formats.adjacentImage(second, -1), first);
     QCOMPARE(formats.adjacentImage(third, 1), first);
     QCOMPARE(formats.adjacentImage(first, -1), third);
+    const QList<QUrl> smallWindow = formats.nearbyImages(first, 5);
+    QCOMPARE(smallWindow.size(), 2);
+    QCOMPARE(smallWindow.at(0), second);
+    QCOMPARE(smallWindow.at(1), third);
     QVERIFY(formats.adjacentImage(first, 0).isEmpty());
     QVERIFY(formats.adjacentImage(QUrl(QStringLiteral("https://example.org/a.png")), 1).isEmpty());
 }
@@ -53,6 +58,41 @@ void FormatNavigationTest::handlesLargeDirectoriesAndMissingCurrentFile()
     QCOMPARE(formats.adjacentImage(image(100), -1), image(99));
     QCOMPARE(formats.adjacentImage(image(249), 1), image(0));
     QVERIFY(formats.adjacentImage(image(250), -1).isEmpty());
+}
+
+void FormatNavigationTest::keepsFiveNeighborsOnEitherSide()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto image = [&directory](int index) {
+        return QUrl::fromLocalFile(
+            directory.filePath(QStringLiteral("image-%1.png").arg(index, 2, 10, QLatin1Char('0'))));
+    };
+    for (int index = 0; index < 16; ++index) {
+        QFile file(image(index).toLocalFile());
+        QVERIFY(file.open(QIODevice::WriteOnly));
+    }
+
+    const Licasa::FormatSupport formats;
+    const QList<QUrl> aroundSeven = formats.nearbyImages(image(7), 5);
+    QCOMPARE(aroundSeven.size(), 10);
+    for (int distance = 1; distance <= 5; ++distance) {
+        QCOMPARE(aroundSeven.at((distance - 1) * 2), image(7 + distance));
+        QCOMPARE(aroundSeven.at((distance - 1) * 2 + 1), image(7 - distance));
+    }
+    const QList<QUrl> movingRight = formats.nearbyImages(image(7), 5, 1);
+    const QList<QUrl> movingLeft = formats.nearbyImages(image(7), 5, -1);
+    for (int distance = 1; distance <= 5; ++distance) {
+        QCOMPARE(movingRight.at(distance - 1), image(7 + distance));
+        QCOMPARE(movingRight.at(5 + distance - 1), image(7 - distance));
+        QCOMPARE(movingLeft.at(distance - 1), image(7 - distance));
+        QCOMPARE(movingLeft.at(5 + distance - 1), image(7 + distance));
+    }
+    const QList<QUrl> aroundEight = formats.nearbyImages(image(8), 5);
+    QCOMPARE(aroundEight.size(), 10);
+    QVERIFY(!aroundEight.contains(image(2)));
+    QVERIFY(aroundEight.contains(image(13)));
+    QCOMPARE(formats.adjacentImage(image(15), 1), image(0));
 }
 
 QTEST_GUILESS_MAIN(FormatNavigationTest)

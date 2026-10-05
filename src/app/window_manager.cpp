@@ -318,6 +318,21 @@ void WindowManager::releasePictureResources()
     }
 }
 
+void WindowManager::releasePictureResourcesForNavigation(const QUrl& nextImage)
+{
+    if (imageProvider_) {
+        imageProvider_->releasePictureResources(true, nextImage);
+    }
+}
+
+void WindowManager::prepareNearbyPreviews(const QList<QUrl>& urls, const QSize& requestedSize,
+                                          int maximumImageMemoryMiB)
+{
+    if (imageProvider_) {
+        imageProvider_->prepareNearbyPreviews(urls, requestedSize, maximumImageMemoryMiB);
+    }
+}
+
 void WindowManager::markParallelPreviewPresented(const QString& pairId)
 {
     if (imageProvider_) {

@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ca-certificates git cmake make ninja-build g++ python3 \
-            pkg-config patch meson nasm clang-format-18 binutils libjpeg-turbo8-dev \
+            pkg-config patch meson nasm clang-format-18 binutils libjpeg-turbo8-dev libtiff-dev \
             libx11-dev libxext-dev \
             qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-image-formats-plugins \
             qt6-base-private-dev qt6-declarative-private-dev qt6-shadertools-dev \

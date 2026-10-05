@@ -36,6 +36,7 @@ Window {
     property var appInfo: ({ version: Qt.application.version, releaseDate: "" })
     required property var viewerPreferences
     required property var windowManager
+    property var temporalControlsItem: temporalControlsLoader.item
 
     width: 1360
     height: 860
@@ -71,6 +72,9 @@ Window {
     // painted. Keep its displayed geometry until the replacement is ready.
     property size displayedNaturalImageSize: Qt.size(0, 0)
     property int imageRevision: 0
+    property int lastBrowseDirection: 0
+    property double lastBrowseAtMs: 0
+    property bool browseBurstActive: false
     property string currentFileName: ""
     property string displayedFileName: ""
     property bool currentImageAnimated: false
@@ -161,7 +165,7 @@ Window {
     readonly property real previewOverscanFactor: 1.20
     readonly property real previewTriggerRatio: 1.15
     readonly property int maxPreviewDecodeExtent: 8192
-    readonly property int fullResUpgradeDelayMs: 80
+    readonly property int fullResUpgradeDelayMs: isLargeTiff() || isLargeJpeg() ? 350 : 80
 
     readonly property real maxWheelDeltaPerEvent: 120
 
@@ -189,6 +193,19 @@ Window {
     onEditPanelOpenChanged: {
         if (editPanelOpen)
             stopMotionPhotoPlaybackForLifecycle()
+        if (editPanelOpen && browseBurstActive) {
+            browseIdleTimer.stop()
+            browseBurstActive = false
+            if (imageViewport.imageStatus === Image.Ready
+                    && (previewPhase || rawFastPhase))
+                fullResTimer.restart()
+        }
+        nearbyPreviewTimer.stop()
+        if (editPanelOpen)
+            refreshNearbyPreviews()
+        else if (imageViewport.imageStatus === Image.Ready
+                && !notificationCenter.isLoading("image"))
+            nearbyPreviewTimer.restart()
     }
     property real editorWorkspaceInset: 0.0
     property string cropAspectPreset: "free"
@@ -498,8 +515,13 @@ Window {
             0.05,
             Math.min(effectiveEditorCropWidth(), effectiveEditorCropHeight())
         )
+        // The first hidden image window can briefly be 1 pixel wide. Request
+        // a useful bounded preview before the native window has its final size.
+        const viewportWidth = imageViewport.width > 64
+            ? imageViewport.width
+            : Math.min(Math.max(1360, Screen.width), 2560)
         return Math.min(maxPreviewDecodeExtent, Math.max(1, Math.ceil(
-            imageViewport.width * effectiveDpr() * previewOverscanFactor * cropBoost)))
+            viewportWidth * effectiveDpr() * previewOverscanFactor * cropBoost)))
     }
 
     function previewSourceHeight() {
@@ -507,8 +529,11 @@ Window {
             0.05,
             Math.min(effectiveEditorCropWidth(), effectiveEditorCropHeight())
         )
+        const viewportHeight = imageViewport.height > 64
+            ? imageViewport.height
+            : Math.min(Math.max(860, Screen.height), 1440)
         return Math.min(maxPreviewDecodeExtent, Math.max(1, Math.ceil(
-            imageViewport.height * effectiveDpr() * previewOverscanFactor * cropBoost)))
+            viewportHeight * effectiveDpr() * previewOverscanFactor * cropBoost)))
     }
 
     function shouldUsePreview() {
@@ -523,6 +548,9 @@ Window {
         const name = FileUrls.fileName(residentImageUrl).toLowerCase()
         const dot = name.lastIndexOf(".")
         const extension = dot >= 0 ? name.substring(dot + 1) : ""
+        // A very large JPEG full read can compete with the next arrow's preview.
+        if (isLargeJpeg())
+            return false
         // A full-native-raster preview makes two large codec jobs compete for
         // CPU and memory. These codecs overlap only with an embedded preview
         // large enough for the current viewport.
@@ -531,6 +559,8 @@ Window {
                 || extension === "hif" || extension === "jxl")
             return rawEmbeddedPreviewSize.width >= previewSourceWidth()
                 && rawEmbeddedPreviewSize.height >= previewSourceHeight()
+        if (extension === "tif" || extension === "tiff")
+            return false
         return true
     }
 
@@ -538,6 +568,18 @@ Window {
         if (naturalImageSize.width <= 0 || naturalImageSize.height <= 0)
             return 0.0
         return naturalImageSize.width * naturalImageSize.height / 1000000.0
+    }
+
+    function isLargeTiff() {
+        const name = FileUrls.fileName(residentImageUrl).toLowerCase()
+        return (name.endsWith(".tif") || name.endsWith(".tiff"))
+            && currentImageMegapixels() >= 25
+    }
+
+    function isLargeJpeg() {
+        const name = FileUrls.fileName(residentImageUrl).toLowerCase()
+        return (name.endsWith(".jpg") || name.endsWith(".jpeg"))
+            && currentImageMegapixels() >= 50
     }
 
     function syncCurrentImageResourceLimit() {
@@ -1272,23 +1314,40 @@ Window {
         if (!FileUrls.isLocal(u) || !formatSupport.canOpen(u))
             return
 
+        if (replaceCurrent !== true) {
+            lastBrowseDirection = 0
+            lastBrowseAtMs = 0
+            browseIdleTimer.stop()
+            browseBurstActive = false
+        }
+
         if (!replaceCurrent && hasAssignedImage() && imageViewport.imageStatus !== Image.Error) {
             windowManager.openInNewWindow(u)
             return
         }
 
         const previousImageReady = imageViewport.imageStatus === Image.Ready
+        const replacingLoadingImage = replaceCurrent === true
+            && notificationCenter.isLoading("image")
+        nearbyPreviewTimer.stop()
+        rawMetadataProbeTimer.stop()
         const preserveVisibleView = replaceCurrent === true && fullScreenMode && previousImageReady
         pendingNavigationFit = preserveVisibleView
 
         if (hasAssignedImage()) {
             stopMotionPhotoPlaybackForLifecycle()
-            windowManager.releasePictureResources()
+            if (replaceCurrent === true)
+                windowManager.releasePictureResourcesForNavigation(u)
+            else
+                windowManager.releasePictureResources()
         }
 
         notificationCenter.startSession()
         imageOpenStartedMs = Date.now()
-        notificationCenter.begin("image", "Opening image", FileUrls.fileName(u), 300)
+        // If the previous photo is still showing its loading notice, update
+        // that notice immediately so a second Next press has visible feedback.
+        notificationCenter.begin("image", "Opening image", FileUrls.fileName(u),
+                                 replacingLoadingImage ? 0 : 300)
         if (!replaceCurrent)
             prepareForImageOpen()
 
@@ -1316,6 +1375,7 @@ Window {
         previewPhase = imageLimitedToPreview
             || (rawPreviewFirst && !rawFastPhase)
             || currentImageAnimated
+            || replacingLoadingImage
             || shouldUsePreview()
         fullResTimer.stop()
 
@@ -1355,8 +1415,40 @@ Window {
                 || !FileUrls.isLocal(root.residentImageUrl) || imageSaveService.busy)
             return
         const adjacent = formatSupport.adjacentImage(root.residentImageUrl, direction)
-        if (FileUrls.isLocal(adjacent))
+        if (FileUrls.isLocal(adjacent)) {
+            const now = Date.now()
+            if (lastBrowseAtMs > 0 && now - lastBrowseAtMs < 250) {
+                browseBurstActive = true
+                fullResTimer.stop()
+            }
+            lastBrowseAtMs = now
+            if (browseBurstActive)
+                browseIdleTimer.restart()
+            lastBrowseDirection = direction > 0 ? 1 : -1
             loadImageUrl(adjacent, true)
+        }
+    }
+
+    function refreshNearbyPreviews() {
+        if (!root.fullScreenMode || root.editPanelOpen
+                || !FileUrls.isLocal(root.residentImageUrl)) {
+            windowManager.prepareNearbyPreviews([], Qt.size(0, 0),
+                root.viewerPreferences.maximumImageMemoryMiB)
+            return
+        }
+        windowManager.prepareNearbyPreviews(
+            formatSupport.nearbyImages(root.residentImageUrl, 5, root.lastBrowseDirection),
+            Qt.size(root.previewSourceWidth(), root.previewSourceHeight()),
+            root.viewerPreferences.maximumImageMemoryMiB)
+    }
+
+    onFullScreenModeChanged: {
+        if (!fullScreenMode) {
+            nearbyPreviewTimer.stop()
+            refreshNearbyPreviews()
+        } else if (imageViewport.imageStatus === Image.Ready) {
+            nearbyPreviewTimer.restart()
+        }
     }
 
     function moveImage(dx, dy) {
@@ -1869,6 +1961,7 @@ Window {
 
         function onMaximumImageMegapixelsChanged() {
             root.syncCurrentImageResourceLimit()
+            nearbyPreviewTimer.restart()
         }
     }
 
@@ -2240,28 +2333,28 @@ Window {
         sequence: "Left"
         enabled: root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen
-            && !(temporalControlsLoader.item && temporalControlsLoader.item.keyboardFocusWithin)
+            && !(root.temporalControlsItem && root.temporalControlsItem.keyboardFocusWithin)
         onActivated: root.browseImage(-1)
     }
     Shortcut {
         sequence: "Right"
         enabled: root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen
-            && !(temporalControlsLoader.item && temporalControlsLoader.item.keyboardFocusWithin)
+            && !(root.temporalControlsItem && root.temporalControlsItem.keyboardFocusWithin)
         onActivated: root.browseImage(1)
     }
     Shortcut {
         sequence: "Up"
         enabled: root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen
-            && !(temporalControlsLoader.item && temporalControlsLoader.item.keyboardFocusWithin)
+            && !(root.temporalControlsItem && root.temporalControlsItem.keyboardFocusWithin)
         onActivated: root.zoomFromKeyboard(1.15)
     }
     Shortcut {
         sequence: "Down"
         enabled: root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen
-            && !(temporalControlsLoader.item && temporalControlsLoader.item.keyboardFocusWithin)
+            && !(root.temporalControlsItem && root.temporalControlsItem.keyboardFocusWithin)
         onActivated: root.zoomFromKeyboard(1.0 / 1.15)
     }
     Shortcut {
@@ -2340,7 +2433,7 @@ Window {
         previewPhase: root.previewPhase
         rawFastPhase: root.rawFastPhase
         rawPreviewFirst: root.rawPreviewFirst
-        parallelFullResolutionEnabled: root.previewPhase
+        parallelFullResolutionEnabled: root.previewPhase && !root.browseBurstActive
             && !root.imageLimitedToPreview
             && !root.currentImageAnimated
             && root.fullResolutionRenderingEnabled
@@ -2475,6 +2568,8 @@ Window {
         }
 
         onImageReady: {
+            if (!root.animatedPlaybackActive)
+                nearbyPreviewTimer.restart()
             const shouldReveal = root.pendingImageReveal
             if (root.pendingNavigationFit) {
                 root.pendingNavigationFit = false
@@ -2517,7 +2612,8 @@ Window {
             if ((root.previewPhase || root.rawFastPhase)
                     && !root.imageLimitedToPreview
                     && !root.animatedPlaybackActive
-                    && root.fullResolutionRenderingEnabled)
+                    && root.fullResolutionRenderingEnabled
+                    && !root.browseBurstActive)
                 fullResTimer.restart()
 
             if (root.imageOpenStartedMs >= 0 && notificationCenter.isLoading("image")) {
@@ -3176,6 +3272,27 @@ Window {
         onTriggered: {
             if (!root.visible && !root.hasAssignedImage())
                 root.nativeWindowOps.trimProcessMemory()
+        }
+    }
+
+    Timer {
+        id: nearbyPreviewTimer
+        interval: 0
+        repeat: false
+        onTriggered: root.refreshNearbyPreviews()
+    }
+
+    Timer {
+        id: browseIdleTimer
+        interval: 220
+        repeat: false
+        onTriggered: {
+            root.browseBurstActive = false
+            if (imageViewport.imageStatus === Image.Ready
+                    && (root.previewPhase || root.rawFastPhase)
+                    && !root.imageLimitedToPreview
+                    && root.fullResolutionRenderingEnabled)
+                fullResTimer.restart()
         }
     }
 

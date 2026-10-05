@@ -116,53 +116,111 @@ bool FormatSupport::canOpen(const QUrl& url) const
     return reader.canRead();
 }
 
-QUrl FormatSupport::adjacentImage(const QUrl& current, int direction) const
+const QStringList& FormatSupport::imagesInDirectory(const QString& directory) const
 {
-    if (!current.isLocalFile() || direction == 0) {
-        return {};
+    const QDateTime modified = QFileInfo(directory).lastModified();
+    if (indexedDirectory_ == directory && indexedDirectoryModified_ == modified) {
+        return indexedNames_;
     }
 
-    const QFileInfo currentFile(current.toLocalFile());
-    const QDir folder(currentFile.absolutePath());
-    const QString currentName = currentFile.fileName();
+    indexedDirectory_ = directory;
+    indexedDirectoryModified_ = modified;
+    indexedNames_.clear();
+    QDirIterator entries(directory, QDir::Files | QDir::Readable | QDir::NoDotAndDotDot);
+    while (entries.hasNext()) {
+        entries.next();
+        const QFileInfo entry = entries.fileInfo();
+        if (readableExtensions_.contains(entry.suffix().toLower())) {
+            indexedNames_.append(entry.fileName());
+        }
+    }
     const auto less = [](const QString& left, const QString& right) {
         const int comparison = left.localeAwareCompare(right);
         return comparison < 0 || (comparison == 0 && left < right);
     };
-    QString first, last, before, after;
-    bool foundCurrent = false;
-    int count = 0;
-    QDirIterator entries(folder.absolutePath(),
-                         QDir::Files | QDir::Readable | QDir::NoDotAndDotDot);
-    while (entries.hasNext()) {
-        entries.next();
-        const QFileInfo entry = entries.fileInfo();
-        const QString name = entry.fileName();
-        if (!readableExtensions_.contains(entry.suffix().toLower()) && name != currentName) {
-            continue;
-        }
-        foundCurrent = foundCurrent || name == currentName;
-        ++count;
-        if (first.isEmpty() || less(name, first)) {
-            first = name;
-        }
-        if (last.isEmpty() || less(last, name)) {
-            last = name;
-        }
-        if (less(name, currentName) && (before.isEmpty() || less(before, name))) {
-            before = name;
-        }
-        if (less(currentName, name) && (after.isEmpty() || less(name, after))) {
-            after = name;
-        }
-    }
+    std::sort(indexedNames_.begin(), indexedNames_.end(), less);
+    return indexedNames_;
+}
 
-    if (!foundCurrent || count < 2) {
+QList<QUrl> FormatSupport::nearbyImages(const QUrl& current, int radius) const
+{
+    return nearbyImages(current, radius, 0);
+}
+
+QList<QUrl> FormatSupport::nearbyImages(const QUrl& current, int radius,
+                                        int preferredDirection) const
+{
+    if (!current.isLocalFile() || radius <= 0) {
         return {};
     }
-    const QString next =
-        direction > 0 ? (after.isEmpty() ? first : after) : (before.isEmpty() ? last : before);
-    return QUrl::fromLocalFile(folder.absoluteFilePath(next));
+
+    const QFileInfo currentFile(current.toLocalFile());
+    if (!currentFile.isFile()) {
+        return {};
+    }
+
+    const QString directory = currentFile.absolutePath();
+    const QStringList& indexed = imagesInDirectory(directory);
+    const auto less = [](const QString& left, const QString& right) {
+        const int comparison = left.localeAwareCompare(right);
+        return comparison < 0 || (comparison == 0 && left < right);
+    };
+    const QString currentName = currentFile.fileName();
+    QStringList additional;
+    const QStringList* names = &indexed;
+    auto currentIt = std::lower_bound(indexed.cbegin(), indexed.cend(), currentName, less);
+    if (currentIt == indexed.cend() || *currentIt != currentName) {
+        if (!canOpen(current)) {
+            return {};
+        }
+        additional = indexed;
+        additional.insert(int(currentIt - indexed.cbegin()), currentName);
+        names = &additional;
+        currentIt = names->cbegin() + (currentIt - indexed.cbegin());
+    }
+
+    const int count = names->size();
+    if (count < 2) {
+        return {};
+    }
+    const int index = int(currentIt - names->cbegin());
+    QList<QUrl> nearby;
+    nearby.reserve(int(std::min<qint64>(count - 1, qint64(radius) * 2)));
+    const auto appendNeighbor = [&](int distance, int direction) {
+        const int neighbor =
+            direction > 0 ? (index + distance) % count : (index - distance + count) % count;
+        const QUrl url = QUrl::fromLocalFile(QDir(directory).absoluteFilePath(names->at(neighbor)));
+        if (!nearby.contains(url)) {
+            nearby.append(url);
+        }
+    };
+    if (preferredDirection != 0) {
+        for (const int direction :
+             {preferredDirection > 0 ? 1 : -1, preferredDirection > 0 ? -1 : 1}) {
+            for (int distance = 1; distance <= radius && nearby.size() < count - 1; ++distance) {
+                appendNeighbor(distance, direction);
+            }
+        }
+    } else {
+        for (int distance = 1; distance <= radius && nearby.size() < count - 1; ++distance) {
+            for (const int direction : {1, -1}) {
+                appendNeighbor(distance, direction);
+            }
+        }
+    }
+    return nearby;
+}
+
+QUrl FormatSupport::adjacentImage(const QUrl& current, int direction) const
+{
+    if (direction == 0) {
+        return {};
+    }
+    const QList<QUrl> nearby = nearbyImages(current, 1);
+    if (nearby.isEmpty()) {
+        return {};
+    }
+    return direction > 0 || nearby.size() == 1 ? nearby.first() : nearby.at(1);
 }
 
 } // namespace Licasa

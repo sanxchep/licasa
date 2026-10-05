@@ -21,6 +21,9 @@ inline constexpr char rawInteractiveDevelopmentProperty[] = "_licasaRawInteracti
 inline constexpr char previewFirstProperty[] = "_licasaPreviewFirst";
 inline constexpr char sensorSizeProperty[] = "_licasaSensorSize";
 inline constexpr char embeddedPreviewSizeProperty[] = "_licasaEmbeddedPreviewSize";
+// A RAW plugin may admit an oversized embedded JPEG only through native,
+// bounded JPEG scaling; this flag lets the selected-preview worker use it.
+inline constexpr char scalableEmbeddedJpegProperty[] = "_licasaScalableEmbeddedJpeg";
 inline constexpr char previewPresentedProperty[] = "_licasaPreviewPresented";
 // Metadata-only HEIF Exif exposure is opt-in. Ordinary HEIC/HEIF probing keeps
 // this false unless a same-basename Apple MOV candidate exists.

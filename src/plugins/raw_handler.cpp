@@ -19,6 +19,7 @@
 namespace Contract = Licasa::ImageDecodeContract;
 namespace {
 constexpr quint64 metadataReadLimit = 8 * 1024 * 1024;
+constexpr quint64 scalableJpegInputLimit = 32 * 1024 * 1024;
 
 quint64 pixels(const QSize& size)
 {
@@ -344,6 +345,7 @@ class RawHandler final : public QImageIOHandler {
             // thumbnail fields. Keep the list for explicit selection, but also
             // compare it with LibRaw's documented default (largest) preview.
             QSize bestListedPreview;
+            bool bestListedScalableJpeg = false;
             for (int i = 0; i < count_; ++i) {
                 const auto& thumb = list.thumblist[order_[i]];
                 if (!admissible(thumb)) {
@@ -354,6 +356,8 @@ class RawHandler final : public QImageIOHandler {
                     continue;
                 }
                 bestListedPreview = candidate;
+                bestListedScalableJpeg =
+                    scalableJpegPreview(candidate, thumb.tlength, thumb.tformat);
                 break;
             }
 
@@ -364,7 +368,15 @@ class RawHandler final : public QImageIOHandler {
             const bool defaultPreviewUsable =
                 raw.thumbOK(thumbLimit) != 0 && defaultThumb.tlength >= 64 &&
                 defaultThumb.tlength <= workingBytes_ && defaultPreview.isValid() &&
-                !defaultPreview.isEmpty() && Contract::allows(defaultPreview, maximumPixels_);
+                !defaultPreview.isEmpty() &&
+                (Contract::allows(defaultPreview, maximumPixels_) ||
+                 scalableJpegPreview(defaultPreview, defaultThumb.tlength, defaultThumb.tformat));
+
+            if (bestListedScalableJpeg ||
+                (defaultPreviewUsable &&
+                 scalableJpegPreview(defaultPreview, defaultThumb.tlength, defaultThumb.tformat))) {
+                device()->setProperty(Contract::scalableEmbeddedJpegProperty, true);
+            }
 
             defaultPreviewPreferred_ =
                 defaultPreviewUsable && pixels(defaultPreview) > pixels(bestListedPreview);
@@ -407,7 +419,8 @@ class RawHandler final : public QImageIOHandler {
         }
         // A JXL thumbnail can omit TIFF dimensions. Its nested, explicitly
         // selected Qt reader must admit its declared raster before decoding.
-        if (!(compressed && !pixels(size)) && !Contract::allows(size, maximumPixels_)) {
+        if (!(compressed && !pixels(size)) && !Contract::allows(size, maximumPixels_) &&
+            !scalableJpegPreview(size, thumb.tlength, thumb.tformat)) {
             return false;
         }
         if (!compressed) {
@@ -422,6 +435,27 @@ class RawHandler final : public QImageIOHandler {
         }
         return compressed || thumb.tformat == LIBRAW_INTERNAL_THUMBNAIL_PPM ||
                thumb.tformat == LIBRAW_INTERNAL_THUMBNAIL_PPM16;
+    }
+    bool scalableJpegPreview(const QSize& dimensions, quint64 compressedBytes, int format) const
+    {
+        if ((format != LIBRAW_THUMBNAIL_JPEG && format != LIBRAW_INTERNAL_THUMBNAIL_JPEG) ||
+            !dimensions.isValid() || dimensions.isEmpty() || maximumPixels_ == 0 ||
+            Contract::allows(dimensions, maximumPixels_)) {
+            return false;
+        }
+        // Qt's JPEG reader has a native 1/8 scale. Even its largest intermediate
+        // raster must stay within this reader's pixel budget. Cap LibRaw's
+        // compressed thumbnail copy separately from the decoded output.
+        const quint64 smallestNativeWidth = (quint64(dimensions.width()) + 7) / 8;
+        const quint64 smallestNativeHeight = (quint64(dimensions.height()) + 7) / 8;
+        const quint64 pixelBasedInputLimit =
+            maximumPixels_ > (std::numeric_limits<quint64>::max() - metadataReadLimit) / 4
+                ? std::numeric_limits<quint64>::max()
+                : maximumPixels_ * 4 + metadataReadLimit;
+        const quint64 inputLimit =
+            std::min({scalableJpegInputLimit, workingBytes_, pixelBasedInputLimit});
+        return smallestNativeWidth * smallestNativeHeight <= maximumPixels_ &&
+               compressedBytes >= 64 && compressedBytes <= inputLimit;
     }
     QImage decodeUnpackedThumbnail(int fallbackFlip)
     {
@@ -475,7 +509,13 @@ class RawHandler final : public QImageIOHandler {
             buffer.setProperty(Contract::cancellationProperty,
                                device()->property(Contract::cancellationProperty));
             const QSize declared = reader.size();
-            if (!Contract::allows(declared, maximumPixels_)) {
+            const bool withinBudget = Contract::allows(declared, maximumPixels_);
+            const bool nativeScaledJpeg =
+                !withinBudget && data.tformat == LIBRAW_THUMBNAIL_JPEG &&
+                scalableJpegPreview(declared, processed->data_size, data.tformat) &&
+                scaledSize_.isValid() && Contract::allows(scaledSize_, maximumPixels_) &&
+                reader.supportsOption(QImageIOHandler::ScaledSize);
+            if (!withinBudget && !nativeScaledJpeg) {
                 return {};
             }
             QSize target = scaledSize_;
@@ -483,11 +523,27 @@ class RawHandler final : public QImageIOHandler {
             if (transformation.testFlag(TransformationRotate90)) {
                 target.transpose();
             }
+            if (nativeScaledJpeg) {
+                // Keep the JPEG decoder's native intermediate inside the same
+                // pixel budget, then let Qt produce the requested view size.
+                for (const quint64 divider : {quint64(1), quint64(2), quint64(4), quint64(8)}) {
+                    const QSize nativeSize(
+                        int((quint64(declared.width()) + divider - 1) / divider),
+                        int((quint64(declared.height()) + divider - 1) / divider));
+                    if (Contract::allows(nativeSize, maximumPixels_)) {
+                        target = target.scaled(nativeSize, Qt::KeepAspectRatio);
+                        break;
+                    }
+                }
+            }
             if (target.isValid() &&
                 (declared.width() > target.width() || declared.height() > target.height())) {
                 reader.setScaledSize(declared.scaled(target, Qt::KeepAspectRatio));
             }
             image = reader.read();
+            if (!Contract::allows(image.size(), maximumPixels_)) {
+                return {};
+            }
             device()->setProperty("_licasaNativeRasterPixels", pixels(declared));
             if (data.tformat == LIBRAW_THUMBNAIL_JPEGXL) {
                 image = orient(std::move(image), fallbackFlip);
