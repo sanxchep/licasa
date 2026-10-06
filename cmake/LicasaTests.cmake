@@ -399,6 +399,9 @@ if(LICASA_ENABLE_HEIF)
             )
     target_link_libraries(licasa_heif_tests PRIVATE licasa_image_services)
     target_include_directories(licasa_heif_tests PRIVATE src)
+    # Qt Quick's Snap SDK headers include an older libheif. The reference
+    # decoder must compile against the same pinned headers as the HEIF plugin.
+    target_include_directories(licasa_heif_tests BEFORE PRIVATE "${LICASA_HEIF_INCLUDES}")
     target_compile_definitions(licasa_heif_tests PRIVATE LICASA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(licasa_heif_tests PRIVATE Qt6::Quick Qt6::Test heif de265)
     licasa_enable_warnings(licasa_heif_tests)
