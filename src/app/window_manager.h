@@ -71,11 +71,18 @@ class WindowManager final : public QObject {
     Q_INVOKABLE void prepareNearbyPreviews(const QList<QUrl>& urls, const QSize& requestedSize,
                                            int maximumImageMemoryMiB);
     Q_INVOKABLE void markParallelPreviewPresented(const QString& pairId);
+    Q_INVOKABLE QVariantMap sampleDisplayedPixel(QObject* windowObject, qreal x, qreal y) const;
     Q_INVOKABLE void destroyWindow(QObject* object);
     Q_INVOKABLE void destroyAllWindows();
     Q_INVOKABLE void quitApplication();
 
     void showAnyWindow();
+
+  signals:
+    void navigationKeyReleased(QObject* window, int direction);
+
+  protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
   private:
     void registerWindow(QQuickWindow* window);

@@ -6,6 +6,7 @@
 
 #include "app/app_constants.h"
 #include "app/application_settings.h"
+#include "app/runtime_error_log.h"
 #include "app/window_manager.h"
 #include "export/image_save_service.h"
 #include "imaging/async_image_provider.h"
@@ -28,16 +29,17 @@
 
 int main(int argc, char* argv[])
 {
+    Licasa::RuntimeErrorLog runtimeErrorLog;
     Licasa::ImageResourcePolicy::initializeDecoderEnvironment();
     Licasa::configureSurfaceFormatForRequestedOpenGL();
 
     QGuiApplication application(argc, argv);
-    Licasa::initializeImagePlugins();
     application.setApplicationName(QString::fromLatin1(Licasa::Constants::applicationName));
     application.setApplicationDisplayName(QString::fromLatin1(Licasa::Constants::applicationName));
     application.setOrganizationName(QString::fromLatin1(Licasa::Constants::organizationName));
     application.setDesktopFileName(QString::fromLatin1(Licasa::Constants::desktopFileName));
     application.setWindowIcon(QIcon(QStringLiteral(":/assets/licasa.png")));
+    Licasa::initializeImagePlugins();
     const bool installedAsSnap = qEnvironmentVariableIsSet("SNAP_NAME");
     const QString snapVersion = installedAsSnap ? qEnvironmentVariable("SNAP_VERSION") : QString{};
     const QString installedVersion =
@@ -101,7 +103,8 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    const bool startHidden = options.background && options.initialUrl.isEmpty();
+    const bool startHidden =
+        options.background && backgroundModeManager.enabled() && options.initialUrl.isEmpty();
     if (!windowManager.createWindow(options.initialUrl, startHidden, true)) {
         return -1;
     }

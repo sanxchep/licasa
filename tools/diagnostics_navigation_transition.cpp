@@ -3,6 +3,7 @@
 
 #include <QCoreApplication>
 #include <QJsonArray>
+#include <QKeyEvent>
 #include <QQuickWindow>
 #include <QSizeF>
 #include <QTimer>
@@ -235,9 +236,9 @@ class NavigationTransitionCheck final : public QObject, public DiagnosticCheck {
 class NavigationSequenceCheck final : public QObject, public DiagnosticCheck {
   public:
     NavigationSequenceCheck(Licasa::AsyncImageProvider* provider, int presses, int intervalMs,
-                            int warmupMs, int idleMs, int direction)
+                            int warmupMs, int idleMs, int direction, bool releaseLastKey)
         : provider_(provider), presses_(presses), intervalMs_(intervalMs), warmupMs_(warmupMs),
-          idleMs_(idleMs), direction_(direction)
+          idleMs_(idleMs), direction_(direction), releaseLastKey_(releaseLastKey)
     {}
 
     bool attach(QQuickWindow* window) override
@@ -278,11 +279,13 @@ class NavigationSequenceCheck final : public QObject, public DiagnosticCheck {
         double selectionCallMs = 0;
         double timerLagMs = 0;
         bool fullPendingBefore = false;
+        bool queued = false;
     };
 
     bool activeMatches(const Press& press) const
     {
-        return window_->property("displayedFileName").toString() == press.fileName &&
+        return !press.queued &&
+               window_->property("displayedFileName").toString() == press.fileName &&
                viewport_->property("imageStatus").toInt() == 1 &&
                viewport_->property("activeRequestKey")
                    .toString()
@@ -308,13 +311,29 @@ class NavigationSequenceCheck final : public QObject, public DiagnosticCheck {
                                       Q_ARG(QVariant, QVariant(direction > 0 ? 1 : -1)));
         press.selectionCallMs = (monotonicNs() - press.pressedNs) / 1e6;
         const QUrl after = window_->property("residentImageUrl").toUrl();
-        if (!invoked || !after.isLocalFile() || after == before) {
-            finish(QStringLiteral("Arrow press did not select another image"));
+        if (!invoked || !after.isLocalFile()) {
+            finish(QStringLiteral("Arrow press could not be handled"));
             return;
         }
+        press.queued = after == before;
         press.fileName = after.fileName();
         press.revision = window_->property("imageRevision").toInt();
         steps_.push_back(std::move(press));
+        if (releaseLastKey_ && int(steps_.size()) == presses_) {
+            // Guarantee that the release exercises a pending repeat even on a
+            // very fast renderer that presented the preceding press already.
+            if (window_->property("browsePendingDirection").toInt() == 0) {
+                releaseForcedQueue_ =
+                    QMetaObject::invokeMethod(window_, "browseImage", Qt::DirectConnection,
+                                              Q_ARG(QVariant, QVariant(direction > 0 ? 1 : -1)));
+            }
+            releasePendingBefore_ = window_->property("browsePendingDirection").toInt() != 0;
+            releaseFile_ = window_->property("residentImageUrl").toUrl().fileName();
+            QKeyEvent release(QEvent::KeyRelease, direction > 0 ? Qt::Key_Right : Qt::Key_Left,
+                              Qt::NoModifier);
+            QCoreApplication::sendEvent(window_, &release);
+            releasePendingAfter_ = window_->property("browsePendingDirection").toInt() != 0;
+        }
     }
 
     void poll()
@@ -343,7 +362,11 @@ class NavigationSequenceCheck final : public QObject, public DiagnosticCheck {
             pressArrow();
             nextPressNs_ += qint64(intervalMs_) * 1000000;
         }
-        if (int(steps_.size()) == presses_ && !steps_.empty() && steps_.back().presentedNs) {
+        if (int(steps_.size()) == presses_ && !steps_.empty() &&
+            !window_->property("browseAwaitingFrame").toBool() &&
+            window_->property("browsePendingDirection").toInt() == 0 &&
+            window_->property("displayedFileName").toString() ==
+                window_->property("residentImageUrl").toUrl().fileName()) {
             if (!finalPresentedNs_) {
                 finalPresentedNs_ = now;
             }
@@ -359,6 +382,22 @@ class NavigationSequenceCheck final : public QObject, public DiagnosticCheck {
             return;
         }
         const qint64 now = monotonicNs();
+        const QString displayed = window_->property("displayedFileName").toString();
+        if (viewport_->property("imageStatus").toInt() == 1 && !displayed.isEmpty() &&
+            (displayedSequence_.isEmpty() || displayedSequence_.last() != displayed)) {
+            displayedSequence_.append(displayed);
+            if (qEnvironmentVariableIsSet("LICASA_VERIFY_FRAME_PIXELS")) {
+                const QImage frame = window_->grabWindow();
+                const QColor center = frame.isNull()
+                                          ? QColor()
+                                          : frame.pixelColor(frame.width() / 2, frame.height() / 2);
+                paintedSamples_.append(QJsonObject{{"file", displayed},
+                                                   {"red", center.red()},
+                                                   {"green", center.green()},
+                                                   {"blue", center.blue()},
+                                                   {"valid", center.isValid()}});
+            }
+        }
         for (Press& press : steps_) {
             if (press.readyNs && !press.presentedNs && activeMatches(press)) {
                 press.presentedNs = now;
@@ -382,6 +421,7 @@ class NavigationSequenceCheck final : public QObject, public DiagnosticCheck {
                              {"cache_count_before", int(press.cacheCountBefore)},
                              {"cache_bytes_before", double(press.cacheBytesBefore)},
                              {"full_pending_before", press.fullPendingBefore}};
+            item["queued"] = press.queued;
             if (press.readyNs) {
                 item["to_ready_ms"] = (press.readyNs - press.pressedNs) / 1e6;
                 item["cache_hits_by_ready"] = double(press.hitsAtReady - press.hitsBefore);
@@ -397,7 +437,14 @@ class NavigationSequenceCheck final : public QObject, public DiagnosticCheck {
             {"warmup_ms", warmupMs_},
             {"idle_ms", idleMs_},
             {"direction", direction_},
+            {"release_last_key", releaseLastKey_},
+            {"release_pending_before", releasePendingBefore_},
+            {"release_pending_after", releasePendingAfter_},
+            {"release_forced_queue", releaseForcedQueue_},
+            {"release_file", releaseFile_},
             {"steps", presses},
+            {"displayed_sequence", QJsonArray::fromStringList(displayedSequence_)},
+            {"painted_samples", paintedSamples_},
             {"cache_count_final", int(provider_->nearbyPreviewCount())},
             {"cache_bytes_final", double(provider_->nearbyPreviewBytes())},
             {"cache_hits_final", double(provider_->nearbyPreviewHitCount())},
@@ -421,11 +468,18 @@ class NavigationSequenceCheck final : public QObject, public DiagnosticCheck {
     QObject* viewport_ = nullptr;
     QTimer timer_;
     std::vector<Press> steps_;
+    QStringList displayedSequence_;
+    QJsonArray paintedSamples_;
     int presses_ = 0;
     int intervalMs_ = 0;
     int warmupMs_ = 0;
     int idleMs_ = 0;
     int direction_ = 1;
+    bool releaseLastKey_ = false;
+    bool releasePendingBefore_ = false;
+    bool releasePendingAfter_ = false;
+    bool releaseForcedQueue_ = false;
+    QString releaseFile_;
     bool finished_ = false;
     qint64 initialReadyNs_ = 0;
     qint64 nextPressNs_ = 0;
@@ -442,10 +496,10 @@ std::unique_ptr<DiagnosticCheck> makeNavigationTransitionCheck(const QUrl& nextI
 std::unique_ptr<DiagnosticCheck> makeNavigationSequenceCheck(Licasa::AsyncImageProvider* provider,
                                                              int presses, int intervalMs,
                                                              int warmupMs, int idleMs,
-                                                             int direction)
+                                                             int direction, bool releaseLastKey)
 {
     return std::make_unique<NavigationSequenceCheck>(provider, presses, intervalMs, warmupMs,
-                                                     idleMs, direction);
+                                                     idleMs, direction, releaseLastKey);
 }
 } // namespace LicasaDiagnostics
 

@@ -1,8 +1,8 @@
 #include "app/application_settings.h"
-#include "io/external_file_identity.h"
 
 #include <QDir>
 #include <QFile>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -10,126 +10,144 @@ class BackgroundModeTests final : public QObject {
     Q_OBJECT
 
   private slots:
-    void nativeLoginEntryIsEnabledByDefault();
-    void snapRemovesOnlyItsLegacyLoginEntry();
-    void snapLeavesOversizedLoginEntryUntouched();
-    void snapServiceStatusTracksSnapctl();
+    void freshNativeInstallIsOffUntilEnabled();
+    void legacyNativeAutostartIsRetired();
+    void snapUsesOptInSessionAutostart();
+    void extractedAppImageUsesAppRun();
+    void unrelatedAutostartIsPreserved();
 };
 
-void BackgroundModeTests::nativeLoginEntryIsEnabledByDefault()
+void BackgroundModeTests::freshNativeInstallIsOffUntilEnabled()
 {
     QTemporaryDir home;
     QVERIFY(home.isValid());
     qputenv("XDG_CONFIG_HOME", home.path().toUtf8());
     qunsetenv("SNAP_NAME");
+    qunsetenv("APPIMAGE");
+    qunsetenv("APPDIR");
 
     Licasa::BackgroundModeManager manager;
-    QVERIFY(manager.enabled());
+    QSignalSpy changed(&manager, &Licasa::BackgroundModeManager::enabledChanged);
+    QFile entry(home.filePath(QStringLiteral("autostart/licasa-background.desktop")));
     manager.syncAutostart();
+    QVERIFY(!manager.enabled());
+    QVERIFY(!entry.exists());
 
-    QFile entry(home.filePath(QStringLiteral("autostart/licasa.desktop")));
+    manager.setEnabled(true);
+    QVERIFY(manager.enabled());
+    QCOMPARE(changed.size(), 1);
     QVERIFY(entry.open(QIODevice::ReadOnly | QIODevice::Text));
     const QByteArray content = entry.readAll();
-    QVERIFY(content.contains("--background"));
-    QVERIFY(content.contains("Exec="));
-#if defined(Q_OS_UNIX)
-    const auto before = Licasa::externalFileIdentity(entry);
-    QVERIFY(before.has_value());
+    QVERIFY(content.contains("X-Licasa-Background=1\n"));
+    QVERIFY(content.contains(" --background\n"));
     entry.close();
+
     manager.syncAutostart();
-    QVERIFY(entry.open(QIODevice::ReadOnly | QIODevice::Text));
-    const auto after = Licasa::externalFileIdentity(entry);
-    QVERIFY(after.has_value());
-    QCOMPARE(after->device, before->device);
-    QCOMPARE(after->inode, before->inode);
-#endif
+    QVERIFY(manager.enabled());
+    manager.setEnabled(false);
+    QVERIFY(!manager.enabled());
+    QVERIFY(!entry.exists());
+    QCOMPARE(changed.size(), 2);
 }
 
-void BackgroundModeTests::snapRemovesOnlyItsLegacyLoginEntry()
+void BackgroundModeTests::legacyNativeAutostartIsRetired()
 {
     QTemporaryDir home;
     QVERIFY(home.isValid());
     qputenv("XDG_CONFIG_HOME", home.path().toUtf8());
-    qputenv("SNAP_NAME", "licasa");
+    qunsetenv("SNAP_NAME");
     QVERIFY(QDir().mkpath(home.filePath(QStringLiteral("autostart"))));
     QFile entry(home.filePath(QStringLiteral("autostart/licasa.desktop")));
     QVERIFY(entry.open(QIODevice::WriteOnly | QIODevice::Text));
-    QVERIFY(entry.write("[Desktop Entry]\nComment=Start Licasa in background at login\n") > 0);
+    QVERIFY(entry.write("[Desktop Entry]\nName=Licasa\n"
+                        "Comment=Start Licasa in background at login\n"
+                        "Exec=/usr/bin/licasa --background\n") > 0);
     entry.close();
 
     Licasa::BackgroundModeManager manager;
     manager.syncAutostart();
     QVERIFY(!entry.exists());
-
-    QVERIFY(entry.open(QIODevice::WriteOnly | QIODevice::Text));
-    QVERIFY(entry.write("[Desktop Entry]\nComment=Other launcher\n") > 0);
-    entry.close();
-    manager.syncAutostart();
-    QVERIFY(entry.exists());
+    QVERIFY(!manager.enabled());
 }
 
-void BackgroundModeTests::snapLeavesOversizedLoginEntryUntouched()
+void BackgroundModeTests::snapUsesOptInSessionAutostart()
+{
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    qputenv("SNAP_NAME", "licasa");
+    qputenv("SNAP_USER_DATA", home.path().toUtf8());
+    qputenv("XDG_CONFIG_HOME", home.filePath(QStringLiteral("other-config")).toUtf8());
+
+    Licasa::BackgroundModeManager manager;
+    const QString path =
+        home.filePath(QStringLiteral(".config/autostart/licasa-background.desktop"));
+    manager.syncAutostart();
+    QVERIFY(!manager.enabled());
+    QVERIFY(!QFileInfo::exists(path));
+
+    manager.setEnabled(true);
+    QVERIFY(manager.enabled());
+    QFile entry(path);
+    QVERIFY(entry.open(QIODevice::ReadOnly | QIODevice::Text));
+    QVERIFY(entry.readAll().contains("Exec=licasa --background\n"));
+    entry.close();
+
+    manager.setEnabled(false);
+    QVERIFY(!manager.enabled());
+    QVERIFY(!entry.exists());
+}
+
+void BackgroundModeTests::extractedAppImageUsesAppRun()
+{
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    qunsetenv("SNAP_NAME");
+    qunsetenv("APPIMAGE");
+    qputenv("XDG_CONFIG_HOME", home.filePath(QStringLiteral("config")).toUtf8());
+    const QString appDir = home.filePath(QStringLiteral("installed-appimage"));
+    QVERIFY(QDir().mkpath(appDir));
+    QFile appRun(QDir(appDir).filePath(QStringLiteral("AppRun")));
+    QVERIFY(appRun.open(QIODevice::WriteOnly));
+    appRun.close();
+    qputenv("APPDIR", appDir.toUtf8());
+
+    Licasa::BackgroundModeManager manager;
+    manager.setEnabled(true);
+    QFile entry(home.filePath(QStringLiteral("config/autostart/licasa-background.desktop")));
+    QVERIFY(entry.open(QIODevice::ReadOnly | QIODevice::Text));
+    QVERIFY(entry.readAll().contains(
+        (QStringLiteral("Exec=\"") + appRun.fileName() + QStringLiteral("\" --background\n"))
+            .toUtf8()));
+    qunsetenv("APPDIR");
+}
+
+void BackgroundModeTests::unrelatedAutostartIsPreserved()
 {
     QTemporaryDir home;
     QVERIFY(home.isValid());
     qputenv("XDG_CONFIG_HOME", home.path().toUtf8());
-    qputenv("SNAP_NAME", "licasa");
+    qunsetenv("SNAP_NAME");
     QVERIFY(QDir().mkpath(home.filePath(QStringLiteral("autostart"))));
     QFile entry(home.filePath(QStringLiteral("autostart/licasa.desktop")));
     QVERIFY(entry.open(QIODevice::WriteOnly | QIODevice::Text));
-    const QByteArray content =
-        QByteArray("Comment=Start Licasa in background at login\n") + QByteArray(4096, 'x');
-    QCOMPARE(entry.write(content), qint64(content.size()));
+    QVERIFY(entry.write("[Desktop Entry]\nName=Other program\n") > 0);
     entry.close();
 
     Licasa::BackgroundModeManager manager;
     manager.syncAutostart();
     QVERIFY(entry.exists());
-}
+    manager.setEnabled(false);
+    QVERIFY(entry.exists());
 
-void BackgroundModeTests::snapServiceStatusTracksSnapctl()
-{
-#if defined(Q_OS_UNIX)
-    QTemporaryDir tools;
-    QVERIFY(tools.isValid());
-    const QString statusPath = tools.filePath(QStringLiteral("service-status"));
-    QFile command(tools.filePath(QStringLiteral("snapctl")));
-    QVERIFY(command.open(QIODevice::WriteOnly | QIODevice::Text));
-    const QByteArray script = QByteArray("#!/bin/sh\ncat '") + statusPath.toUtf8() + "'\n";
-    QCOMPARE(command.write(script), qint64(script.size()));
-    command.close();
-    QVERIFY(command.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
-
-    const QByteArray originalPath = qgetenv("PATH");
-    qputenv("PATH", tools.path().toUtf8() + ':' + originalPath);
-    qputenv("SNAP_NAME", "licasa");
-
-    auto writeStatus = [&statusPath](const QByteArray& output) {
-        QFile status(statusPath);
-        if (!status.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            return false;
-        }
-        return status.write(output) == output.size();
-    };
-
-    Licasa::BackgroundModeManager manager;
-    QVERIFY(manager.snapService());
-    QVERIFY(writeStatus("Service Startup Current Notes\nlicasa.background enabled active user\n"));
-    manager.refreshSnapServiceStatus();
-    QTRY_COMPARE(manager.snapServiceStatus(), QStringLiteral("active"));
-
-    QVERIFY(
-        writeStatus("Service Startup Current Notes\nlicasa.background enabled inactive user\n"));
-    manager.refreshSnapServiceStatus();
-    QTRY_COMPARE(manager.snapServiceStatus(), QStringLiteral("inactive"));
-
-    QVERIFY(writeStatus("Service Startup Current Notes\nother.background enabled active user\n"));
-    manager.refreshSnapServiceStatus();
-    QTRY_COMPARE(manager.snapServiceStatus(), QStringLiteral("unavailable"));
-    qputenv("PATH", originalPath);
-#else
-    QSKIP("Snap services are only available on Unix");
-#endif
+    QFile reserved(home.filePath(QStringLiteral("autostart/licasa-background.desktop")));
+    QVERIFY(reserved.open(QIODevice::WriteOnly | QIODevice::Text));
+    QVERIFY(reserved.write("[Desktop Entry]\nName=Other program\n") > 0);
+    reserved.close();
+    QSignalSpy errors(&manager, &Licasa::BackgroundModeManager::errorOccurred);
+    manager.setEnabled(true);
+    QVERIFY(!manager.enabled());
+    QVERIFY(reserved.exists());
+    QCOMPARE(errors.size(), 1);
 }
 
 QTEST_GUILESS_MAIN(BackgroundModeTests)

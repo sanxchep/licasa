@@ -1,4 +1,4 @@
-name: Verify and release hosted Snap and deb
+name: Verify and release Linux packages
 
 on:
   push:
@@ -48,49 +48,52 @@ jobs:
           fi
 
   verify_sanitizers:
-    needs: [preflight, store_snap]
+    needs: preflight
     uses: ./.github/workflows/ci.yml
     with:
       source_ref: ${{ github.sha }}
       presets: '["asan","ubsan"]'
 
   build_and_test:
-    needs: [preflight, verify_sanitizers, store_snap]
+    needs: [preflight, verify_sanitizers]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-      - name: Install build dependencies
+      - name: Build and test from a clean Ubuntu 24.04 image
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            ca-certificates cmake ninja-build g++ python3 pkg-config patch git meson nasm dpkg-dev \
-            clang-format-18 \
-            binutils qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-image-formats-plugins \
-            libopenjp2-7-dev libjpeg-turbo8-dev libtiff-dev libxext-dev \
-            qt6-base-private-dev qt6-declarative-private-dev qt6-shadertools-dev \
-            qt6-multimedia-dev libpulse-dev libavcodec-dev libavformat-dev \
-            libavutil-dev libswresample-dev libswscale-dev libavdevice-dev libavfilter-dev \
-            qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript \
-            qml6-module-qttest qml6-module-qtquick-controls qml6-module-qtquick-templates \
-            qml6-module-qtquick-dialogs qml6-module-qtquick-layouts
-      - name: Check first-party C++ formatting
-        run: python3 tools/check_code_style.py
-      - name: Build once, run Release CTest, and package deb
-        run: python3 tools/build_ubuntu_deb.py --jobs 4
-      - name: Verify installed Release and hardening
-        run: |
-          cmake --install build/deb-release --prefix "$RUNNER_TEMP/licasa-package"
-          python3 tools/check_hardening.py "$RUNNER_TEMP/licasa-package/bin/licasa"
-          python3 tools/verify_installed_release.py "$RUNNER_TEMP/licasa-package" \
-            --output build/qualification/deb/release-smoke.json
+          docker build --pull -f packaging/build-deb.Dockerfile \
+            -t licasa-deb-builder:release packaging
+          docker run --rm -v "$PWD:/source:ro" licasa-deb-builder:release \
+            bash -c 'cd /source && python3 tools/check_code_style.py'
+          mkdir -p build/qualification/deb build/qualification/appimage
+          docker run --rm -e LICASA_MAX_JOBS=3 \
+            -v "$PWD:/source:ro" -v "$PWD/build/qualification/deb:/output" \
+            licasa-deb-builder:release bash /source/packaging/verify-fresh-build.sh
+          mv "build/qualification/deb/Licasa-${VERSION}-x86_64.AppImage" \
+            "build/qualification/deb/Licasa-${VERSION}-x86_64.AppImage.sha256" \
+            build/qualification/appimage/
+          docker run --rm -e VERSION="$VERSION" -v "$PWD:/source:ro" \
+            -v "$PWD/build/qualification/deb:/output:ro" \
+            licasa-deb-builder:release bash -ec '
+              dpkg-deb --extract "/output/licasa_${VERSION}-1_amd64.deb" /tmp/licasa-package
+              python3 /source/tools/check_hardening.py /tmp/licasa-package/usr/bin/licasa'
       - name: Install deb on clean Ubuntu and decode samples
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: python3 tools/verify_deb_container.py "build/qualification/deb/licasa_${VERSION}-1_amd64.deb"
-      - name: Save the checked deb and test reports
+      - name: Verify AppImage on clean Ubuntu, Fedora, and Arch
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          python3 tools/verify_appimage_container.py "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage"
+          python3 tools/verify_appimage_fedora.py "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage"
+          python3 tools/verify_appimage_desktops.py "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage"
+      - name: Save checked packages and test reports
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
@@ -102,11 +105,18 @@ jobs:
           cp "build/qualification/deb/licasa_${VERSION}-1_amd64.deb" dist/deb/
           cp "build/qualification/deb/licasa_${VERSION}-1_amd64.deb.sha256" dist/deb/
           cp build/qualification/deb/install-smoke.json dist/deb/
-          cp build/qualification/deb/release-smoke.json dist/deb/
+          mkdir -p dist/appimage
+          cp "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage" dist/appimage/
+          cp "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256" dist/appimage/
+          cp packaging/install-licasa-appimage.sh dist/appimage/
+          (cd dist/appimage && sha256sum install-licasa-appimage.sh > install-licasa-appimage.sh.sha256)
+          cp build/qualification/appimage/install-smoke.json dist/appimage/
+          cp build/qualification/appimage/fedora-smoke.json dist/appimage/
+          cp build/qualification/appimage/desktop-smoke.json dist/appimage/
       - uses: actions/upload-artifact@v4
         with:
-          name: licasa-deb-amd64
-          path: dist/deb/
+          name: licasa-linux-amd64
+          path: dist/
           if-no-files-found: error
 
   store_snap:
@@ -119,11 +129,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-      - name: Require the matching Snapcraft-hosted edge build
+      - name: Install matching hosted Snap with user daemons disabled
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          sudo snap set system experimental.user-daemons=true
+          sudo snap set system experimental.user-daemons=false
           sudo snap install --channel=edge licasa
           source_file=/snap/licasa/current/usr/share/licasa/source-commit
           installed_version="$(snap list licasa | awk 'NR == 2 {print $2}')"
@@ -170,7 +180,7 @@ jobs:
         run: snapcraft release licasa "$REVISION" beta
 
   github_release:
-    needs: [preflight, store_snap, publish_snap]
+    needs: [preflight, build_and_test, publish_snap]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -182,13 +192,13 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          name: licasa-deb-amd64
-          path: dist/deb
+          name: licasa-linux-amd64
+          path: dist
       - name: Install GitHub CLI
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gh
-      - name: Recheck source version, deb version, and checksum
+      - name: Recheck source version, package versions, and checksums
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
@@ -198,25 +208,31 @@ jobs:
           cd dist/deb
           sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256"
           test "$(dpkg-deb --field "licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
-      - name: Publish GitHub Release with the checked deb
+          cd ../appimage
+          sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256"
+          sha256sum --check install-licasa-appimage.sh.sha256
+      - name: Publish GitHub Release with checked packages
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
-          SNAP_REVISION: ${{ needs.store_snap.outputs.revision }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           {
             cat "packaging/release-notes/$RELEASE_TAG.md"
-            printf '\n### Snap Store\n\n'
-            printf 'Snapcraft hosted build revision %s (Licasa %s) was installed, tested, and promoted to beta.\n' "$SNAP_REVISION" "$VERSION"
-            printf "\n### Debian package SHA-256\n\n\`\`\`text\n"
+            printf "\n### Package SHA-256 checksums\n\n\`\`\`text\n"
             cat "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256"
+            cat "dist/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256"
+            cat "dist/appimage/install-licasa-appimage.sh.sha256"
             printf "\`\`\`\n"
             printf "\nSource commit: \`%s\`.\n" "$GITHUB_SHA"
           } > dist/release-notes.md
           gh release create "$RELEASE_TAG" \
             "dist/deb/licasa_${VERSION}-1_amd64.deb" \
             "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256" \
-            --target "$GITHUB_SHA" --prerelease --title "Licasa $RELEASE_TAG" \
+            "dist/appimage/Licasa-${VERSION}-x86_64.AppImage" \
+            "dist/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256" \
+            "dist/appimage/install-licasa-appimage.sh" \
+            "dist/appimage/install-licasa-appimage.sh.sha256" \
+            --target "$GITHUB_SHA" --title "Licasa $RELEASE_TAG" \
             --notes-file dist/release-notes.md

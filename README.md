@@ -15,7 +15,7 @@ Licasa is an image viewer and editor for the Linux desktop. It opens a photo fro
 
 ## Try Licasa
 
-**[Download published packages](https://github.com/sanxchep/licasa/releases)** · [Read the 0.3.0 release notes](packaging/release-notes/v0.3.0.md)
+**[Download the latest published release](https://github.com/sanxchep/licasa/releases/latest)** · [0.5.0 release notes](packaging/release-notes/v0.5.0.md)
 
 - View photos fullscreen or in a floating window, then crop, adjust, and export them.
 - Open JPEG, PNG, TIFF, WebP, HEIC/HEIF, JPEG XL, AVIF, JPEG 2000, and RAW previews.
@@ -23,22 +23,35 @@ Licasa is an image viewer and editor for the Linux desktop. It opens a photo fro
 
 If you try it, [report a bug or suggest a feature](https://github.com/sanxchep/licasa/issues/new).
 
-## Requirements
-
-- Ubuntu 24.04 on amd64 for the current `.deb` package.
-- Docker to build the release package from source using the supplied build environment.
-
 ## Install
 
-Download `licasa_0.3.0-1_amd64.deb` from [Releases](https://github.com/sanxchep/licasa/releases) and install it with:
+- **AppImage** (`Licasa-0.5.0-x86_64.AppImage`) and `install-licasa-appimage.sh`: for recent x86-64 Linux desktops. The package is built on Ubuntu 24.04, so older systems may not run it.
+- **Debian package** (`licasa_0.5.0-1_amd64.deb`): for Ubuntu 24.04 on amd64. APT installs the required system libraries and QML modules.
+- **Snap beta**: available through the Snap Store on systems with Snapd.
+
+Download the AppImage and installer script into the same folder, then run:
 
 ```sh
-sudo apt install ./licasa_0.3.0-1_amd64.deb
+bash install-licasa-appimage.sh ./Licasa-0.5.0-x86_64.AppImage
 ```
 
-You can then open Licasa from your application menu or run `licasa /path/to/photo.jpg`.
+To install the Debian package:
 
-## Build the Ubuntu package
+```sh
+sudo apt install ./licasa_0.5.0-1_amd64.deb
+```
+
+To install the Snap beta:
+
+```sh
+sudo snap install licasa --beta
+```
+
+In **Settings**, turn on **Background process** if you want faster repeat opens. Licasa then stays ready when you close its window and starts in the background at your next desktop login, including after a reboot. This is off by default. Turning it off removes the login startup entry; closing Licasa then exits it. This works through your desktop session, so it does not start before you log in.
+
+If Licasa has trouble, its private error log is at `$XDG_STATE_HOME/licasa/errors.log` (normally `~/.local/state/licasa/errors.log`; inside the Snap's user data for Snap installs). It records warnings and errors, keeps one rotated copy, and never uploads anything. Log messages can include photo paths, so review the file before attaching it to a bug report.
+
+## Build the Linux packages
 
 From the repository root, with Docker installed:
 
@@ -49,21 +62,34 @@ docker run --rm -v "$PWD:/source:ro" -v "$PWD/build/deb-output:/output" \
   licasa-deb-builder bash /source/packaging/verify-fresh-build.sh
 ```
 
-The `.deb` and its SHA-256 file appear in `build/deb-output/`. To install the local build:
+The `.deb`, AppImage, and SHA-256 files appear in `build/deb-output/`. Docker is required only to build these packages from source. To check the local files:
 
 ```sh
-(cd build/deb-output && sha256sum -c licasa_0.3.0-1_amd64.deb.sha256)
-sudo apt install ./build/deb-output/licasa_0.3.0-1_amd64.deb
+(cd build/deb-output && sha256sum -c licasa_0.5.0-1_amd64.deb.sha256)
+(cd build/deb-output && sha256sum -c Licasa-0.5.0-x86_64.AppImage.sha256)
+(cd build/deb-output && sha256sum -c install-licasa-appimage.sh.sha256)
 ```
+
+Before releasing an AppImage, run its [installation checks](docs/linux-package-qualification.md). They install and launch the actual file without FUSE on clean Ubuntu and Fedora, then test virtual X11 and Wayland displays on Arch.
 
 ## Update
 
-Download the newer `.deb` and its `.sha256` file from [Releases](https://github.com/sanxchep/licasa/releases), then check and install them. Replace the filename with the published version:
+Download the newer package and its `.sha256` file from [Releases](https://github.com/sanxchep/licasa/releases/latest). To update a Debian installation, replace the version in these commands:
 
 ```sh
-sha256sum -c licasa_0.3.0-1_amd64.deb.sha256
-sudo apt install ./licasa_0.3.0-1_amd64.deb
+sha256sum -c licasa_0.5.0-1_amd64.deb.sha256
+sudo apt install ./licasa_0.5.0-1_amd64.deb
 ```
+
+To update an AppImage installation, close Licasa (AppImage), then download the new AppImage, `install-licasa-appimage.sh`, and both `.sha256` files into the same folder. Replace the version in these commands:
+
+```sh
+sha256sum -c Licasa-0.5.0-x86_64.AppImage.sha256
+sha256sum -c install-licasa-appimage.sh.sha256
+bash install-licasa-appimage.sh ./Licasa-0.5.0-x86_64.AppImage
+```
+
+The installer replaces the existing per-user AppImage installation and refreshes its application-menu launcher.
 
 ## Uninstall
 
@@ -71,16 +97,7 @@ sudo apt install ./licasa_0.3.0-1_amd64.deb
 sudo apt remove licasa
 ```
 
-## Local Snap builds
-
-The Snap starts a per-user background service on install and restarts it on refresh. Snapd currently requires its experimental user-daemons setting for this service. Enable the setting once before installing a local Licasa Snap:
-
-```sh
-sudo snap set system experimental.user-daemons=true
-sudo snap install --dangerous ./licasa_0.3.0_amd64.snap
-```
-
-Removing the Snap stops its service. The system-wide Snapd setting remains enabled after removal.
+To remove an AppImage installation, delete `~/.local/opt/licasa-appimage`, `~/.local/share/applications/licasa-appimage.desktop`, and `~/.local/share/icons/hicolor/512x512/apps/licasa-appimage.png`.
 
 ## License
 

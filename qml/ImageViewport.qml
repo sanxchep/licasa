@@ -4,8 +4,9 @@
     Image rendering, backdrop, pointer interaction, wheel zoom,
     and drag-and-drop handling for Licasa.
 
-    Windowed mode behavior is intentionally simple:
-    - at rest, the native window is exactly the displayed image size
+    Windowed mode behavior:
+    - at ordinary zoom, the native window matches the displayed image size
+    - at inspection zoom, the window stays bounded while pixels pan within it
     - dragging moves the window
     - wheel zoom uses a transparent fixed surface while the exact window
       prepares its final size behind it on supported X11 desktops
@@ -31,6 +32,9 @@ Item {
     required property real imageWidth
     required property real imageHeight
     required property real currentScale
+    property bool windowedInspectionMode: false
+    property bool rasterPixelZoomEnabled: false
+    readonly property bool scaledContentMode: fullScreenMode || windowedInspectionMode
 
     required property string providerSource
     // The gesture surface selects a bounded source for large images and
@@ -42,6 +46,7 @@ Item {
     required property bool rawFastPhase
     required property bool rawPreviewFirst
     property bool parallelFullResolutionEnabled: false
+    property bool rapidBrowseMode: false
     required property int previewSourceWidth
     required property int previewSourceHeight
 
@@ -62,11 +67,11 @@ Item {
     // A native resize can complete a frame after its requested zoom scale.
     // In floating mode the window itself is the image boundary, so render from
     // its actual size to avoid exposing an old image at either corner.
-    readonly property real renderedImageX: fullScreenMode ? alignedCoordinate(imageX) : 0
-    readonly property real renderedImageY: fullScreenMode ? alignedCoordinate(imageY) : 0
-    readonly property real renderedImageRight: fullScreenMode
+    readonly property real renderedImageX: scaledContentMode ? alignedCoordinate(imageX) : 0
+    readonly property real renderedImageY: scaledContentMode ? alignedCoordinate(imageY) : 0
+    readonly property real renderedImageRight: scaledContentMode
         ? renderedImageX + imageWidth * currentScale : width
-    readonly property real renderedImageBottom: fullScreenMode
+    readonly property real renderedImageBottom: scaledContentMode
         ? renderedImageY + imageHeight * currentScale : height
     readonly property real visibleImageLeft: Math.max(0, Math.min(width, renderedImageX))
     readonly property real visibleImageTop: Math.max(0, Math.min(height, renderedImageY))
@@ -101,6 +106,53 @@ Item {
         : activeImageSlot === 1
             ? photoB
             : activeImageSlot === 2 ? photoC : null
+    readonly property var motionFrameSurface: motionPhotoFrameLoader.item
+    readonly property bool motionFrameReady: motionPhotoFrameLoader.visible
+        && motionFrameSurface && motionFrameSurface.hasFrame
+    readonly property real inspectedRasterWidth: animatedFrameReady
+        ? animatedPhoto.implicitWidth
+        : motionFrameReady ? motionFrameSurface.frameSize.width
+            : activeImage ? activeImage.implicitWidth : 0
+    readonly property real inspectedRasterHeight: animatedFrameReady
+        ? animatedPhoto.implicitHeight
+        : motionFrameReady ? motionFrameSurface.frameSize.height
+            : activeImage ? activeImage.implicitHeight : 0
+    readonly property real motionFrameFit: motionFrameReady
+        ? Math.min(imageStage.width / inspectedRasterWidth,
+                   imageStage.height / inspectedRasterHeight) : 1
+    readonly property real gridImageX: motionFrameReady
+        ? renderedImageX + (imageStage.width - inspectedRasterWidth * motionFrameFit)
+            * imageStage.scale * 0.5 : renderedImageX
+    readonly property real gridImageY: motionFrameReady
+        ? renderedImageY + (imageStage.height - inspectedRasterHeight * motionFrameFit)
+            * imageStage.scale * 0.5 : renderedImageY
+    readonly property real gridImageRight: motionFrameReady
+        ? gridImageX + inspectedRasterWidth * motionFrameFit * imageStage.scale
+        : renderedImageRight
+    readonly property real gridImageBottom: motionFrameReady
+        ? gridImageY + inspectedRasterHeight * motionFrameFit * imageStage.scale
+        : renderedImageBottom
+    readonly property real rasterCellWidth: inspectedRasterWidth > 0
+        ? (gridImageRight - gridImageX) / inspectedRasterWidth : 0
+    readonly property real rasterCellHeight: inspectedRasterHeight > 0
+        ? (gridImageBottom - gridImageY) / inspectedRasterHeight : 0
+    readonly property bool pixelInspectionScaleReached: rasterPixelZoomEnabled
+        && rasterCellWidth * devicePixelRatio >= 24
+        && rasterCellHeight * devicePixelRatio >= 24
+    readonly property bool pixelGridVisible: pixelInspectionScaleReached
+        && imageStatus === Image.Ready
+    readonly property string inspectedPixelKind: motionFrameReady ? "Video pixel"
+        : animatedFrameReady ? "Frame pixel"
+            : activeRequestKey.indexOf("licasa_stage=preview") >= 0
+                || activeRequestKey.indexOf("licasa_stage=raw-fast") >= 0
+                ? "Preview pixel" : "Pixel"
+    property int hoveredPixelX: -1
+    property int hoveredPixelY: -1
+    property real hoverViewportX: 0
+    property real hoverViewportY: 0
+    property int sampledPixelX: -1
+    property int sampledPixelY: -1
+    property var sampledPixelColor: null
     readonly property string activeRequestKey: activeImage ? String(activeImage.source) : ""
     readonly property size activeRequestSize: activeImage ? activeImage.sourceSize : Qt.size(0, 0)
     readonly property var pendingImage: pendingImageSlot === 0
@@ -180,6 +232,71 @@ Item {
     signal imageReady()
     signal imageRequestFailed()
     signal playbackToggleRequested()
+    signal pixelSampleRequested(real viewportX, real viewportY, int pixelX, int pixelY)
+
+    function requestHoveredPixelSample() {
+        if (pixelGridVisible && hoveredPixelX >= 0 && hoveredPixelY >= 0
+                && !presentationOnly && !hoverSampleTimer.running)
+            hoverSampleTimer.start()
+    }
+
+    function updateHoveredPixel(px, py) {
+        if (pixelGridVisible && px >= gridImageX && px < gridImageRight
+                && py >= gridImageY && py < gridImageBottom) {
+            const pixelX = Math.max(0, Math.min(inspectedRasterWidth - 1,
+                Math.floor((px - gridImageX) / rasterCellWidth)))
+            const pixelY = Math.max(0, Math.min(inspectedRasterHeight - 1,
+                Math.floor((py - gridImageY) / rasterCellHeight)))
+            const cellChanged = pixelX !== hoveredPixelX || pixelY !== hoveredPixelY
+            hoveredPixelX = pixelX
+            hoveredPixelY = pixelY
+            hoverViewportX = px
+            hoverViewportY = py
+            if (cellChanged)
+                requestHoveredPixelSample()
+        } else {
+            hoveredPixelX = -1
+            hoveredPixelY = -1
+        }
+    }
+
+    Timer {
+        id: hoverSampleTimer
+        interval: 50
+        repeat: false
+        onTriggered: {
+            if (!root.pixelGridVisible || root.hoveredPixelX < 0
+                    || root.hoveredPixelY < 0 || root.presentationOnly)
+                return
+            const cellLeft = root.gridImageX + root.hoveredPixelX * root.rasterCellWidth
+            const cellTop = root.gridImageY + root.hoveredPixelY * root.rasterCellHeight
+            const left = Math.max(0, cellLeft)
+            const right = Math.min(root.width, cellLeft + root.rasterCellWidth)
+            const top = Math.max(0, cellTop)
+            const bottom = Math.min(root.height, cellTop + root.rasterCellHeight)
+            if (left >= right || top >= bottom)
+                return
+            root.pixelSampleRequested((left + right) * 0.5, (top + bottom) * 0.5,
+                                      root.hoveredPixelX, root.hoveredPixelY)
+        }
+    }
+
+    onImageReady: requestHoveredPixelSample()
+    onPixelGridVisibleChanged: {
+        if (pointerLayer.containsMouse)
+            updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
+    }
+    onAnimationCurrentFrameChanged: requestHoveredPixelSample()
+    onActiveRequestKeyChanged: {
+        sampledPixelColor = null
+        requestHoveredPixelSample()
+    }
+    onMotionFrameReadyChanged: requestHoveredPixelSample()
+
+    Connections {
+        target: root.motionFrameSurface
+        function onFrameChanged() { root.requestHoveredPixelSample() }
+    }
 
     // Wait out the desktop's double-click interval before committing a single
     // click. Entering fullscreen must never briefly start or pause playback.
@@ -361,8 +478,8 @@ Item {
             // outgoing image at its last on-screen bounds during the fade.
             fadingViewportRect = Qt.rect(
                 renderedImageX, renderedImageY,
-                fullScreenMode ? imageWidth * currentScale : width,
-                fullScreenMode ? imageHeight * currentScale : height
+                scaledContentMode ? imageWidth * currentScale : width,
+                scaledContentMode ? imageHeight * currentScale : height
             )
             fadingImageSlot = previousSlot
         }
@@ -568,9 +685,9 @@ Item {
         visible: root.imageStatus === Image.Ready
         x: root.renderedImageX
         y: root.renderedImageY
-        width: root.fullScreenMode ? Math.max(1, root.imageWidth) : root.width
-        height: root.fullScreenMode ? Math.max(1, root.imageHeight) : root.height
-        scale: root.fullScreenMode ? root.currentScale : 1.0
+        width: root.scaledContentMode ? Math.max(1, root.imageWidth) : root.width
+        height: root.scaledContentMode ? Math.max(1, root.imageHeight) : root.height
+        scale: root.scaledContentMode ? root.currentScale : 1.0
         transformOrigin: Item.TopLeft
 
         readonly property real fadingScale: Math.max(0.0001, scale)
@@ -594,12 +711,12 @@ Item {
             opacity: root.fadingImageSlot === 0 && root.activeImageSlot !== 0 ? 0.0 : 1.0
             asynchronous: true
             cache: false
-            smooth: root.smoothScalingEnabled
+            smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
             mipmap: root.mipmapScalingEnabled
             fillMode: Image.Stretch
 
             Behavior on opacity {
-                enabled: root.fadingImageSlot === 0
+                enabled: root.fadingImageSlot === 0 && !root.rapidBrowseMode
                 NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
             }
 
@@ -626,12 +743,12 @@ Item {
             opacity: root.fadingImageSlot === 1 && root.activeImageSlot !== 1 ? 0.0 : 1.0
             asynchronous: true
             cache: false
-            smooth: root.smoothScalingEnabled
+            smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
             mipmap: root.mipmapScalingEnabled
             fillMode: Image.Stretch
 
             Behavior on opacity {
-                enabled: root.fadingImageSlot === 1
+                enabled: root.fadingImageSlot === 1 && !root.rapidBrowseMode
                 NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
             }
 
@@ -658,12 +775,12 @@ Item {
             opacity: root.fadingImageSlot === 2 && root.activeImageSlot !== 2 ? 0.0 : 1.0
             asynchronous: true
             cache: false
-            smooth: root.smoothScalingEnabled
+            smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
             mipmap: root.mipmapScalingEnabled
             fillMode: Image.Stretch
 
             Behavior on opacity {
-                enabled: root.fadingImageSlot === 2
+                enabled: root.fadingImageSlot === 2 && !root.rapidBrowseMode
                 NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
             }
 
@@ -686,7 +803,7 @@ Item {
             // Synchronous lookup avoids a queue of obsolete frame requests.
             asynchronous: false
             cache: false
-            smooth: root.smoothScalingEnabled
+            smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
             mipmap: root.mipmapScalingEnabled
             fillMode: Image.Stretch
 
@@ -714,7 +831,7 @@ Item {
             // Loader itself. The nested Component has its own creation context,
             // so its visual object remains self-contained.
             property var motionSession: root.motionPhotoSession
-            property bool frameSmooth: root.smoothScalingEnabled
+            property bool frameSmooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
 
             active: motionSession && motionSession.available
             // The native surface paints transparently until its first valid
@@ -741,6 +858,130 @@ Item {
             // preserves ordinary-still startup and activates the C++ type
             // registrar before MotionPhotoFrameSurface is instantiated.
             source: active ? Qt.resolvedUrl("MotionPhotoFrameSurfaceHost.qml") : ""
+        }
+    }
+
+    // Draw only the boundaries that cross the viewport. These are the cells
+    // of the actual displayed raster, including an animation or video frame.
+    Canvas {
+        id: pixelGrid
+        objectName: "pixelGrid"
+        anchors.fill: parent
+        z: 5
+        visible: root.pixelGridVisible
+
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.clearRect(0, 0, width, height)
+            if (!root.pixelGridVisible)
+                return
+
+            const dpr = Math.max(1, root.devicePixelRatio)
+            const left = Math.max(0, root.gridImageX)
+            const right = Math.min(root.width, root.gridImageRight)
+            const top = Math.max(0, root.gridImageY)
+            const bottom = Math.min(root.height, root.gridImageBottom)
+            if (left >= right || top >= bottom)
+                return
+            const firstX = Math.max(0, Math.ceil((left - root.gridImageX)
+                / root.rasterCellWidth))
+            const lastX = Math.min(root.inspectedRasterWidth, Math.floor(
+                (right - root.gridImageX) / root.rasterCellWidth))
+            const firstY = Math.max(0, Math.ceil((top - root.gridImageY)
+                / root.rasterCellHeight))
+            const lastY = Math.min(root.inspectedRasterHeight, Math.floor(
+                (bottom - root.gridImageY) / root.rasterCellHeight))
+            ctx.save()
+            ctx.beginPath()
+            ctx.rect(left, top, right - left, bottom - top)
+            ctx.clip()
+            ctx.lineWidth = 1 / dpr
+            ctx.strokeStyle = "rgba(128, 128, 128, 0.8)"
+            ctx.beginPath()
+            for (let x = firstX; x <= lastX; ++x) {
+                const boundary = root.gridImageX + x * root.rasterCellWidth
+                const aligned = (Math.round(boundary * dpr) + 0.5) / dpr
+                ctx.moveTo(aligned, top)
+                ctx.lineTo(aligned, bottom)
+            }
+            for (let y = firstY; y <= lastY; ++y) {
+                const boundary = root.gridImageY + y * root.rasterCellHeight
+                const aligned = (Math.round(boundary * dpr) + 0.5) / dpr
+                ctx.moveTo(left, aligned)
+                ctx.lineTo(right, aligned)
+            }
+            ctx.stroke()
+            ctx.restore()
+        }
+
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onVisibleChanged: requestPaint()
+        Connections {
+            target: root
+            function onGridImageXChanged() {
+                pixelGrid.requestPaint()
+                if (pointerLayer.containsMouse)
+                    root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
+            }
+            function onGridImageYChanged() {
+                pixelGrid.requestPaint()
+                if (pointerLayer.containsMouse)
+                    root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
+            }
+            function onRasterCellWidthChanged() {
+                pixelGrid.requestPaint()
+                if (pointerLayer.containsMouse)
+                    root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
+            }
+            function onRasterCellHeightChanged() {
+                pixelGrid.requestPaint()
+                if (pointerLayer.containsMouse)
+                    root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
+            }
+            function onDevicePixelRatioChanged() { pixelGrid.requestPaint() }
+        }
+    }
+
+    Rectangle {
+        objectName: "pixelCoordinateOverlay"
+        property bool sampleCaptureHidden: false
+        z: 9
+        visible: root.pixelGridVisible && root.hoveredPixelX >= 0
+            && root.hoveredPixelY >= 0 && root.sampledPixelColor
+            && root.sampledPixelX === root.hoveredPixelX
+            && root.sampledPixelY === root.hoveredPixelY
+            && !root.presentationOnly && !sampleCaptureHidden
+        x: root.hoverViewportX + width + 16 <= root.width
+            ? root.hoverViewportX + 16
+            : Math.max(8, root.hoverViewportX - width - 16)
+        y: root.hoverViewportY + height + 16 <= root.height
+            ? root.hoverViewportY + 16
+            : Math.max(8, root.hoverViewportY - height - 16)
+        width: pixelCoordinateText.implicitWidth + 16
+        height: pixelCoordinateText.implicitHeight + 10
+        radius: 5
+        color: "#E6191B20"
+        border.color: "#B0FFFFFF"
+        border.width: 1
+
+        Text {
+            id: pixelCoordinateText
+            anchors.centerIn: parent
+            objectName: "pixelCoordinateText"
+            text: root.inspectedPixelKind + " (" + root.hoveredPixelX
+                + ", " + root.hoveredPixelY + ")  "
+                + (root.sampledPixelColor && root.sampledPixelColor.alpha < 255
+                    ? "RGBA(" + root.sampledPixelColor.red + ", "
+                        + root.sampledPixelColor.green + ", "
+                        + root.sampledPixelColor.blue + ", "
+                        + root.sampledPixelColor.alpha + ")"
+                    : "RGB(" + (root.sampledPixelColor ? root.sampledPixelColor.red : 0)
+                        + ", " + (root.sampledPixelColor ? root.sampledPixelColor.green : 0)
+                        + ", " + (root.sampledPixelColor ? root.sampledPixelColor.blue : 0)
+                        + ")")
+            color: "white"
+            font.pixelSize: 12
         }
     }
 
@@ -909,6 +1150,7 @@ Item {
 
     MouseArea {
         id: pointerLayer
+        objectName: "imagePointerLayer"
         anchors.fill: parent
         z: 10
         acceptedButtons: Qt.LeftButton
@@ -936,6 +1178,7 @@ Item {
                 : Qt.ArrowCursor)
 
         onPressed: function(mouse) {
+            root.updateHoveredPixel(mouse.x, mouse.y)
             pressPosition = Qt.point(mouse.x, mouse.y)
             dragged = false
             pressedOnImage = root.imageStatus === Image.Ready
@@ -949,7 +1192,7 @@ Item {
                 root.promoteFullResRequested()
             root.cancelZoomAnimationRequested()
 
-            if (!root.fullScreenMode) {
+            if (!root.fullScreenMode && !root.windowedInspectionMode) {
                 if (root.pointHitsImage(mouse.x, mouse.y) && !root.floatingPlaybackEnabled)
                     root.windowMoveStarted()
                 return
@@ -964,6 +1207,7 @@ Item {
         }
 
         onPositionChanged: function(mouse) {
+            root.updateHoveredPixel(mouse.x, mouse.y)
             if (root.imageStatus !== Image.Ready || !pressed || !pressedOnImage)
                 return
 
@@ -975,7 +1219,7 @@ Item {
                 playbackClickTimer.stop()
             }
 
-            if (!root.fullScreenMode) {
+            if (!root.fullScreenMode && !root.windowedInspectionMode) {
                 root.windowMoveUpdated()
                 return
             }
@@ -985,8 +1229,15 @@ Item {
             lastY = mouse.y
         }
 
+        onContainsMouseChanged: {
+            if (!containsMouse) {
+                root.hoveredPixelX = -1
+                root.hoveredPixelY = -1
+            }
+        }
+
         onReleased: {
-            if (root.fullScreenMode)
+            if (root.fullScreenMode || root.windowedInspectionMode)
                 root.clampPanRequested()
             else
                 root.windowMoveFinished()
@@ -994,7 +1245,7 @@ Item {
 
         onCanceled: {
             playbackClickTimer.stop()
-            if (root.fullScreenMode)
+            if (root.fullScreenMode || root.windowedInspectionMode)
                 root.clampPanRequested()
             else
                 root.windowMoveFinished()

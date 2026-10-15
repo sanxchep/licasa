@@ -203,9 +203,12 @@ Item {
 
     Rectangle {
         id: panel
+        objectName: "editorPanel"
         width: root.panelWidth
         height: root.height - 24
-        x: root.panelOpen ? root.panelLeftMargin : -width - 18
+        // The hidden position follows the window size without animating it.
+        property real revealProgress: root.panelOpen ? 1 : 0
+        x: -width - 18 + (width + 18 + root.panelLeftMargin) * revealProgress
         y: 12
         radius: 26
         color: "#F21A1A1A"
@@ -213,7 +216,7 @@ Item {
         border.color: "#30FFFFFF"
         antialiasing: true
 
-        Behavior on x {
+        Behavior on revealProgress {
             NumberAnimation {
                 duration: root.panelMotionDuration
                 easing.type: Easing.OutCubic

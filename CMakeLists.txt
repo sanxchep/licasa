@@ -5,10 +5,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Licasa
-        VERSION 0.3.0
+        VERSION 0.5.0
         LANGUAGES CXX
 )
-set(LICASA_RELEASE_DATE "2026-10-06")
+set(LICASA_RELEASE_DATE "2026-10-15")
 
 # Qt 6 requires C++17 or newer.
 set(CMAKE_CXX_STANDARD 17)
@@ -392,10 +392,13 @@ if(LICASA_ENABLE_GPU_EDITS)
     find_path(LICASA_NVRTC_INCLUDE_DIR nvrtc.h HINTS /usr/local/cuda/include)
     find_library(LICASA_NVRTC_LIBRARY NAMES nvrtc libnvrtc.so.13 libnvrtc.so.12
         HINTS /usr/local/cuda/lib64 "${LICASA_NVRTC_INCLUDE_DIR}/../lib")
+    set(LICASA_OPENCL_EDIT_STATUS "unavailable")
+    set(LICASA_CUDA_EDIT_STATUS "unavailable")
     if(LICASA_OPENCL_INCLUDE_DIR)
         target_sources(licasa_image_services PRIVATE src/imaging/compute/opencl_edit_device.cpp)
         target_include_directories(licasa_image_services SYSTEM PRIVATE "${LICASA_OPENCL_INCLUDE_DIR}")
         target_compile_definitions(licasa_image_services PRIVATE LICASA_HAVE_OPENCL_EDITS=1)
+        set(LICASA_OPENCL_EDIT_STATUS "enabled")
     endif()
     if(LICASA_CUDA_INCLUDE_DIR AND LICASA_NVRTC_INCLUDE_DIR AND LICASA_NVRTC_LIBRARY)
         add_executable(licasa_cuda_ptx_generator tools/generate_cuda_edit_ptx.cpp)
@@ -418,8 +421,9 @@ if(LICASA_ENABLE_GPU_EDITS)
         target_include_directories(licasa_image_services PRIVATE
             "${CMAKE_CURRENT_BINARY_DIR}/generated")
         target_compile_definitions(licasa_image_services PRIVATE LICASA_HAVE_CUDA_EDITS=1)
+        set(LICASA_CUDA_EDIT_STATUS "enabled")
     endif()
-    message(STATUS "GPU edits: OpenCL headers=${LICASA_OPENCL_INCLUDE_DIR}; CUDA headers=${LICASA_CUDA_INCLUDE_DIR}; build-time NVRTC=${LICASA_NVRTC_LIBRARY}")
+    message(STATUS "GPU edits: OpenCL=${LICASA_OPENCL_EDIT_STATUS}; CUDA=${LICASA_CUDA_EDIT_STATUS}")
 endif()
 licasa_enable_warnings(licasa_image_services)
 if(LICASA_ENABLE_IPO AND LTO_SUPPORTED)
@@ -477,7 +481,8 @@ set(LICASA_APPLICATION_SOURCES
         src/app/window_media_state.cpp
         src/app/window_media_state.h
 )
-qt_add_executable(licasa src/main.cpp ${LICASA_APPLICATION_SOURCES})
+qt_add_executable(licasa src/main.cpp src/app/runtime_error_log.cpp
+        src/app/runtime_error_log.h ${LICASA_APPLICATION_SOURCES})
 target_compile_definitions(licasa PRIVATE
         "LICASA_VERSION=\"${PROJECT_VERSION}\""
         "LICASA_RELEASE_DATE=\"${LICASA_RELEASE_DATE}\"")

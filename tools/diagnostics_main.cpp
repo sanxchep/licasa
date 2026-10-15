@@ -143,6 +143,7 @@ int main(int argc, char** argv)
     parser.addOption({"sequence-direction",
                       "Arrow direction: right, left, left-right, or right-left.", "direction",
                       "right"});
+    parser.addOption({"sequence-release-last", "Release the final arrow key after its press."});
     parser.addOption({"raw-behavior", "Verify progressive RAW preview and automatic full "
                                       "development in the production viewer."});
     parser.addOption(
@@ -188,7 +189,7 @@ int main(int argc, char** argv)
         (navigationSequence && parser.positionalArguments().size() != 1) ||
         (navigationSequence &&
          (!validPresses || sequencePresses < 1 || sequencePresses > 100 || !validInterval ||
-          sequenceIntervalMs < 20 || sequenceIntervalMs > 10000 || !validWarmup ||
+          sequenceIntervalMs < 1 || sequenceIntervalMs > 10000 || !validWarmup ||
           sequenceWarmupMs < 0 || sequenceWarmupMs > 10000 || !validIdle || sequenceIdleMs < 0 ||
           sequenceIdleMs > 10000 ||
           (sequenceDirection != QStringLiteral("right") &&
@@ -238,7 +239,8 @@ int main(int argc, char** argv)
             sequenceDirection == QStringLiteral("left")         ? -1
             : sequenceDirection == QStringLiteral("left-right") ? -2
             : sequenceDirection == QStringLiteral("right-left") ? 2
-                                                                : 1);
+                                                                : 1,
+            parser.isSet("sequence-release-last"));
     } else if (navigation) {
         const QUrl nextUrl =
             QUrl::fromLocalFile(QFileInfo(parser.positionalArguments().at(1)).absoluteFilePath());

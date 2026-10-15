@@ -132,18 +132,9 @@ Item {
     }
     onPanelOpenChanged: {
         if (panelOpen) {
+            closeButton.forceActiveFocus()
+        } else if (fullscreen)
             menuButton.forceActiveFocus()
-            if (backgroundModeManager && backgroundModeManager.snapService)
-                backgroundModeManager.refreshSnapServiceStatus()
-        }
-    }
-
-    Timer {
-        interval: 15000
-        repeat: true
-        running: root.panelOpen && root.backgroundModeManager
-            && root.backgroundModeManager.snapService
-        onTriggered: root.backgroundModeManager.refreshSnapServiceStatus()
     }
 
     Rectangle {
@@ -170,7 +161,8 @@ Item {
 
     RoundIconButton {
         id: menuButton
-        visible: root.fullscreen
+        objectName: "settingsMenuButton"
+        visible: root.fullscreen && !root.panelOpen
         width: root.cornerControlSize
         height: width
         anchors.right: parent.right
@@ -186,17 +178,22 @@ Item {
 
     Rectangle {
         id: panel
-        width: Math.min(360, Math.max(310, root.width * 0.27))
+        objectName: "settingsPanel"
+        visible: root.panelOpen || revealProgress > 0.001
+        width: Math.min(400, Math.max(280, root.width - 40))
         height: root.height - 40
         y: 20
-        x: root.panelOpen ? root.width - width - 20 : root.width + 24
+        // Keep geometry changes separate from the drawer motion. A fullscreen
+        // resize must place a closed drawer offscreen immediately.
+        property real revealProgress: root.panelOpen ? 1 : 0
+        x: root.width + 24 - (width + 44) * revealProgress
         radius: 28
-        color: "#F21A1A1A"
+        color: "#FA1A1A1A"
         border.width: 1
         border.color: "#30FFFFFF"
         antialiasing: true
 
-        Behavior on x {
+        Behavior on revealProgress {
             NumberAnimation {
                 duration: root.panelMotionDuration
                 easing.type: Easing.OutCubic
@@ -229,9 +226,24 @@ Item {
                 id: subtitleText
                 x: 0
                 y: titleText.y + titleText.height + 4
-                text: "Viewer behavior"
+                text: "Customize your viewer"
                 color: "#B3FFFFFF"
                 font.pixelSize: 12
+            }
+
+            RoundIconButton {
+                id: closeButton
+                objectName: "settingsCloseButton"
+                width: 36
+                height: 36
+                anchors.top: parent.top
+                anchors.right: parent.right
+                iconName: "close"
+                accessibleName: "Close settings"
+                baseColor: "#2B2B2B"
+                hoverColor: "#393939"
+                animationDuration: root.buttonMotionDuration
+                onClicked: root.panelOpen = false
             }
 
             Rectangle {
@@ -245,6 +257,7 @@ Item {
 
             Flickable {
                 id: settingsFlick
+                objectName: "settingsFlick"
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: divider.bottom
@@ -299,69 +312,21 @@ Item {
                         }
                     }
 
-                    Rectangle {
+                    ToggleRow {
                         id: backgroundServiceRow
                         objectName: "backgroundServiceRow"
                         visible: root.backgroundModeManager
-                            && root.backgroundModeManager.snapService
+                            && root.backgroundModeManager.supported
                         width: parent.width
-                        height: 62
-                        radius: 14
-                        color: "#1F1F1F"
-                        border.width: 1
-                        border.color: "#1EFFFFFF"
+                        title: "Background process"
+                        subtitle: "Stay ready after closing and start at your next login"
+                        checked: root.backgroundModeManager
+                            ? root.backgroundModeManager.enabled : false
+                        buttonMotionDuration: root.buttonMotionDuration
+                        switchMotionDuration: root.switchMotionDuration
 
-                        readonly property string serviceStatus:
-                            root.backgroundModeManager
-                                ? root.backgroundModeManager.snapServiceStatus
-                                : "unavailable"
-                        readonly property color statusColor: serviceStatus === "active"
-                            ? "#34C759" : serviceStatus === "checking"
-                                ? "#99FFFFFF" : "#FF453A"
-
-                        Accessible.role: Accessible.StaticText
-                        Accessible.name: "Background service"
-                        Accessible.description: serviceStatusText.text
-
-                        Text {
-                            id: serviceTitle
-                            anchors.left: parent.left
-                            anchors.right: serviceDot.left
-                            anchors.leftMargin: 14
-                            anchors.rightMargin: 12
-                            anchors.top: parent.top
-                            anchors.topMargin: 11
-                            text: "Background service"
-                            color: "white"
-                            font.pixelSize: 14
-                            font.weight: Font.Medium
-                        }
-
-                        Text {
-                            id: serviceStatusText
-                            objectName: "backgroundServiceStatusText"
-                            anchors.left: serviceTitle.left
-                            anchors.top: serviceTitle.bottom
-                            anchors.topMargin: 3
-                            text: backgroundServiceRow.serviceStatus === "active"
-                                ? "Running" : backgroundServiceRow.serviceStatus === "inactive"
-                                    ? "Not running"
-                                    : backgroundServiceRow.serviceStatus === "checking"
-                                        ? "Checking…" : "Can't check status"
-                            color: backgroundServiceRow.statusColor
-                            font.pixelSize: 11
-                        }
-
-                        Rectangle {
-                            id: serviceDot
-                            objectName: "backgroundServiceStatusDot"
-                            width: 12
-                            height: 12
-                            radius: 6
-                            anchors.right: parent.right
-                            anchors.rightMargin: 16
-                            anchors.verticalCenter: parent.verticalCenter
-                            color: backgroundServiceRow.statusColor
+                        onToggled: function(value) {
+                            root.backgroundModeManager.setEnabled(value)
                         }
                     }
 
@@ -394,11 +359,13 @@ Item {
                     ValueRow {
                         width: parent.width
                         title: "Grid opacity"
-                        subtitle: "Strength of the transparency checkerboard"
+                        subtitle: root.transparencyCheckerboardEnabled
+                            ? "Strength of the transparency checkerboard"
+                            : "Turn on Transparency grid to adjust"
                         value: root.transparencyCheckerboardOpacity
                         step: 0.05
                         enabled: root.transparencyCheckerboardEnabled
-                        opacity: enabled ? 1.0 : 0.42
+                        opacity: enabled ? 1.0 : 0.7
                         buttonMotionDuration: root.buttonMotionDuration
 
                         onValueChangedByUser: function(value) {
@@ -591,7 +558,9 @@ Item {
                         ValueRow {
                             width: parent.width
                             title: "Playback speed"
-                            subtitle: "Adjust animation timing without changing the file"
+                            subtitle: root.animatedImagePlaybackEnabled
+                                ? "Adjust animation timing without changing the file"
+                                : "Turn on Play animated images to adjust"
                             from: 0.25
                             to: 2.0
                             value: root.animationSpeed
@@ -600,7 +569,7 @@ Item {
                             displayDecimals: 0
                             displaySuffix: "%"
                             enabled: root.animatedImagePlaybackEnabled
-                            opacity: enabled ? 1.0 : 0.42
+                            opacity: enabled ? 1.0 : 0.7
                             buttonMotionDuration: root.buttonMotionDuration
                             onValueChangedByUser: function(value) {
                                 root.animationSpeedRequested(value)

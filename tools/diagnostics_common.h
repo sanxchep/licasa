@@ -32,6 +32,6 @@ std::unique_ptr<DiagnosticCheck> makeNavigationTransitionCheck(const QUrl& nextI
 std::unique_ptr<DiagnosticCheck> makeNavigationSequenceCheck(Licasa::AsyncImageProvider* provider,
                                                              int presses, int intervalMs,
                                                              int warmupMs, int idleMs,
-                                                             int direction);
+                                                             int direction, bool releaseLastKey);
 
 } // namespace LicasaDiagnostics

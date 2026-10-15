@@ -11,11 +11,7 @@ Item {
 
     signal toggled(bool value)
 
-    readonly property real textBottom: rowSubtitle.visible
-        ? rowSubtitle.y + rowSubtitle.height
-        : rowTitle.y + rowTitle.height
-
-    height: Math.max(58, textBottom + 8)
+    height: Math.max(64, textColumn.implicitHeight + 20)
     activeFocusOnTab: enabled && visible
 
     Accessible.role: Accessible.CheckBox
@@ -36,45 +32,51 @@ Item {
     }
 
     Rectangle {
+        objectName: "toggleRowFocusFrame"
         anchors.fill: parent
         radius: 12
-        color: "transparent"
+        color: rowMouse.containsMouse && root.enabled ? "#12FFFFFF" : "transparent"
         border.width: root.activeFocus ? 2 : 0
         border.color: "#C8FFFFFF"
     }
 
-    Text {
-        id: rowTitle
-        anchors.left: parent.left
-        anchors.right: toggleBox.left
-        anchors.rightMargin: 12
-        anchors.top: parent.top
-        text: root.title
-        color: "white"
-        font.pixelSize: 14
-        font.weight: Font.Medium
-        wrapMode: Text.Wrap
-    }
+    Column {
+        id: textColumn
+        x: 12
+        width: Math.max(1, root.width - toggleBox.width - 34)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 2
 
-    Text {
-        id: rowSubtitle
-        anchors.left: parent.left
-        anchors.right: toggleBox.left
-        anchors.rightMargin: 12
-        anchors.top: rowTitle.bottom
-        anchors.topMargin: 2
-        text: root.subtitle
-        color: "#99FFFFFF"
-        font.pixelSize: 11
-        wrapMode: Text.Wrap
-        visible: text.length > 0
+        Text {
+            id: rowTitle
+            objectName: "toggleRowTitle"
+            width: parent.width
+            text: root.title
+            color: "white"
+            font.pixelSize: 14
+            font.weight: Font.Medium
+            wrapMode: Text.Wrap
+        }
+
+        Text {
+            id: rowSubtitle
+            objectName: "toggleRowSubtitle"
+            width: parent.width
+            text: root.subtitle
+            color: "#B3FFFFFF"
+            font.pixelSize: 12
+            wrapMode: Text.Wrap
+            visible: text.length > 0
+        }
     }
 
     Item {
         id: toggleBox
+        objectName: "toggleRowSwitch"
         width: 52
         height: 32
         anchors.right: parent.right
+        anchors.rightMargin: 10
         anchors.verticalCenter: parent.verticalCenter
 
         Rectangle {
@@ -112,6 +114,7 @@ Item {
     }
 
     MouseArea {
+        id: rowMouse
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor

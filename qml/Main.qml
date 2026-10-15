@@ -51,6 +51,27 @@ Window {
             lastPresentedParallelPairId = imageViewport.parallelPairId
             windowManager.markParallelPreviewPresented(lastPresentedParallelPairId)
         }
+        if (browseAwaitingFrame && browseImageReadyForFrame
+                && displayedFileName === currentFileName) {
+            browseAwaitingFrame = false
+            browseImageReadyForFrame = false
+            const direction = browsePendingDirection
+            browsePendingDirection = 0
+            if (direction !== 0) {
+                const generation = browseInputGeneration
+                browseScheduledDirection = direction
+                Qt.callLater(function() {
+                    if (root.browseInputGeneration === generation
+                            && root.browseScheduledDirection === direction) {
+                        root.browseScheduledDirection = 0
+                        root.browseImage(direction)
+                    }
+                })
+            }
+            else if (!browseBurstActive && (previewPhase || rawFastPhase)
+                    && !imageLimitedToPreview && fullResolutionRenderingEnabled)
+                fullResTimer.restart()
+        }
     }
     onActiveFocusItemChanged: {
         if (fullscreenSideMenu.panelOpen)
@@ -75,6 +96,26 @@ Window {
     property int lastBrowseDirection: 0
     property double lastBrowseAtMs: 0
     property bool browseBurstActive: false
+    // Repeated shortcuts may arrive faster than a decoder can supply images.
+    // Hold at most one further step until the current preview is painted.
+    property bool browseAwaitingFrame: false
+    property bool browseImageReadyForFrame: false
+    property int browsePendingDirection: 0
+    property int browseScheduledDirection: 0
+    property int browseInputGeneration: 0
+    Connections {
+        target: root.windowManager
+        function onNavigationKeyReleased(window, direction) {
+            if (window !== root)
+                return
+            if (root.browsePendingDirection === direction)
+                root.browsePendingDirection = 0
+            if (root.browseScheduledDirection === direction) {
+                root.browseScheduledDirection = 0
+                root.browseInputGeneration += 1
+            }
+        }
+    }
     property string currentFileName: ""
     property string displayedFileName: ""
     property bool currentImageAnimated: false
@@ -134,7 +175,16 @@ Window {
     readonly property real cropShieldOpacity: viewerPreferences.cropShieldOpacity
 
     readonly property real minScale: 0.02
-    readonly property real maxScale: 16.0
+    readonly property bool rasterPixelZoomEnabled: {
+        const name = (displayedFileName || FileUrls.fileName(residentImageUrl)).toLowerCase()
+        return !name.endsWith(".svg") && !name.endsWith(".svgz")
+    }
+    // A source pixel may grow to fill the current display. SVG keeps its
+    // previous zoom policy until it has a dedicated vector rendering path.
+    readonly property real maxScale: rasterPixelZoomEnabled
+        ? Math.max(16, Math.ceil(Math.max(Screen.width, Screen.height,
+            imageViewport.width, imageViewport.height) * effectiveDpr()))
+        : 16.0
     readonly property real fullScreenWheelSensitivity: 1.0015
     readonly property real windowedWheelSensitivity: 1.0009
     readonly property real openFitPadding: 0.70
@@ -534,6 +584,14 @@ Window {
             : Math.min(Math.max(860, Screen.height), 1440)
         return Math.min(maxPreviewDecodeExtent, Math.max(1, Math.ceil(
             viewportHeight * effectiveDpr() * previewOverscanFactor * cropBoost)))
+    }
+
+    function burstPreviewSize() {
+        const width = previewSourceWidth()
+        const height = previewSourceHeight()
+        const scale = Math.min(1, Math.sqrt(2000000 / (width * height)))
+        return Qt.size(Math.max(1, Math.floor(width * scale)),
+                       Math.max(1, Math.floor(height * scale)))
     }
 
     function shouldUsePreview() {
@@ -1128,6 +1186,13 @@ Window {
     }
 
     function clearImageState() {
+        browseAwaitingFrame = false
+        browseImageReadyForFrame = false
+        browsePendingDirection = 0
+        browseScheduledDirection = 0
+        browseInputGeneration += 1
+        browseBurstActive = false
+        browseIdleTimer.stop()
         imageOpenStartedMs = -1
         pendingSaveKind = ""
         stopMotionPhotoPlaybackForLifecycle()
@@ -1315,6 +1380,11 @@ Window {
             return
 
         if (replaceCurrent !== true) {
+            browseAwaitingFrame = false
+            browseImageReadyForFrame = false
+            browsePendingDirection = 0
+            browseScheduledDirection = 0
+            browseInputGeneration += 1
             lastBrowseDirection = 0
             lastBrowseAtMs = 0
             browseIdleTimer.stop()
@@ -1375,6 +1445,7 @@ Window {
         previewPhase = imageLimitedToPreview
             || (rawPreviewFirst && !rawFastPhase)
             || currentImageAnimated
+            || (replaceCurrent === true && browseAwaitingFrame)
             || replacingLoadingImage
             || shouldUsePreview()
         fullResTimer.stop()
@@ -1411,9 +1482,20 @@ Window {
     }
 
     function browseImage(direction) {
+        if (browseScheduledDirection !== 0) {
+            browseScheduledDirection = 0
+            browseInputGeneration += 1
+        }
         if (!root.fullScreenMode || root.editPanelOpen || fullscreenSideMenu.panelOpen
                 || !FileUrls.isLocal(root.residentImageUrl) || imageSaveService.busy)
             return
+        if (browseAwaitingFrame) {
+            browsePendingDirection = direction > 0 ? 1 : -1
+            browseBurstActive = true
+            fullResTimer.stop()
+            browseIdleTimer.restart()
+            return
+        }
         const adjacent = formatSupport.adjacentImage(root.residentImageUrl, direction)
         if (FileUrls.isLocal(adjacent)) {
             const now = Date.now()
@@ -1425,6 +1507,8 @@ Window {
             if (browseBurstActive)
                 browseIdleTimer.restart()
             lastBrowseDirection = direction > 0 ? 1 : -1
+            browseAwaitingFrame = true
+            browseImageReadyForFrame = false
             loadImageUrl(adjacent, true)
         }
     }
@@ -1438,7 +1522,8 @@ Window {
         }
         windowManager.prepareNearbyPreviews(
             formatSupport.nearbyImages(root.residentImageUrl, 5, root.lastBrowseDirection),
-            Qt.size(root.previewSourceWidth(), root.previewSourceHeight()),
+            root.browseBurstActive ? root.burstPreviewSize()
+                                   : Qt.size(root.previewSourceWidth(), root.previewSourceHeight()),
             root.viewerPreferences.maximumImageMemoryMiB)
     }
 
@@ -1852,6 +1937,7 @@ Window {
             imageWidth: root.imageWidth()
             imageHeight: root.imageHeight()
             currentScale: windowedZoom.scale
+            rasterPixelZoomEnabled: root.rasterPixelZoomEnabled
             providerSource: gestureWindow.visible ? root.renderedProviderSource : ""
             sourceOverride: gestureWindow.presentationSource
             sourceOverrideSize: gestureWindow.presentationSourceSize
@@ -2428,18 +2514,24 @@ Window {
         imageWidth: root.imageWidth()
         imageHeight: root.imageHeight()
         currentScale: root.currentScale
+        windowedInspectionMode: !root.fullScreenMode && windowedZoom.inspectionMode
+        rasterPixelZoomEnabled: root.rasterPixelZoomEnabled
 
         providerSource: root.renderedProviderSource
         previewPhase: root.previewPhase
         rawFastPhase: root.rawFastPhase
         rawPreviewFirst: root.rawPreviewFirst
         parallelFullResolutionEnabled: root.previewPhase && !root.browseBurstActive
+            && !root.browseAwaitingFrame
             && !root.imageLimitedToPreview
             && !root.currentImageAnimated
             && root.fullResolutionRenderingEnabled
             && root.parallelOpeningWorthwhile()
-        previewSourceWidth: root.previewSourceWidth()
-        previewSourceHeight: root.previewSourceHeight()
+        previewSourceWidth: root.browseAwaitingFrame || root.browseBurstActive
+            ? root.burstPreviewSize().width : root.previewSourceWidth()
+        previewSourceHeight: root.browseAwaitingFrame || root.browseBurstActive
+            ? root.burstPreviewSize().height : root.previewSourceHeight()
+        rapidBrowseMode: root.browseAwaitingFrame || root.browseBurstActive
         animatedSource: root.residentImageUrl
         animationController: root.animationController
         motionPhotoSession: root.motionPhotoSession
@@ -2474,8 +2566,20 @@ Window {
         }
 
         onPanRequested: function(dx, dy) {
-            root.panX += dx
-            root.panY += dy
+            if (root.fullScreenMode) {
+                root.panX += dx
+                root.panY += dy
+            } else if (windowedZoom.inspectionMode) {
+                windowedZoom.panBy(dx, dy)
+            }
+        }
+
+        onPixelSampleRequested: function(viewportX, viewportY, pixelX, pixelY) {
+            const sample = windowManager.sampleDisplayedPixel(root, viewportX, viewportY)
+            imageViewport.sampledPixelColor = sample && sample.red !== undefined
+                ? sample : null
+            imageViewport.sampledPixelX = pixelX
+            imageViewport.sampledPixelY = pixelY
         }
 
         onDisableFitModeRequested: {
@@ -2531,6 +2635,28 @@ Window {
                 root.promoteFullRes()
                 return
             }
+            if (root.browseAwaitingFrame && root.previewPhase
+                    && !root.imageLimitedToPreview) {
+                root.promoteFullRes()
+                return
+            }
+            if (root.browseAwaitingFrame) {
+                root.browseAwaitingFrame = false
+                root.browseImageReadyForFrame = false
+                const direction = root.browsePendingDirection
+                root.browsePendingDirection = 0
+                if (direction !== 0) {
+                    const generation = root.browseInputGeneration
+                    root.browseScheduledDirection = direction
+                    Qt.callLater(function() {
+                        if (root.browseInputGeneration === generation
+                                && root.browseScheduledDirection === direction) {
+                            root.browseScheduledDirection = 0
+                            root.browseImage(direction)
+                        }
+                    })
+                }
+            }
             root.pendingNavigationFit = false
             const previewAvailable = root.hasImage()
             const openingImage = root.imageOpenStartedMs >= 0
@@ -2568,6 +2694,8 @@ Window {
         }
 
         onImageReady: {
+            if (root.browseAwaitingFrame)
+                root.browseImageReadyForFrame = true
             if (!root.animatedPlaybackActive)
                 nearbyPreviewTimer.restart()
             const shouldReveal = root.pendingImageReveal
@@ -2613,7 +2741,7 @@ Window {
                     && !root.imageLimitedToPreview
                     && !root.animatedPlaybackActive
                     && root.fullResolutionRenderingEnabled
-                    && !root.browseBurstActive)
+                    && !root.browseBurstActive && !root.browseAwaitingFrame)
                 fullResTimer.restart()
 
             if (root.imageOpenStartedMs >= 0 && notificationCenter.isLoading("image")) {
@@ -3288,7 +3416,7 @@ Window {
         repeat: false
         onTriggered: {
             root.browseBurstActive = false
-            if (imageViewport.imageStatus === Image.Ready
+            if (!root.browseAwaitingFrame && imageViewport.imageStatus === Image.Ready
                     && (root.previewPhase || root.rawFastPhase)
                     && !root.imageLimitedToPreview
                     && root.fullResolutionRenderingEnabled)

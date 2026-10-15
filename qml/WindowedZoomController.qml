@@ -21,6 +21,11 @@ QtObject {
     property real scale: 1.0
     property real targetScale: 1.0
     property bool stateValid: false
+    property real contentX: 0.0
+    property real contentY: 0.0
+    readonly property bool inspectionMode: hostWindow.rasterPixelZoomEnabled
+        && (hostWindow.imageWidth() * scale > maximumWindowWidth()
+            || hostWindow.imageHeight() * scale > maximumWindowHeight())
 
     onScaleChanged: {
         if (zoomAnimation.running) {
@@ -191,12 +196,12 @@ QtObject {
         const geometry = currentNativeGeometry()
         const scaleValue = Math.max(hostWindow.minScale, scale)
         anchorImageX = hostWindow.clamp(
-            pointerX / scaleValue,
+            (pointerX - imageX()) / scaleValue,
             0,
             hostWindow.imageWidth()
         )
         anchorImageY = hostWindow.clamp(
-            pointerY / scaleValue,
+            (pointerY - imageY()) / scaleValue,
             0,
             hostWindow.imageHeight()
         )
@@ -206,11 +211,19 @@ QtObject {
     }
 
     function imageX() {
-        return 0.0
+        return inspectionMode ? contentX : 0.0
     }
 
     function imageY() {
-        return 0.0
+        return inspectionMode ? contentY : 0.0
+    }
+
+    function maximumWindowWidth() {
+        return Math.max(1, Math.floor(screenWidth() * maximumScreenFraction))
+    }
+
+    function maximumWindowHeight() {
+        return Math.max(1, Math.floor(screenHeight() * maximumScreenFraction))
     }
 
     function scaleForScreenFraction(screenFraction) {
@@ -233,7 +246,8 @@ QtObject {
     }
 
     function maximumScale() {
-        return scaleForScreenFraction(maximumScreenFraction)
+        return hostWindow.rasterPixelZoomEnabled
+            ? hostWindow.maxScale : scaleForScreenFraction(maximumScreenFraction)
     }
 
     function clampScale(scaleValue) {
@@ -242,17 +256,25 @@ QtObject {
 
     function exactGeometryForScale(scaleValue) {
         const boundedScale = clampScale(scaleValue)
-        const desiredX = anchorGlobalX - anchorImageX * boundedScale
-        const desiredY = anchorGlobalY - anchorImageY * boundedScale
-        const targetWidth = ViewerMath.scaledExtent(
+        const scaledWidth = ViewerMath.scaledExtent(
             hostWindow.imageWidth(),
             boundedScale
         )
-        const targetHeight = ViewerMath.scaledExtent(
+        const scaledHeight = ViewerMath.scaledExtent(
             hostWindow.imageHeight(),
             boundedScale
         )
         const screen = screenGeometry()
+        const boundedWindow = hostWindow.rasterPixelZoomEnabled
+        const targetWidth = boundedWindow
+            ? Math.min(scaledWidth, maximumWindowWidth()) : scaledWidth
+        const targetHeight = boundedWindow
+            ? Math.min(scaledHeight, maximumWindowHeight()) : scaledHeight
+        const current = currentNativeGeometry()
+        const desiredX = boundedWindow && scaledWidth > targetWidth
+            ? current.x : anchorGlobalX - anchorImageX * boundedScale
+        const desiredY = boundedWindow && scaledHeight > targetHeight
+            ? current.y : anchorGlobalY - anchorImageY * boundedScale
         const constrained = ViewerMath.constrainRectToBounds(
             desiredX,
             desiredY,
@@ -294,7 +316,31 @@ QtObject {
         if (!geometryAnchorActive)
             anchorAtCurrentCenter()
 
-        applyExactGeometry(exactGeometryForScale(scaleValue))
+        const geometry = exactGeometryForScale(scaleValue)
+        const scaledWidth = hostWindow.imageWidth() * scaleValue
+        const scaledHeight = hostWindow.imageHeight() * scaleValue
+        contentX = scaledWidth > geometry.width
+            ? hostWindow.clamp(anchorGlobalX - anchorImageX * scaleValue - geometry.x,
+                               geometry.width - scaledWidth, 0) : 0
+        contentY = scaledHeight > geometry.height
+            ? hostWindow.clamp(anchorGlobalY - anchorImageY * scaleValue - geometry.y,
+                               geometry.height - scaledHeight, 0) : 0
+        applyExactGeometry(geometry)
+    }
+
+    function panBy(dx, dy) {
+        if (!inspectionMode || hostWindow.fullScreenMode)
+            return
+        const geometry = currentNativeGeometry()
+        contentX = hostWindow.clamp(contentX + dx,
+            geometry.width - hostWindow.imageWidth() * scale, 0)
+        contentY = hostWindow.clamp(contentY + dy,
+            geometry.height - hostWindow.imageHeight() * scale, 0)
+        anchorGlobalX = geometry.x + geometry.width * 0.5
+        anchorGlobalY = geometry.y + geometry.height * 0.5
+        anchorImageX = (geometry.width * 0.5 - contentX) / scale
+        anchorImageY = (geometry.height * 0.5 - contentY) / scale
+        geometryAnchorActive = true
     }
 
     function ensureState() {
@@ -367,10 +413,19 @@ QtObject {
         const pointerGlobalY = gestureActive
             ? gestureScreenGeometry.y + pointerY
             : currentNativeGeometry().y + pointerY
-        if (!gestureActive || Math.abs(pointerGlobalX - anchorGlobalX) > 0.5
-                || Math.abs(pointerGlobalY - anchorGlobalY) > 0.5)
+        const targetInspection = hostWindow.rasterPixelZoomEnabled
+            && (hostWindow.imageWidth() * newScale > maximumWindowWidth()
+                || hostWindow.imageHeight() * newScale > maximumWindowHeight())
+        if (targetInspection && gestureActive) {
+            finishGestureImmediately()
+            const geometry = currentNativeGeometry()
+            anchorAtPointer(pointerGlobalX - geometry.x, pointerGlobalY - geometry.y)
+        } else if (!gestureActive || Math.abs(pointerGlobalX - anchorGlobalX) > 0.5
+                || Math.abs(pointerGlobalY - anchorGlobalY) > 0.5) {
             anchorAtPointer(pointerX, pointerY)
-        if (!gestureActive && hostWindow.zoomAnimationDurationMs > 0)
+        }
+        if (!gestureActive && !inspectionMode && !targetInspection
+                && hostWindow.zoomAnimationDurationMs > 0)
             beginGesture()
         targetScale = newScale
         if (hostWindow.zoomAnimationDurationMs <= 0) {
@@ -421,6 +476,8 @@ QtObject {
         stateValid = false
         targetScale = 1.0
         geometryAnchorActive = false
+        contentX = 0
+        contentY = 0
     }
 
     function reset() {
@@ -433,6 +490,8 @@ QtObject {
         targetScale = 1.0
         geometryAnchorActive = false
         suppressGeometryCapture = false
+        contentX = 0
+        contentY = 0
     }
 
     function restore() {
@@ -447,6 +506,10 @@ QtObject {
 
             if (hadWindowedState) {
                 setTopLeftAnchor(restoreGeometry.x, restoreGeometry.y)
+                if (inspectionMode) {
+                    anchorImageX = -contentX / Math.max(hostWindow.minScale, scale)
+                    anchorImageY = -contentY / Math.max(hostWindow.minScale, scale)
+                }
             } else {
                 anchorAtScreenCenter()
             }

@@ -1,6 +1,6 @@
 name: licasa
 title: Licasa
-version: '0.3.0'
+version: '0.5.0'
 summary: Fast, image-first photo viewer and editor
 description: |
   Licasa opens photographs in a focused, image-sized window. Browse, zoom,
@@ -14,7 +14,6 @@ icon: assets/licasa.png
 base: core24
 grade: devel
 confinement: strict
-assumes: [snapd2.66]
 
 # The qualified private Qt patches and codec builds currently target only
 # Ubuntu 24.04 on amd64. Add platforms after qualifying their runtime stacks.
@@ -25,30 +24,18 @@ apps:
   licasa:
     command: usr/bin/licasa
     desktop: usr/share/applications/licasa.desktop
+    autostart: licasa-background.desktop
     extensions: [gnome]
-    environment: &licasa_environment
+    environment:
       LD_LIBRARY_PATH: $SNAP/usr/lib/licasa/lib:$SNAP/usr/lib/x86_64-linux-gnu:$SNAP/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
       QT_PLUGIN_PATH: $SNAP/usr/lib/licasa/plugins:$SNAP/usr/lib/x86_64-linux-gnu/qt6/plugins
       QML2_IMPORT_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/qml
       QML_IMPORT_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/qml
       QT_QPA_PLATFORM_PLUGIN_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/plugins/platforms
-    plugs: &licasa_plugs
+    plugs:
       - home
       - removable-media
       - audio-playback
-  background:
-    command: usr/lib/licasa/background-service
-    daemon: simple
-    # Snapd currently requires experimental.user-daemons=true to install this service.
-    daemon-scope: user
-    install-mode: enable
-    refresh-mode: restart
-    restart-condition: always
-    restart-delay: 2s
-    stop-mode: sigterm-all
-    extensions: [gnome]
-    environment: *licasa_environment
-    plugs: *licasa_plugs
 
 parts:
   licasa:
@@ -92,6 +79,7 @@ parts:
       - qml6-module-qtquick
       - qml6-module-qtquick-window
       - qml6-module-qtqml-workerscript
+      - qml6-module-qtqml-models
       - qml6-module-qttest
       - qml6-module-qtquick-controls
       - qml6-module-qtquick-templates
@@ -125,6 +113,7 @@ parts:
       - qt6-image-formats-plugins
       - qml6-module-qtqml
       - qml6-module-qtqml-workerscript
+      - qml6-module-qtqml-models
       - qml6-module-qtquick
       - qml6-module-qtquick-controls
       - qml6-module-qtquick-dialogs
@@ -147,5 +136,3 @@ parts:
       fi
       install -d "$CRAFT_PART_INSTALL/usr/share/licasa"
       printf '%s\n' "$source_commit" > "$CRAFT_PART_INSTALL/usr/share/licasa/source-commit"
-      install -Dm755 "$CRAFT_PART_BUILD/snap/background-service" \
-        "$CRAFT_PART_INSTALL/usr/lib/licasa/background-service"

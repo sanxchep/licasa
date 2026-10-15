@@ -10,10 +10,9 @@ Item {
 
     QtObject {
         id: fakeBackgroundService
-        property bool snapService: true
-        property string snapServiceStatus: "inactive"
-        property int refreshCount: 0
-        function refreshSnapServiceStatus() { refreshCount++ }
+        property bool supported: true
+        property bool enabled: false
+        function setEnabled(value) { enabled = value }
     }
 
     TestCase {
@@ -55,6 +54,16 @@ Item {
             maximumImageMemoryMiB: 8192
             minimumImageMemoryMiB: 384
             maximumImageMemoryLimitMiB: 32768
+        }
+    }
+
+    Component {
+        id: editorSidePanelComponent
+        EditorSidePanel {
+            width: 640
+            height: 480
+            hasImage: true
+            panelOpen: false
         }
     }
 
@@ -323,6 +332,41 @@ Item {
         compare(spy.count, 2)
     }
 
+    function test_settingsRowsKeepTextAndControlsInsideTheFocusBorder() {
+        const toggle = createControl(toggleComponent)
+        toggle.width = 260
+        toggle.subtitle = "A longer description that wraps to another line"
+        waitForRendering(toggle)
+        const toggleFrame = findChild(toggle, "toggleRowFocusFrame")
+        const toggleTitle = findChild(toggle, "toggleRowTitle")
+        const toggleSubtitle = findChild(toggle, "toggleRowSubtitle")
+        const toggleSwitch = findChild(toggle, "toggleRowSwitch")
+        verify(toggleFrame && toggleTitle && toggleSubtitle && toggleSwitch)
+        const titlePosition = toggleTitle.mapToItem(toggle, 0, 0)
+        const subtitlePosition = toggleSubtitle.mapToItem(toggle, 0, 0)
+        verify(titlePosition.y >= 8)
+        verify(titlePosition.x >= 8)
+        verify(subtitlePosition.y + toggleSubtitle.height <= toggleFrame.height - 8)
+        verify(toggleSwitch.x + toggleSwitch.width <= toggleFrame.width - 8)
+
+        const value = createControl(valueRowComponent)
+        value.width = 260
+        value.title = "Maximum working memory per image"
+        value.subtitle = "Estimated per-image budget: 8.00 GiB"
+        waitForRendering(value)
+        const valueFrame = findChild(value, "valueRowFocusFrame")
+        const valueTitle = findChild(value, "valueRowTitle")
+        const valueSubtitle = findChild(value, "valueRowSubtitle")
+        const valueControls = findChild(value, "valueRowControls")
+        verify(valueFrame && valueTitle && valueSubtitle && valueControls)
+        verify(valueTitle.y >= 8)
+        verify(valueTitle.x >= 8)
+        verify(valueTitle.lineCount >= 2)
+        verify(!valueTitle.truncated)
+        verify(valueSubtitle.y + valueSubtitle.height + 8 <= valueControls.y)
+        verify(valueControls.y + valueControls.height <= valueFrame.height - 8)
+    }
+
     function test_settingsRowsRespondToKeyboard() {
         const toggle = createControl(toggleComponent)
         const toggleSpy = createSpy(toggle, "toggled")
@@ -431,28 +475,22 @@ Item {
         compare(menu.currentImageMegapixelsText(), "240 MP")
     }
 
-    function test_snapBackgroundServiceAppearsInSettings() {
+    function test_backgroundModeCanBeEnabledInSettings() {
         const menu = createControl(settingsMenuComponent)
         const row = findChild(menu, "backgroundServiceRow")
-        const status = findChild(menu, "backgroundServiceStatusText")
-        const dot = findChild(menu, "backgroundServiceStatusDot")
         verify(row)
-        verify(status)
-        verify(dot)
         verify(!row.visible)
 
-        fakeBackgroundService.refreshCount = 0
-        fakeBackgroundService.snapServiceStatus = "inactive"
+        fakeBackgroundService.enabled = false
         menu.backgroundModeManager = fakeBackgroundService
         menu.panelOpen = true
         verify(row.visible)
-        compare(fakeBackgroundService.refreshCount, 1)
-        compare(status.text, "Not running")
-        compare(dot.color, "#ff453a")
-
-        fakeBackgroundService.snapServiceStatus = "active"
-        compare(status.text, "Running")
-        compare(dot.color, "#34c759")
+        verify(!row.checked)
+        row.toggled(true)
+        verify(fakeBackgroundService.enabled)
+        verify(row.checked)
+        row.toggled(false)
+        verify(!fakeBackgroundService.enabled)
     }
 
     function test_aboutSectionShowsInstalledBuild() {
@@ -485,6 +523,59 @@ Item {
         menu.panelOpen = true
         menu.panelOpen = false
         compare(scrim.visible, false)
+    }
+
+    function test_settingsPanelHasCloseControlAndFitsNarrowScreens() {
+        const menu = createControl(settingsMenuComponent)
+        const panel = findChild(menu, "settingsPanel")
+        const closeButton = findChild(menu, "settingsCloseButton")
+        const menuButton = findChild(menu, "settingsMenuButton")
+        verify(panel && closeButton && menuButton)
+        menu.panelOpen = true
+        verify(closeButton.visible)
+        verify(!menuButton.visible)
+        mouseClick(closeButton, closeButton.width / 2, closeButton.height / 2,
+                   Qt.LeftButton)
+        compare(menu.panelOpen, false)
+        tryCompare(panel, "visible", false, 400)
+
+        menu.anchors.fill = null
+        menu.width = 320
+        menu.height = 480
+        menu.panelOpen = true
+        tryCompare(panel, "x", menu.width - panel.width - 20, 400)
+        verify(panel.x >= 0)
+        verify(panel.x + panel.width <= menu.width)
+    }
+
+    function test_closedDrawersFollowFullscreenResizeWithoutSliding() {
+        const menu = createControl(settingsMenuComponent)
+        const settingsPanel = findChild(menu, "settingsPanel")
+        verify(settingsPanel)
+        compare(settingsPanel.x, 664)
+
+        menu.anchors.fill = null
+        menu.width = 960
+        compare(settingsPanel.x, 984)
+
+        menu.panelOpen = true
+        tryCompare(settingsPanel, "x", menu.width - settingsPanel.width - 20, 400)
+        menu.panelOpen = false
+        tryCompare(settingsPanel, "x", menu.width + 24, 400)
+
+        const editor = createControl(editorSidePanelComponent)
+        const editorPanel = findChild(editor, "editorPanel")
+        verify(editorPanel)
+        compare(editorPanel.x, -editorPanel.width - 18)
+
+        editor.anchors.fill = null
+        editor.width = 1800
+        compare(editorPanel.x, -editorPanel.width - 18)
+
+        editor.panelOpen = true
+        tryCompare(editorPanel, "x", editor.panelLeftMargin, 400)
+        editor.panelOpen = false
+        tryCompare(editorPanel, "x", -editorPanel.width - 18, 400)
     }
 
     function test_scrollBarHandleDragsTheFlickable() {
@@ -979,6 +1070,131 @@ Item {
         compare(imageStage.width, 1240)
         compare(imageStage.height, 1248)
         compare(imageStage.scale, 0.5)
+    }
+
+    function test_pixelGridFollowsTheDisplayedRaster() {
+        const viewport = createControl(imageViewportComponent)
+        tryCompare(viewport, "imageStatus", Image.Ready, 5000)
+        viewport.rasterPixelZoomEnabled = true
+        viewport.fullScreenMode = true
+        viewport.imageX = -35
+        viewport.imageY = -15
+
+        const grid = findChild(viewport, "pixelGrid")
+        verify(grid)
+        const thresholdScale = Math.max(
+            24 * viewport.inspectedRasterWidth / viewport.imageWidth,
+            24 * viewport.inspectedRasterHeight / viewport.imageHeight)
+        viewport.currentScale = thresholdScale * 0.9
+        compare(viewport.pixelGridVisible, false)
+        viewport.currentScale = thresholdScale * 1.1
+        tryCompare(viewport, "pixelGridVisible", true, 5000)
+        compare(grid.visible, true)
+        verify(viewport.rasterCellWidth * viewport.devicePixelRatio >= 24)
+        verify(viewport.rasterCellHeight * viewport.devicePixelRatio >= 24)
+
+        const sampleSpy = createSpy(viewport, "pixelSampleRequested")
+        mouseMove(viewport, 40, 40)
+        mouseMove(viewport, 41, 41)
+        const pointer = findChild(viewport, "imagePointerLayer")
+        verify(pointer)
+        verify(viewport.hoveredPixelX >= 0)
+        verify(viewport.hoveredPixelY >= 0)
+        tryCompare(sampleSpy, "count", 1, 5000)
+        verify(sampleSpy.signalArguments[0][0] >= 0)
+        verify(sampleSpy.signalArguments[0][0] < viewport.width)
+        verify(sampleSpy.signalArguments[0][1] >= 0)
+        verify(sampleSpy.signalArguments[0][1] < viewport.height)
+        compare(sampleSpy.signalArguments[0][2], viewport.hoveredPixelX)
+        compare(sampleSpy.signalArguments[0][3], viewport.hoveredPixelY)
+
+        const readout = findChild(viewport, "pixelCoordinateText")
+        verify(readout)
+        viewport.sampledPixelX = viewport.hoveredPixelX
+        viewport.sampledPixelY = viewport.hoveredPixelY
+        viewport.sampledPixelColor = { red: 12, green: 34, blue: 56, alpha: 255 }
+        compare(readout.text, "Preview pixel (" + viewport.hoveredPixelX + ", "
+                + viewport.hoveredPixelY + ")  RGB(12, 34, 56)")
+        viewport.sampledPixelColor = { red: 12, green: 34, blue: 56, alpha: 128 }
+        compare(readout.text, "Preview pixel (" + viewport.hoveredPixelX + ", "
+                + viewport.hoveredPixelY + ")  RGBA(12, 34, 56, 128)")
+
+        mouseMove(viewport, 80, 40)
+        tryCompare(sampleSpy, "count", 2, 5000)
+        compare(sampleSpy.signalArguments[1][2], viewport.hoveredPixelX)
+        compare(sampleSpy.signalArguments[1][3], viewport.hoveredPixelY)
+
+        viewport.fullScreenMode = false
+        viewport.windowedInspectionMode = true
+        compare(viewport.renderedImageX, -35)
+        compare(viewport.renderedImageY, -15)
+        compare(findChild(viewport, "imageStage").scale, thresholdScale * 1.1)
+        tryCompare(viewport, "imageStatus", Image.Ready, 5000)
+        const panSpy = createSpy(viewport, "panRequested")
+        mouseDrag(viewport, 80, 80, 40, 20, Qt.LeftButton)
+        verify(panSpy.count > 0)
+    }
+
+    function test_pixelGridTracksPreviewToFullResolution() {
+        const viewport = createControl(imageViewportComponent)
+        tryCompare(viewport, "imageStatus", Image.Ready, 5000)
+        viewport.rasterPixelZoomEnabled = true
+        viewport.fullScreenMode = true
+        const previewWidth = viewport.inspectedRasterWidth
+        compare(viewport.inspectedPixelKind, "Preview pixel")
+
+        viewport.previewPhase = false
+        tryVerify(function() {
+            return viewport.imageStatus === Image.Ready
+                && viewport.activeRequestKey.indexOf("licasa_stage=full") >= 0
+        }, 5000)
+        compare(viewport.inspectedPixelKind, "Pixel")
+        verify(viewport.inspectedRasterWidth >= previewWidth)
+        viewport.currentScale = Math.max(
+            24 * viewport.inspectedRasterWidth / viewport.imageWidth,
+            24 * viewport.inspectedRasterHeight / viewport.imageHeight) * 1.1
+        tryCompare(viewport, "pixelGridVisible", true, 5000)
+    }
+
+    function test_pixelGridThresholdKeepsTheCurrentImageVisible() {
+        const viewport = createControl(imageViewportComponent)
+        tryCompare(viewport, "imageStatus", Image.Ready, 5000)
+        viewport.rasterPixelZoomEnabled = true
+        viewport.fullScreenMode = true
+        const thresholdScale = Math.max(
+            24 * viewport.inspectedRasterWidth / viewport.imageWidth,
+            24 * viewport.inspectedRasterHeight / viewport.imageHeight)
+        viewport.currentScale = thresholdScale * 0.9
+        tryCompare(viewport, "imageStatus", Image.Ready, 5000)
+        const statusSpy = createSpy(viewport, "imageStatusChanged")
+        const emptyState = findChild(viewport, "emptyImageState")
+        const imageStage = findChild(viewport, "imageStage")
+        const displayedImage = viewport.activeImage
+        const displayedSource = viewport.activeRequestKey
+        const initialMipmap = displayedImage.mipmap
+
+        viewport.currentScale = thresholdScale * 1.1
+        compare(viewport.imageStatus, Image.Ready)
+        compare(imageStage.visible, true)
+        compare(emptyState.visible, false)
+        compare(viewport.activeImage, displayedImage)
+        compare(viewport.activeRequestKey, displayedSource)
+        compare(displayedImage.mipmap, initialMipmap)
+        compare(displayedImage.smooth, false)
+        wait(100)
+        compare(statusSpy.count, 0)
+        compare(viewport.pixelGridVisible, true)
+
+        viewport.currentScale = thresholdScale * 0.9
+        compare(viewport.imageStatus, Image.Ready)
+        compare(imageStage.visible, true)
+        compare(emptyState.visible, false)
+        compare(viewport.activeImage, displayedImage)
+        compare(viewport.activeRequestKey, displayedSource)
+        compare(displayedImage.mipmap, initialMipmap)
+        compare(displayedImage.smooth, viewport.smoothScalingEnabled)
+        wait(100)
+        compare(statusSpy.count, 0)
     }
 
     function test_imageLoaderRetainsReadyFrameDuringFullResolutionSwap() {

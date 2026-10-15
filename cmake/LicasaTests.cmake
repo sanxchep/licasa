@@ -13,6 +13,17 @@ set(LICASA_RAW_TEST_TARGETS)
 set(LICASA_AVIF_TEST_TARGETS)
 set(LICASA_APNG_TEST_TARGETS)
 
+add_executable(licasa_runtime_error_log_tests
+        tests/tst_runtime_error_log.cpp src/app/runtime_error_log.cpp)
+target_include_directories(licasa_runtime_error_log_tests PRIVATE src)
+target_link_libraries(licasa_runtime_error_log_tests PRIVATE Qt6::Core Qt6::Test)
+licasa_enable_warnings(licasa_runtime_error_log_tests)
+list(APPEND LICASA_TEST_TARGETS licasa_runtime_error_log_tests)
+list(APPEND LICASA_CORE_TEST_TARGETS licasa_runtime_error_log_tests)
+add_test(NAME licasa_runtime_error_log_tests COMMAND licasa_runtime_error_log_tests)
+set_tests_properties(licasa_runtime_error_log_tests PROPERTIES
+        TIMEOUT 15 LABELS "core;logging;fast")
+
 add_executable(licasa_background_mode_tests
         tests/tst_background_mode.cpp
         src/app/application_settings.cpp)
@@ -456,12 +467,6 @@ set_tests_properties(licasa_qml_tests PROPERTIES
         ENVIRONMENT "QT_QUICK_BACKEND=software"
         LABELS "core;qml;fast"
 )
-if(LICASA_SANITIZER MATCHES "address" AND Qt6_VERSION VERSION_LESS "6.8.0"
-        AND NOT LICASA_QT_QUICK_BACKPORT_LIBRARY)
-    set_property(TEST licasa_qml_tests APPEND PROPERTY ENVIRONMENT
-            "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan-qt-software.supp:print_suppressions=1")
-endif()
-
 add_executable(licasa_async_image_provider_tests tests/tst_async_image_provider.cpp)
 target_link_libraries(licasa_async_image_provider_tests PRIVATE licasa_image_services Qt6::Test)
 if(LICASA_HAVE_FAST_TIFF_PREVIEW)
@@ -545,6 +550,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 ${CMAKE_CURRENT_SOURCE_DIR}/assets/licasa.png)
         set_tests_properties(licasa_navigation_transition PROPERTIES
                 TIMEOUT 25 LABELS "integration;navigation;qml")
+        add_test(NAME licasa_navigation_burst
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_navigation_burst.py
+                $<TARGET_FILE:licasa_diagnostics>)
+        set_tests_properties(licasa_navigation_burst PROPERTIES
+                TIMEOUT 90 LABELS "integration;navigation;qml")
         if(LICASA_ENABLE_RAW)
             list(APPEND LICASA_RAW_TEST_TARGETS licasa_diagnostics)
             add_test(NAME licasa_raw_viewer_behavior
@@ -591,6 +601,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 TIMEOUT 150 LABELS "integration;lifecycle"
                 RUN_SERIAL TRUE PROCESSORS ${LICASA_LIFECYCLE_JOBS})
     endif()
+endif()
+
+# Qt 6.4's software scene graph retains textures at shutdown. Apply the
+# existing, narrowly scoped suppression to every test that launches it.
+if(LICASA_SANITIZER MATCHES "address" AND Qt6_VERSION VERSION_LESS "6.8.0"
+        AND NOT LICASA_QT_QUICK_BACKPORT_LIBRARY)
+    foreach(test_name licasa_qml_tests licasa_navigation_transition
+            licasa_navigation_burst licasa_viewer_lifecycle)
+        if(TEST ${test_name})
+            set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT
+                    "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan-qt-software.supp:print_suppressions=1")
+        endif()
+    endforeach()
 endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/LicasaTemporalTests.cmake)

@@ -31,6 +31,26 @@ namespace Licasa {
 namespace {
 QSize boundedPreviewSize(const QSize& requestedSize, quint64 maximumPixels);
 
+bool isJpegSuffix(const QString& suffix)
+{
+    return suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg");
+}
+
+bool isTiffSuffix(const QString& suffix)
+{
+    return suffix == QStringLiteral("tif") || suffix == QStringLiteral("tiff");
+}
+
+bool isRawSuffix(const QString& suffix)
+{
+    return suffix == QStringLiteral("dng") || suffix == QStringLiteral("raw") ||
+           suffix == QStringLiteral("cr2") || suffix == QStringLiteral("cr3") ||
+           suffix == QStringLiteral("nef") || suffix == QStringLiteral("nrw") ||
+           suffix == QStringLiteral("arw") || suffix == QStringLiteral("srw") ||
+           suffix == QStringLiteral("rw2") || suffix == QStringLiteral("pef") ||
+           suffix == QStringLiteral("orf") || suffix == QStringLiteral("raf");
+}
+
 struct NearbyFileStamp {
     QString canonicalPath;
     qint64 size = -1;
@@ -167,6 +187,7 @@ struct NearbyPreviewCache : std::enable_shared_from_this<NearbyPreviewCache> {
     qsizetype bytes = 0;
     quint64 hitCount = 0;
     std::shared_ptr<std::atomic_bool> activeCancellation;
+    QString activePath;
     bool workerRunning = false;
 
     void cancelActive()
@@ -181,18 +202,10 @@ struct NearbyPreviewCache : std::enable_shared_from_this<NearbyPreviewCache> {
         QMutexLocker lock(&mutex);
         cancelActive();
         desired.clear();
+        activePath.clear();
         entries.clear();
         attempted.clear();
         bytes = 0;
-    }
-
-    void cancelForNavigation()
-    {
-        QMutexLocker lock(&mutex);
-        cancelActive();
-        // Keep the overlapping ready entries until the new center is known.
-        desired.clear();
-        attempted.clear();
     }
 
     QImage lookup(const QString& path)
@@ -232,7 +245,9 @@ struct NearbyPreviewCache : std::enable_shared_from_this<NearbyPreviewCache> {
         if (desired == paths && requestedSize == requested && byteLimit == limit) {
             return !workerRunning && !paths.isEmpty();
         }
-        cancelActive();
+        if (!activePath.isEmpty() && !paths.contains(activePath)) {
+            cancelActive();
+        }
         desired = std::move(paths);
         requestedSize = requested;
         byteLimit = limit;
@@ -266,31 +281,26 @@ struct NearbyPreviewCache : std::enable_shared_from_this<NearbyPreviewCache> {
             if (path.isEmpty()) {
                 workerRunning = false;
                 activeCancellation.reset();
+                activePath.clear();
                 return;
             }
             attempted.insert(path);
             target = requestedSize;
             maxBytes = slotLimit;
             activeCancellation = cancellation;
+            activePath = path;
         }
 
         QImage decoded;
         const NearbyFileStamp before = nearbyFileStamp(path);
         const QString suffix = QFileInfo(path).suffix().toLower();
-        const bool raw = suffix == QStringLiteral("dng") || suffix == QStringLiteral("raw") ||
-                         suffix == QStringLiteral("cr2") || suffix == QStringLiteral("cr3") ||
-                         suffix == QStringLiteral("nef") || suffix == QStringLiteral("nrw") ||
-                         suffix == QStringLiteral("arw") || suffix == QStringLiteral("srw") ||
-                         suffix == QStringLiteral("rw2") || suffix == QStringLiteral("pef") ||
-                         suffix == QStringLiteral("orf") || suffix == QStringLiteral("raf");
-        const bool stillOrSmall =
-            suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg") ||
-            suffix == QStringLiteral("png") || suffix == QStringLiteral("webp") ||
-            suffix == QStringLiteral("bmp") || suffix == QStringLiteral("tif") ||
-            suffix == QStringLiteral("tiff");
+        const bool raw = isRawSuffix(suffix);
+        const bool stillOrSmall = isJpegSuffix(suffix) || suffix == QStringLiteral("png") ||
+                                  suffix == QStringLiteral("webp") ||
+                                  suffix == QStringLiteral("bmp") || isTiffSuffix(suffix);
         if ((stillOrSmall || raw) && before.isValid() && maxBytes > 0 && target.isValid()) {
 #ifdef LICASA_HAVE_FAST_TIFF_PREVIEW
-            if (suffix == QStringLiteral("tif") || suffix == QStringLiteral("tiff")) {
+            if (isTiffSuffix(suffix)) {
                 decoded = readFastTiffPreview(path, target, policy.maximumImagePixels(), maxBytes,
                                               cancellation.get());
             }
@@ -304,8 +314,7 @@ struct NearbyPreviewCache : std::enable_shared_from_this<NearbyPreviewCache> {
                 reader.setAutoTransform(true);
                 if (reader.canRead()) {
                     const QSize source = reader.size();
-                    const bool jpeg =
-                        suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg");
+                    const bool jpeg = isJpegSuffix(suffix);
                     const QSize nativeJpegSize =
                         jpeg ? admittedNativeJpegSize(source, maximumPixels) : QSize();
                     const bool nativeJpegScale =
@@ -355,6 +364,9 @@ struct NearbyPreviewCache : std::enable_shared_from_this<NearbyPreviewCache> {
         bool more = false;
         {
             QMutexLocker lock(&mutex);
+            if (activePath == path) {
+                activePath.clear();
+            }
             if (!cancellation->load(std::memory_order_relaxed) && desired.contains(path) &&
                 !decoded.isNull() && decoded.sizeInBytes() > 0 &&
                 decoded.sizeInBytes() <= slotLimit && sameFileStamp(before, after)) {
@@ -585,16 +597,13 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
         constexpr int previewMegapixels = 2;
         constexpr quint64 previewPixels = quint64(previewMegapixels) * 1000000;
         const QString suffix = QFileInfo(filePath_).suffix().toLower();
-        const bool jpeg = suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg");
+        const bool jpeg = isJpegSuffix(suffix);
         const bool smallRaster = suffix == QStringLiteral("png") ||
                                  suffix == QStringLiteral("bmp") ||
                                  suffix == QStringLiteral("webp");
-        const bool raw = suffix == QStringLiteral("dng") || suffix == QStringLiteral("cr2") ||
-                         suffix == QStringLiteral("cr3") || suffix == QStringLiteral("nef") ||
-                         suffix == QStringLiteral("arw") || suffix == QStringLiteral("rw2");
+        const bool raw = isRawSuffix(suffix);
 #ifdef LICASA_HAVE_FAST_TIFF_PREVIEW
-        const bool tiff = suffix == QStringLiteral("tif") || suffix == QStringLiteral("tiff");
-        if (tiff) {
+        if (isTiffSuffix(suffix)) {
             QImage fastPreview = readFastTiffPreview(filePath_, requestedSize_, previewPixels,
                                                      8 * 1024 * 1024, cancelled_.get());
             if (!fastPreview.isNull()) {
@@ -664,7 +673,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
 #ifdef LICASA_HAVE_FAST_TIFF_PREVIEW
         if (image.isNull() && !fullDetail_ && !isCancelled()) {
             const QString suffix = fileInfo.suffix().toLower();
-            if (suffix == QStringLiteral("tif") || suffix == QStringLiteral("tiff")) {
+            if (isTiffSuffix(suffix)) {
                 image = readFastTiffPreview(filePath_, requestedSize_, maximumPixels,
                                             8 * 1024 * 1024, cancelled_.get());
             }
@@ -728,8 +737,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
 #ifdef LICASA_EARLY_PROGRESSIVE_JPEG
             const QString extension = fileInfo.suffix().toLower();
             if (!fullDetail_ && !rawFastDevelopment_ && !rawInteractiveDevelopment_ &&
-                (extension == QStringLiteral("jpg") || extension == QStringLiteral("jpeg")) &&
-                reader.scaledSize().isValid() &&
+                isJpegSuffix(extension) && reader.scaledSize().isValid() &&
                 reader.transformation() == QImageIOHandler::TransformationNone) {
                 image = readEarlyProgressiveJpegPreview(filePath_, reader.scaledSize(),
                                                         maximumPixels, cancelled_.get());
@@ -932,9 +940,9 @@ void AsyncImageProvider::releasePictureResources(bool retainNearbyPreviews, cons
         nextNavigationPath_ =
             retainNearbyPreviews && nextImage.isLocalFile() ? nextImage.toLocalFile() : QString();
     }
-    if (retainNearbyPreviews) {
-        nearbyPreviewCache_->cancelForNavigation();
-    } else {
+    // Keep filling the current neighbor window until the new center is ready.
+    // Most prepared entries still overlap after a single navigation step.
+    if (!retainNearbyPreviews) {
         nearbyPreviewCache_->clear();
     }
     {

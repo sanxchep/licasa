@@ -1,10 +1,10 @@
+#include "container_signatures.h"
 #include "imaging/image_decode_contract.h"
 
 #include <QColorSpace>
 #include <QImageIOHandler>
 #include <QPainter>
 #include <QThread>
-#include <QtEndian>
 
 #include <libheif/heif.h>
 #include <libheif/heif_sequences.h>
@@ -36,38 +36,6 @@ int decodeWorkerLimit()
     bool validOverride = false;
     const int override = qEnvironmentVariableIntValue("LICASA_HEIF_DECODE_WORKERS", &validOverride);
     return validOverride ? std::clamp(override, 0, available) : available;
-}
-
-bool heifSignature(QIODevice* device)
-{
-    if (!device || !device->isReadable()) {
-        return false;
-    }
-    const QByteArray header = device->peek(256);
-    if (header.size() < 16 || header.mid(4, 4) != "ftyp") {
-        return false;
-    }
-    const quint32 length = qFromBigEndian<quint32>(header.constData());
-    if (length < 16 || length % 4 != 0) {
-        return false;
-    }
-    // Do not capture AVIF: its maintained AV1 backend has a separate plugin.
-    bool compatible = false;
-    for (qsizetype offset = 8; offset + 4 <= std::min<qsizetype>(length, header.size());
-         offset += 4) {
-        if (offset == 12) {
-            continue; // minor version, not a brand
-        }
-        const auto brand = header.mid(offset, 4);
-        if (brand == "avif" || brand == "avis") {
-            return false;
-        }
-        if (brand == "heic" || brand == "heix" || brand == "hevc" || brand == "hevx" ||
-            brand == "mif1" || brand == "msf1") {
-            compatible = true;
-        }
-    }
-    return compatible;
 }
 
 const heif_reader& deviceReader()
@@ -122,7 +90,9 @@ class HeifHandler final : public QImageIOHandler {
 
     bool canRead() const override
     {
-        const bool readable = !readComplete_ && (handle_ || track_ || heifSignature(device()));
+        const bool readable =
+            !readComplete_ &&
+            (handle_ || track_ || Licasa::ContainerSignatures::heifSignature(device()));
         if (readable && format().isEmpty()) {
             setFormat("heic");
         }

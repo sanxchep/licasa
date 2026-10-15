@@ -14,16 +14,22 @@
 #include "media/preferred_cover_frame_coordinator.h"
 #include "platform/graphics_backend.h"
 
+#include <QColor>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QEvent>
+#include <QImage>
+#include <QKeyEvent>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickItem>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QTimer>
 #include <QVariantMap>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -52,6 +58,18 @@ WindowManager::WindowManager(QQmlApplicationEngine* engine, QVariantMap sharedWi
 {}
 
 WindowManager::~WindowManager() { destroyAllWindows(); }
+
+bool WindowManager::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() == QEvent::KeyRelease) {
+        const auto* key = static_cast<QKeyEvent*>(event);
+        if (!key->isAutoRepeat() && key->modifiers() == Qt::NoModifier &&
+            (key->key() == Qt::Key_Left || key->key() == Qt::Key_Right)) {
+            emit navigationKeyReleased(watched, key->key() == Qt::Key_Right ? 1 : -1);
+        }
+    }
+    return QObject::eventFilter(watched, event);
+}
 
 void WindowManager::setMotionPhotoResourcePolicy(MotionPhotoResourcePolicy* resourcePolicy) noexcept
 {
@@ -340,6 +358,39 @@ void WindowManager::markParallelPreviewPresented(const QString& pairId)
     }
 }
 
+QVariantMap WindowManager::sampleDisplayedPixel(QObject* windowObject, qreal x, qreal y) const
+{
+    auto* window = qobject_cast<QQuickWindow*>(windowObject);
+    if (!window || !window->isVisible() || !std::isfinite(x) || !std::isfinite(y) || x < 0 ||
+        y < 0 || x >= window->width() || y >= window->height()) {
+        return {};
+    }
+
+    // Capture the displayed raster with edits and color management applied.
+    // The hover label can cover the next cell, so exclude it from the grab.
+    // grabWindow() synchronizes the scene graph before rendering this frame.
+    QPointer<QQuickItem> hoverLabel =
+        window->findChild<QQuickItem*>(QStringLiteral("pixelCoordinateOverlay"));
+    if (hoverLabel) {
+        hoverLabel->setProperty("sampleCaptureHidden", true);
+    }
+    const QImage frame = window->grabWindow();
+    if (hoverLabel) {
+        hoverLabel->setProperty("sampleCaptureHidden", false);
+    }
+    if (frame.isNull()) {
+        return {};
+    }
+    const int pixelX = std::clamp(int(x * frame.width() / window->width()), 0, frame.width() - 1);
+    const int pixelY =
+        std::clamp(int(y * frame.height() / window->height()), 0, frame.height() - 1);
+    const QColor color = frame.pixelColor(pixelX, pixelY);
+    return {{QStringLiteral("red"), color.red()},
+            {QStringLiteral("green"), color.green()},
+            {QStringLiteral("blue"), color.blue()},
+            {QStringLiteral("alpha"), color.alpha()}};
+}
+
 void WindowManager::destroyAllWindows()
 {
     pruneDeadWindows();
@@ -378,6 +429,7 @@ void WindowManager::showAnyWindow()
 void WindowManager::registerWindow(QQuickWindow* window)
 {
     pruneDeadWindows();
+    window->installEventFilter(this);
 
     // A hidden persistent shell should keep only application state. Decoded
     // photos, textures, and render targets are rebuilt on demand when shown.

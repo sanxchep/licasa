@@ -63,6 +63,30 @@ def main() -> None:
                                f"{completed.stdout}")
         report = json.loads(completed.stdout)
 
+        # Start and stop the viewer inside confinement: the host cannot always
+        # signal a process confined by the Snap's AppArmor profile.
+        viewer_script = (
+            'export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software; '
+            'XDG_RUNTIME_DIR=$(mktemp -d); export XDG_RUNTIME_DIR; '
+            '"$SNAP/usr/bin/licasa" "$1" >/tmp/licasa-viewer.log 2>&1 & viewer=$!; '
+            'trap \'kill "$viewer" 2>/dev/null || true\' EXIT; '
+            'sleep 12; '
+            'if ! kill -0 "$viewer" 2>/dev/null; then '
+            'wait "$viewer"; cat /tmp/licasa-viewer.log; exit 1; fi; '
+            'kill "$viewer"; wait "$viewer" 2>/dev/null || true; '
+            'XDG_STATE_HOME="$SNAP_USER_DATA/.local/state" XDG_RUNTIME_DIR=relative '
+            '"$SNAP/usr/bin/licasa" --quit >/tmp/licasa-log-probe.log 2>&1; '
+            'grep -Fq "Single-instance IPC disabled" '
+            '"$SNAP_USER_DATA/.local/state/licasa/errors.log"'
+        )
+        viewer = subprocess.run(
+            ["snap", "run", "--shell", "licasa", "-c", viewer_script, "_", str(spaced_sample)],
+            cwd=ROOT, capture_output=True, text=True, timeout=30,
+        )
+        if viewer.returncode:
+            raise RuntimeError(f"Confined Snap viewer did not stay open from a cold start "
+                               f"(exit {viewer.returncode}):\n{viewer.stderr}\n{viewer.stdout}")
+
     available = set(report["read_formats"])
     missing = set(SAMPLES) - available
     if missing:
@@ -86,8 +110,9 @@ def main() -> None:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     report["source_commit"] = source_commit
+    report["viewer_cold_start"] = True
     args.output.write_text(json.dumps(report, indent=2) + "\n")
-    print(f"Confined Snap decoded {len(expected)} samples: {args.output}")
+    print(f"Confined Snap launched the viewer and decoded {len(expected)} samples: {args.output}")
 
 
 if __name__ == "__main__":

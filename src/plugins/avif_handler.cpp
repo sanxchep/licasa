@@ -1,3 +1,4 @@
+#include "container_signatures.h"
 #include "imaging/image_decode_contract.h"
 
 #include <QByteArray>
@@ -5,7 +6,6 @@
 #include <QImageIOHandler>
 #include <QThread>
 #include <QTransform>
-#include <QtEndian>
 
 #include <avif/avif.h>
 
@@ -25,55 +25,6 @@ constexpr qsizetype maximumMotionXmpBytes = 1024 * 1024;
 constexpr quint64 minimumReadWindow = 16 * 1024 * 1024;
 constexpr quint64 maximumReadWindow = 256 * 1024 * 1024;
 using Decoder = std::unique_ptr<avifDecoder, decltype(&avifDecoderDestroy)>;
-
-bool isAvifBrand(const QByteArray& brand) { return brand == "avif" || brand == "avis"; }
-
-bool avifSignature(QIODevice* device)
-{
-    if (!device || !device->isReadable()) {
-        return false;
-    }
-
-    // The entire file-type box is not trusted or buffered. The major brand is
-    // sufficient for normal AVIFs; a bounded compatible-brand scan also covers
-    // the common mif1-compatible layout.
-    const QByteArray header = device->peek(512);
-    if (header.size() < 16 || header.mid(4, 4) != "ftyp") {
-        return false;
-    }
-
-    const quint32 size32 = qFromBigEndian<quint32>(header.constData());
-    qsizetype brandOffset = 8;
-    quint64 boxSize = size32;
-    if (size32 == 1) {
-        if (header.size() < 24) {
-            return false;
-        }
-        boxSize = qFromBigEndian<quint64>(header.constData() + 8);
-        brandOffset = 16;
-    } else if (size32 == 0) {
-        const qint64 size = device->size();
-        if (size <= 0) {
-            return false;
-        }
-        boxSize = quint64(size);
-    }
-
-    if (boxSize < quint64(brandOffset + 8)) {
-        return false;
-    }
-    if (isAvifBrand(header.mid(brandOffset, 4))) {
-        return true;
-    }
-
-    const qsizetype scanEnd = std::min<quint64>(boxSize, quint64(header.size()));
-    for (qsizetype offset = brandOffset + 8; offset + 4 <= scanEnd; offset += 4) {
-        if (isAvifBrand(header.mid(offset, 4))) {
-            return true;
-        }
-    }
-    return false;
-}
 
 class DeviceIO final {
   public:
@@ -385,7 +336,9 @@ class AvifHandler final : public QImageIOHandler {
 
     bool canRead() const override
     {
-        const bool readable = !readComplete_ && (metadataReady_ || avifSignature(device()));
+        const bool readable =
+            !readComplete_ &&
+            (metadataReady_ || Licasa::ContainerSignatures::avifSignature(device()));
         if (readable && format().isEmpty()) {
             setFormat("avif");
         }

@@ -21,7 +21,9 @@ Item {
     }
 
     function valueForTrackX(trackX, trackWidth) {
-        const ratio = Math.max(0.0, Math.min(1.0, trackX / Math.max(1, trackWidth)))
+        // Match the pointer to the center of the 14-pixel thumb.
+        const ratio = Math.max(0.0, Math.min(1.0,
+            (trackX - 7) / Math.max(1, trackWidth - 14)))
         return from + ratio * Math.max(0.000001, to - from)
     }
 
@@ -34,11 +36,10 @@ Item {
             + displaySuffix
     }
 
-    readonly property real textBottom: valueSubtitle.visible
-        ? valueSubtitle.y + valueSubtitle.height
-        : valueTitle.y + valueTitle.height
+    readonly property real textHeight: valueTitle.implicitHeight
+        + (valueSubtitle.visible ? 2 + valueSubtitle.implicitHeight : 0)
 
-    height: Math.max(72, textBottom + 12 + controls.height)
+    height: Math.max(92, 10 + textHeight + 12 + controls.height + 10)
     activeFocusOnTab: enabled && visible
 
     Accessible.role: Accessible.Slider
@@ -64,43 +65,56 @@ Item {
     }
 
     Rectangle {
+        objectName: "valueRowFocusFrame"
         anchors.fill: parent
         radius: 12
-        color: "transparent"
+        color: root.enabled && (minusMouse.containsMouse || plusMouse.containsMouse
+            || trackMouse.containsMouse) ? "#12FFFFFF" : "transparent"
         border.width: root.activeFocus ? 2 : 0
         border.color: "#C8FFFFFF"
     }
 
     Text {
         id: valueTitle
+        objectName: "valueRowTitle"
         anchors.left: parent.left
+        anchors.leftMargin: 12
         anchors.right: valueLabel.left
         anchors.rightMargin: 12
         anchors.top: parent.top
+        anchors.topMargin: 10
         text: root.title
         color: "white"
         font.pixelSize: 14
         font.weight: Font.Medium
+        wrapMode: Text.Wrap
+        maximumLineCount: 2
         elide: Text.ElideRight
     }
 
     Text {
         id: valueSubtitle
+        objectName: "valueRowSubtitle"
         anchors.left: parent.left
+        anchors.leftMargin: 12
         anchors.right: parent.right
+        anchors.rightMargin: 12
         anchors.top: valueTitle.bottom
         anchors.topMargin: 2
         text: root.subtitle
-        color: "#99FFFFFF"
-        font.pixelSize: 11
+        color: "#B3FFFFFF"
+        font.pixelSize: 12
         wrapMode: Text.Wrap
         visible: text.length > 0
     }
 
     Text {
         id: valueLabel
+        objectName: "valueRowValue"
         anchors.right: parent.right
+        anchors.rightMargin: 12
         anchors.top: parent.top
+        anchors.topMargin: 10
         text: root.formattedValue()
         color: "#F2FFFFFF"
         font.pixelSize: 13
@@ -109,9 +123,13 @@ Item {
 
     Item {
         id: controls
+        objectName: "valueRowControls"
         anchors.left: parent.left
+        anchors.leftMargin: 12
         anchors.right: parent.right
+        anchors.rightMargin: 12
         anchors.bottom: parent.bottom
+        anchors.bottomMargin: 10
         height: 34
 
         Rectangle {
@@ -133,6 +151,7 @@ Item {
             }
 
             MouseArea {
+                id: minusMouse
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
@@ -196,6 +215,7 @@ Item {
             }
 
             MouseArea {
+                id: plusMouse
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
@@ -208,6 +228,7 @@ Item {
         }
 
         MouseArea {
+            id: trackMouse
             anchors.left: track.left
             anchors.right: track.right
             anchors.verticalCenter: track.verticalCenter

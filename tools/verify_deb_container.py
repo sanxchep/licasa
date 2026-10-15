@@ -83,9 +83,25 @@ def main() -> None:
         failed = [sample["path"] for sample in report["samples"] if not sample["decoded"]]
         if missing or failed:
             raise RuntimeError(f"Missing reader formats: {missing}; failed installed decodes: {failed}")
+        viewer = subprocess.run(
+            ["docker", "run", "--rm", "--network", "none", "--read-only",
+             "--tmpfs", "/tmp:rw,nosuid,nodev", "--user", "65534:65534",
+             "-e", "QT_QPA_PLATFORM=offscreen", "-e", "QT_QUICK_BACKEND=software",
+             "-e", "XDG_RUNTIME_DIR=relative", "-e", "XDG_CACHE_HOME=/tmp/cache",
+             "-e", "XDG_STATE_HOME=/tmp/state",
+             "-e", "XDG_CONFIG_HOME=/tmp/config", "-v", f"{assets}:/samples:ro", tag,
+             "sh", "-ec", "status=0; timeout 12 /usr/bin/licasa \"$1\" "
+             ">/tmp/viewer.log 2>&1 || status=$?; "
+             "if [ \"$status\" -ne 124 ]; then cat /tmp/viewer.log; exit 1; fi; "
+             "grep -Fq 'Single-instance IPC disabled' /tmp/state/licasa/errors.log",
+             "_", f"/samples/{SAMPLES[0]}"],
+            capture_output=True, text=True, timeout=35,
+        )
+        if viewer.returncode:
+            raise RuntimeError(f"Installed viewer did not stay open:\n{viewer.stdout}\n{viewer.stderr}")
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + "\n")
-        print(f"Clean Ubuntu apt install and {len(SAMPLES)} decodes passed: {args.output}")
+        print(f"Clean Ubuntu apt install, viewer launch, and {len(SAMPLES)} decodes passed: {args.output}")
 
 
 if __name__ == "__main__":

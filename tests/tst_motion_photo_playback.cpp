@@ -288,6 +288,7 @@ static bool ffmpegBackendIsMapped()
     });
 }
 
+#ifdef LICASA_HEIC_MOTION_FIXTURE
 static QByteArray overBudgetVideoFromFixture(const PhotoAssetInfo& asset)
 {
     if (!asset.motion || !asset.sourceUrl.isLocalFile()) {
@@ -322,6 +323,7 @@ static QByteArray overBudgetVideoFromFixture(const PhotoAssetInfo& asset)
     }
     return {};
 }
+#endif
 
 static QJsonObject processMemory()
 {

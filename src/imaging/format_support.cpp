@@ -8,6 +8,14 @@
 #include <algorithm>
 
 namespace Licasa {
+namespace {
+bool lessFileName(const QString& left, const QString& right)
+{
+    const int comparison = left.localeAwareCompare(right);
+    return comparison < 0 || (comparison == 0 && left < right);
+}
+} // namespace
+
 FormatSupport::FormatSupport(QObject* parent) : QObject(parent)
 {
     QSet<QString> patterns;
@@ -134,11 +142,7 @@ const QStringList& FormatSupport::imagesInDirectory(const QString& directory) co
             indexedNames_.append(entry.fileName());
         }
     }
-    const auto less = [](const QString& left, const QString& right) {
-        const int comparison = left.localeAwareCompare(right);
-        return comparison < 0 || (comparison == 0 && left < right);
-    };
-    std::sort(indexedNames_.begin(), indexedNames_.end(), less);
+    std::sort(indexedNames_.begin(), indexedNames_.end(), lessFileName);
     return indexedNames_;
 }
 
@@ -161,14 +165,10 @@ QList<QUrl> FormatSupport::nearbyImages(const QUrl& current, int radius,
 
     const QString directory = currentFile.absolutePath();
     const QStringList& indexed = imagesInDirectory(directory);
-    const auto less = [](const QString& left, const QString& right) {
-        const int comparison = left.localeAwareCompare(right);
-        return comparison < 0 || (comparison == 0 && left < right);
-    };
     const QString currentName = currentFile.fileName();
     QStringList additional;
     const QStringList* names = &indexed;
-    auto currentIt = std::lower_bound(indexed.cbegin(), indexed.cend(), currentName, less);
+    auto currentIt = std::lower_bound(indexed.cbegin(), indexed.cend(), currentName, lessFileName);
     if (currentIt == indexed.cend() || *currentIt != currentName) {
         if (!canOpen(current)) {
             return {};

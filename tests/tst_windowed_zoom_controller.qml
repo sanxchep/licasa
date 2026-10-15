@@ -21,6 +21,7 @@ Item {
         property bool imageReady: true
         property real minScale: 0.02
         property real maxScale: 16.0
+        property bool rasterPixelZoomEnabled: false
         property int zoomAnimationDurationMs: 0
         property real currentScale: 1.0
         property bool fitMode: false
@@ -191,6 +192,8 @@ Item {
             host.fitMode = false;
             host.panX = 0.0;
             host.panY = 0.0;
+            host.rasterPixelZoomEnabled = false;
+            host.maxScale = 16.0;
             nativeOps.screenGeometry = Qt.rect(0, 0, 1000, 800);
             nativeOps.nativeGeometry = Qt.rect(100, 100, 400, 200);
             nativeOps.cursorPosition = Qt.point(200, 200);
@@ -277,6 +280,35 @@ Item {
             compare(nativeOps.nativeGeometry, Qt.rect(150, 125, 300, 150));
             compare(controller.restoreGeometry, nativeOps.nativeGeometry);
             compare(nativeOps.setGeometryCount, 2);
+        }
+
+        function test_rasterZoomKeepsWindowBoundedAndPansItsPixels() {
+            host.rasterPixelZoomEnabled = true;
+            host.maxScale = 1000.0;
+
+            controller.zoomToScale(4.0, 200, 100);
+
+            compare(controller.maximumScale(), 1000.0);
+            compare(controller.inspectionMode, true);
+            compare(nativeOps.nativeGeometry.width, 800);
+            compare(nativeOps.nativeGeometry.height, 640);
+            verify(controller.imageX() <= 0);
+            verify(controller.imageY() <= 0);
+
+            const beforeX = controller.imageX();
+            controller.panBy(-100, -50);
+            verify(controller.imageX() <= beforeX);
+            verify(controller.imageX() >= nativeOps.nativeGeometry.width - 1600);
+
+            controller.anchorAtPointer(400, 300);
+            fuzzyCompare(controller.anchorImageX,
+                         (400 - controller.imageX()) / controller.scale, 0.000001);
+
+            controller.zoomToScale(64.0, 400, 300);
+            compare(controller.scale, 64.0);
+            compare(nativeOps.nativeGeometry.width, 800);
+            compare(nativeOps.nativeGeometry.height, 640);
+            compare(controller.inspectionMode, true);
         }
 
         function test_animatedZoomKeepsEveryFrameImageSizedOnStaggeredMonitor() {

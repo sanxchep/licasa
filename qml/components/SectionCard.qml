@@ -42,8 +42,8 @@ Rectangle {
         height: implicitHeight
         text: root.subtitle
         visible: text.length > 0
-        color: "#93FFFFFF"
-        font.pixelSize: 11
+        color: "#B3FFFFFF"
+        font.pixelSize: 12
         wrapMode: Text.Wrap
         renderType: Text.NativeRendering
     }

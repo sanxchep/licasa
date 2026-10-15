@@ -87,6 +87,8 @@ def main() -> None:
     parser.add_argument("--build-dir", required=True, type=Path)
     parser.add_argument("--prefix", type=Path, default=Path.home() / ".local")
     parser.add_argument("--launch", action="store_true")
+    parser.add_argument("--allow-disable-motion-playback", action="store_true",
+                        help="Allow replacing a motion-enabled local install with a build without playback")
     args = parser.parse_args()
 
     build_dir = args.build_dir.expanduser().resolve()
@@ -96,6 +98,15 @@ def main() -> None:
         raise SystemExit(f"Not a configured CMake build directory: {build_dir}")
     if os.geteuid() == 0:
         raise SystemExit("Refusing to deploy the local development build as root.")
+
+    motion_backend = prefix / "lib" / "licasa" / "plugins" / "motion" / "liblicasa_motion_photo_backend.so"
+    motion_enabled = "LICASA_ENABLE_MOTION_PLAYBACK:BOOL=ON" in (
+        build_dir / "CMakeCache.txt").read_text(encoding="utf-8").splitlines()
+    if motion_backend.is_file() and not motion_enabled and not args.allow_disable_motion_playback:
+        raise SystemExit(
+            "This build disables Live Photo playback, but the current local install supports it. "
+            "Choose a motion-enabled build or pass --allow-disable-motion-playback explicitly."
+        )
 
     binary = prefix / "bin" / "licasa"
     was_running = stop_running_local_copy(binary)
@@ -129,7 +140,9 @@ def main() -> None:
 
     print(f"\nLicasa deployed locally: {binary}")
     if args.launch or was_running:
-        launch_local_copy(binary, background=not args.launch)
+        config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        background_entry = config_home / "autostart/licasa-background.desktop"
+        launch_local_copy(binary, background=not args.launch and background_entry.is_file())
 
 
 if __name__ == "__main__":
