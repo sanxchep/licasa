@@ -29,7 +29,7 @@ If you try it, [report a bug or suggest a feature](https://github.com/sanxchep/l
 - **Debian package** (`licasa_0.5.0-1_amd64.deb`): for Ubuntu 24.04 on amd64. APT installs the required system libraries and QML modules.
 - **Snap beta**: available through the Snap Store on systems with Snapd.
 
-The GitHub release also includes `licasa_0.5.0_amd64.snap` and a checksum file. If you want to install that file directly, check its checksum and run `sudo snap install --dangerous ./licasa_0.5.0_amd64.snap`. A directly installed Snap does not follow Store updates; use the beta channel for automatic updates.
+The GitHub prerelease and final release include `licasa_0.5.0_amd64.snap` and a checksum file. If you want to install that file directly, check its checksum and run `sudo snap install --dangerous ./licasa_0.5.0_amd64.snap`. A directly installed Snap does not follow Store updates; use a Store channel for automatic updates.
 
 Download the AppImage and installer script into the same folder, then run:
 
@@ -74,7 +74,7 @@ The `.deb`, AppImage, and SHA-256 files appear in `build/deb-output/`. Docker is
 
 Before releasing an AppImage, run its [installation checks](docs/linux-package-qualification.md). They install and launch the actual file without FUSE on clean Ubuntu and Fedora, then test virtual X11 and Wayland displays on Arch.
 
-The [release process](docs/release-process.md) builds the Snap and Linux packages in GitHub Actions, checks the Snap locally, and uploads it to the Store's edge channel. Promoting that exact revision to beta and publishing the GitHub release requires a second workflow run started manually.
+The [release process](docs/release-process.md) builds and verifies all Linux packages in GitHub Actions, uploads the Snap to Store edge, and publishes a GitHub prerelease. A manually started approval run promotes that exact Snap revision to beta and marks the same GitHub release as Latest.
 
 ## Update
 

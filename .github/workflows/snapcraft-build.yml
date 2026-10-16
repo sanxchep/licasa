@@ -155,6 +155,8 @@ jobs:
     runs-on: ubuntu-24.04
     environment: snap-beta
     timeout-minutes: 45
+    outputs:
+      revision: ${{ steps.verify.outputs.revision }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -178,6 +180,7 @@ jobs:
           sudo snap install snapcraft --classic
           snapcraft upload "dist/snap/licasa_${VERSION}_amd64.snap" --release=edge
       - name: Verify the Store's edge revision
+        id: verify
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
@@ -202,8 +205,75 @@ jobs:
           expected="$(cut -d' ' -f1 "dist/snap/licasa_${VERSION}_amd64.snap.sha256")"
           actual="$(sudo sha256sum "/var/lib/snapd/snaps/licasa_${revision}.snap" | cut -d' ' -f1)"
           test "$actual" = "$expected"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: licasa-store-snap-smoke
           path: build/qualification/snap-edge-smoke.json
           if-no-files-found: error
+
+  github_prerelease:
+    needs: [preflight, build_snap, build_and_test, upload_snap_edge]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-linux-amd64
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-snap-amd64
+          path: dist/snap
+      - name: Recheck package versions and hashes
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          python3 tools/check_release_version.py \
+            --channel beta --expected-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+          (cd dist/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
+          test "$(dpkg-deb --field "dist/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
+          (cd dist/appimage && sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256")
+          (cd dist/appimage && sha256sum --check install-licasa-appimage.sh.sha256)
+          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gh
+      - name: Publish checked packages as a GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SNAP_REVISION: ${{ needs.upload_snap_edge.outputs.revision }}
+        run: |
+          {
+            printf 'Preview release: the checked Snap is on Store edge as revision %s. Beta follows qualification.\n\n' "$SNAP_REVISION"
+            cat "packaging/release-notes/$RELEASE_TAG.md"
+            printf "\n### Package SHA-256 checksums\n\n\`\`\`text\n"
+            cat "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256"
+            cat "dist/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256"
+            cat "dist/appimage/install-licasa-appimage.sh.sha256"
+            cat "dist/snap/licasa_${VERSION}_amd64.snap.sha256"
+            printf "\`\`\`\n"
+            printf "\nSource commit: \`%s\`.\n" "$GITHUB_SHA"
+          } > dist/release-notes.md
+          gh release create "$RELEASE_TAG" \
+            "dist/deb/licasa_${VERSION}-1_amd64.deb" \
+            "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256" \
+            "dist/appimage/Licasa-${VERSION}-x86_64.AppImage" \
+            "dist/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256" \
+            "dist/appimage/install-licasa-appimage.sh" \
+            "dist/appimage/install-licasa-appimage.sh.sha256" \
+            "dist/snap/licasa_${VERSION}_amd64.snap" \
+            "dist/snap/licasa_${VERSION}_amd64.snap.sha256" \
+            --target "$GITHUB_SHA" --title "Licasa $RELEASE_TAG" \
+            --prerelease --latest=false --notes-file dist/release-notes.md
