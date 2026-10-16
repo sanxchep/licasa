@@ -457,9 +457,11 @@ def main():
             command = ["cmake", "-S", str(source), "-B", str(build),
                    "-DCMAKE_BUILD_TYPE=" + ("RelWithDebInfo" if args.sanitizer else "Release"),
                    f"-DCMAKE_INSTALL_PREFIX={prefix}", f"-DCMAKE_PREFIX_PATH={prefix}",
-                   "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_INSTALL_RPATH=$ORIGIN",
+                   "-DCMAKE_INSTALL_RPATH=$ORIGIN",
                    "-DBUILD_SHARED_LIBS=ON", f"-DCMAKE_C_FLAGS={flags}", f"-DCMAKE_CXX_FLAGS={flags}",
                    "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,relro,-z,now,-z,noexecstack"]
+            if name != "libyuv":
+                command.append("-DCMAKE_INSTALL_LIBDIR=lib")
             command.extend(f"-D{key}={value}" for key, value in spec["options"].items())
             subprocess.run(command, env=env, check=True)
             build_command = ["cmake", "--build", str(build), "--parallel", str(args.jobs)]

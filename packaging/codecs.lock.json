@@ -117,7 +117,8 @@
     ],
     "patches": [
       "packaging/patches/libraw-0.22.2-lossless-jpeg-zero-diff.patch",
-      "packaging/patches/libraw-0.22.2-parallel-copy.patch"
+      "packaging/patches/libraw-0.22.2-parallel-copy.patch",
+      "packaging/patches/libraw-0.22.2-safety-fixes.patch"
     ]
   },
   "libyuv": {

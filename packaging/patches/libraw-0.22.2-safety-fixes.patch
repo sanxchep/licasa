@@ -1,0 +1,40 @@
+--- a/src/decompressors/losslessjpeg.cpp
++++ b/src/decompressors/losslessjpeg.cpp
+@@ -21,8 +21,6 @@
+ #include "../../internal/losslessjpeg.h"
+ #include <string.h>
+ 
+-#define ZERO(a) do { memset(a,0,sizeof(a));} while(0)
+-
+ bool ByteStreamBE::skip_to_marker() // true: success, false - no marker
+ {
+ 	if (pos + 2 > size) return false;
+--- a/src/write/file_write.cpp
++++ b/src/write/file_write.cpp
+@@ -75,8 +75,8 @@
+   strncpy(th->t_model, model, 64);
+   strcpy(th->soft, "dcraw v" DCRAW_VERSION);
+   t = localtime(&timestamp);
+-  sprintf(th->date, "%04d:%02d:%02d %02d:%02d:%02d", t->tm_year + 1900,
+-          t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
++  if (!t || !strftime(th->date, sizeof(th->date), "%Y:%m:%d %H:%M:%S", t))
++    th->date[0] = 0;
+   strncpy(th->t_artist, artist, 64);
+   if (full)
+   {
+--- a/src/preprocessing/ext_preprocess.cpp
++++ b/src/preprocessing/ext_preprocess.cpp
+@@ -117,7 +117,12 @@
+   std::vector<ushort> pixel(width, 0);
+   for (row = 0; row < height; row++)
+   {
+-    fread(pixel.data(), 2, width, fp);
++    if (fread(pixel.data(), 2, width, fp) != width)
++    {
++      imgdata.process_warnings |= LIBRAW_WARN_BAD_DARKFRAME_FILE;
++      fclose(fp);
++      return;
++    }
+     for (col = 0; col < width; col++)
+       BAYER(row, col) = MAX(BAYER(row, col) - ntohs(pixel[col]), 0);
+   }

@@ -51,7 +51,7 @@ jobs:
               output.write(f"source_sha={build['head_sha']}\n")
           print(f"Verified build run {build['id']} for {build['head_sha']}")
           PY
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ steps.build.outputs.source_sha }}
           fetch-depth: 0
@@ -91,16 +91,16 @@ jobs:
     outputs:
       revision: ${{ steps.edge.outputs.revision }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.source_sha }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: licasa-linux-amd64
           path: dist
           run-id: ${{ inputs.build_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: licasa-snap-amd64
           path: dist/snap
@@ -145,7 +145,7 @@ jobs:
     environment: snap-beta
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.source_sha }}
       - name: Require Store credentials
@@ -178,7 +178,7 @@ jobs:
           python3 tools/verify_snap_install.py --version "$VERSION" \
             --source-sha "$SOURCE_SHA" \
             --output build/qualification/snap-beta-smoke.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: licasa-beta-snap-smoke
           path: build/qualification/snap-beta-smoke.json
@@ -192,17 +192,17 @@ jobs:
       actions: read
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.source_sha }}
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: licasa-linux-amd64
           path: dist
           run-id: ${{ inputs.build_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: licasa-snap-amd64
           path: dist/snap

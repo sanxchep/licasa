@@ -18,7 +18,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       release_tag: ${{ steps.version.outputs.release_tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -56,7 +56,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       - name: Build and test from a clean Ubuntu 24.04 image
@@ -110,7 +110,7 @@ jobs:
           cp build/qualification/appimage/install-smoke.json dist/appimage/
           cp build/qualification/appimage/fedora-smoke.json dist/appimage/
           cp build/qualification/appimage/desktop-smoke.json dist/appimage/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: licasa-linux-amd64
           path: dist/
@@ -121,7 +121,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -144,7 +144,7 @@ jobs:
           (cd dist/snap && sha256sum "licasa_${VERSION}_amd64.snap" \
             > "licasa_${VERSION}_amd64.snap.sha256")
           cp build/qualification/snap-local-smoke.json dist/snap/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: licasa-snap-amd64
           path: dist/snap/
@@ -158,10 +158,10 @@ jobs:
     outputs:
       revision: ${{ steps.verify.outputs.revision }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: licasa-snap-amd64
           path: dist/snap
@@ -206,7 +206,7 @@ jobs:
           actual="$(sudo sha256sum "/var/lib/snapd/snaps/licasa_${revision}.snap" | cut -d' ' -f1)"
           test "$actual" = "$expected"
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: licasa-store-snap-smoke
           path: build/qualification/snap-edge-smoke.json
@@ -220,15 +220,15 @@ jobs:
       actions: read
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: licasa-linux-amd64
           path: dist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: licasa-snap-amd64
           path: dist/snap

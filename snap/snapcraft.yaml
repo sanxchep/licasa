@@ -15,6 +15,16 @@ base: core24
 grade: devel
 confinement: strict
 
+# Licasa's private Qt and codec runtimes are required by the viewer and its
+# plugins, but Snapcraft's library scan cannot resolve all of those paths.
+lint:
+  ignore:
+    - library:
+        - usr/lib/licasa/lib/libQt6Quick.so.*
+        - usr/lib/licasa/lib/libdav1d.so.*
+        - usr/lib/licasa/lib/libde265.so.*
+        - usr/lib/licasa/lib/libheif.so.*
+
 # The qualified private Qt patches and codec builds currently target only
 # Ubuntu 24.04 on amd64. Add platforms after qualifying their runtime stacks.
 platforms:

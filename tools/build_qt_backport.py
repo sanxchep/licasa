@@ -77,7 +77,7 @@ def main():
                f"-DCMAKE_INSTALL_PREFIX={work / 'qt-backport-prefix'}",
                "-DCMAKE_BUILD_TYPE=Release", "-DQT_BUILD_EXAMPLES=OFF",
                "-DQT_BUILD_TESTS=OFF", "-DQT_BUILD_BENCHMARKS=OFF",
-               "-DFEATURE_quick3d=OFF", "-DCMAKE_CXX_FLAGS=-fstack-protector-strong",
+               "-DCMAKE_CXX_FLAGS=-fstack-protector-strong",
                "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,relro,-z,now,-z,noexecstack"]
     if args.qt_prefix:
         qt_prefix = args.qt_prefix.resolve(strict=True)
