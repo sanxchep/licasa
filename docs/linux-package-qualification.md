@@ -31,10 +31,10 @@ To repeat the installation checks from the repository root with Docker installed
 after following the README's package build commands:
 
 ```sh
-python3 tools/verify_deb_container.py build/deb-output/licasa_0.5.0-1_amd64.deb
-python3 tools/verify_appimage_container.py build/deb-output/Licasa-0.5.0-x86_64.AppImage
-python3 tools/verify_appimage_fedora.py build/deb-output/Licasa-0.5.0-x86_64.AppImage
-python3 tools/verify_appimage_desktops.py build/deb-output/Licasa-0.5.0-x86_64.AppImage
+python3 tools/verify_deb_container.py build/deb-output/licasa_0.5.1-1_amd64.deb
+python3 tools/verify_appimage_container.py build/deb-output/Licasa-0.5.1-x86_64.AppImage
+python3 tools/verify_appimage_fedora.py build/deb-output/Licasa-0.5.1-x86_64.AppImage
+python3 tools/verify_appimage_desktops.py build/deb-output/Licasa-0.5.1-x86_64.AppImage
 ```
 
 All four scripts use the packaged files. Their reports are saved under

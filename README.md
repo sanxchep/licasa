@@ -15,7 +15,7 @@ Licasa is an image viewer and editor for the Linux desktop. It opens a photo fro
 
 ## Try Licasa
 
-**[Download the latest published release](https://github.com/sanxchep/licasa/releases/latest)** · [0.5.0 release notes](packaging/release-notes/v0.5.0.md)
+**[Download the latest published release](https://github.com/sanxchep/licasa/releases/latest)** · [0.5.1 release notes](packaging/release-notes/v0.5.1.md)
 
 - View photos fullscreen or in a floating window, then crop, adjust, and export them.
 - Open JPEG, PNG, TIFF, WebP, HEIC/HEIF, JPEG XL, AVIF, JPEG 2000, and RAW previews.
@@ -25,22 +25,22 @@ If you try it, [report a bug or suggest a feature](https://github.com/sanxchep/l
 
 ## Install
 
-- **AppImage** (`Licasa-0.5.0-x86_64.AppImage`) and `install-licasa-appimage.sh`: for recent x86-64 Linux desktops. The package is built on Ubuntu 24.04, so older systems may not run it.
-- **Debian package** (`licasa_0.5.0-1_amd64.deb`): for Ubuntu 24.04 on amd64. APT installs the required system libraries and QML modules.
+- **AppImage** (`Licasa-0.5.1-x86_64.AppImage`) and `install-licasa-appimage.sh`: for recent x86-64 Linux desktops. The package is built on Ubuntu 24.04, so older systems may not run it.
+- **Debian package** (`licasa_0.5.1-1_amd64.deb`): for Ubuntu 24.04 on amd64. APT installs the required system libraries and QML modules.
 - **Snap beta**: available through the Snap Store on systems with Snapd.
 
-The GitHub prerelease and final release include `licasa_0.5.0_amd64.snap` and a checksum file. If you want to install that file directly, check its checksum and run `sudo snap install --dangerous ./licasa_0.5.0_amd64.snap`. A directly installed Snap does not follow Store updates; use a Store channel for automatic updates.
+The GitHub prerelease and final release include `licasa_0.5.1_amd64.snap` and a checksum file. If you want to install that file directly, check its checksum and run `sudo snap install --dangerous ./licasa_0.5.1_amd64.snap`. A directly installed Snap does not follow Store updates; use a Store channel for automatic updates.
 
 Download the AppImage and installer script into the same folder, then run:
 
 ```sh
-bash install-licasa-appimage.sh ./Licasa-0.5.0-x86_64.AppImage
+bash install-licasa-appimage.sh ./Licasa-0.5.1-x86_64.AppImage
 ```
 
 To install the Debian package:
 
 ```sh
-sudo apt install ./licasa_0.5.0-1_amd64.deb
+sudo apt install ./licasa_0.5.1-1_amd64.deb
 ```
 
 To install the Snap beta:
@@ -67,8 +67,8 @@ docker run --rm -v "$PWD:/source:ro" -v "$PWD/build/deb-output:/output" \
 The `.deb`, AppImage, and SHA-256 files appear in `build/deb-output/`. Docker is required only to build these packages from source. To check the local files:
 
 ```sh
-(cd build/deb-output && sha256sum -c licasa_0.5.0-1_amd64.deb.sha256)
-(cd build/deb-output && sha256sum -c Licasa-0.5.0-x86_64.AppImage.sha256)
+(cd build/deb-output && sha256sum -c licasa_0.5.1-1_amd64.deb.sha256)
+(cd build/deb-output && sha256sum -c Licasa-0.5.1-x86_64.AppImage.sha256)
 (cd build/deb-output && sha256sum -c install-licasa-appimage.sh.sha256)
 ```
 
@@ -81,16 +81,16 @@ The [release process](docs/release-process.md) builds and verifies all Linux pac
 Download the newer package and its `.sha256` file from [Releases](https://github.com/sanxchep/licasa/releases/latest). To update a Debian installation, replace the version in these commands:
 
 ```sh
-sha256sum -c licasa_0.5.0-1_amd64.deb.sha256
-sudo apt install ./licasa_0.5.0-1_amd64.deb
+sha256sum -c licasa_0.5.1-1_amd64.deb.sha256
+sudo apt install ./licasa_0.5.1-1_amd64.deb
 ```
 
 To update an AppImage installation, close Licasa (AppImage), then download the new AppImage, `install-licasa-appimage.sh`, and both `.sha256` files into the same folder. Replace the version in these commands:
 
 ```sh
-sha256sum -c Licasa-0.5.0-x86_64.AppImage.sha256
+sha256sum -c Licasa-0.5.1-x86_64.AppImage.sha256
 sha256sum -c install-licasa-appimage.sh.sha256
-bash install-licasa-appimage.sh ./Licasa-0.5.0-x86_64.AppImage
+bash install-licasa-appimage.sh ./Licasa-0.5.1-x86_64.AppImage
 ```
 
 The installer replaces the existing per-user AppImage installation and refreshes its application-menu launcher.
