@@ -134,7 +134,12 @@ def main() -> None:
             "Description: Licasa image viewer\n"
             " A Qt image viewer with private HEIF, JPEG XL, RAW and AVIF decoders.\n"
         )
-        subprocess.run(["dpkg-deb", "--build", "--root-owner-group", str(stage), str(destination)], check=True)
+        # Ubuntu's pkgbinarymangler wrapper expects a Debian source package.
+        # This deb is assembled inside Snapcraft too, where those source-level
+        # hooks print errors despite a successful dpkg-deb build.
+        subprocess.run(
+            ["dpkg-deb", "--build", "--root-owner-group", str(stage), str(destination)],
+            env=dict(os.environ, NO_PKG_MANGLE="1"), check=True)
 
     with destination.open("rb") as package_file:
         digest = hashlib.file_digest(package_file, "sha256").hexdigest()
