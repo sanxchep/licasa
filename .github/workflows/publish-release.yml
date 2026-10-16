@@ -1,0 +1,235 @@
+name: Promote checked Snap and publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful "Build and qualify Linux packages" run ID to publish
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: licasa-release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Check version, source, and release notes
+        id: version
+        run: |
+          version="$(python3 tools/check_release_version.py \
+            --channel beta --expected-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$version" >> "$GITHUB_OUTPUT"
+      - name: Check the selected build run succeeded for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gh
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" \
+            > "$RUNNER_TEMP/licasa-build-run.json"
+          python3 - "$RUNNER_TEMP/licasa-build-run.json" "$GITHUB_SHA" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as build_file:
+              build = json.load(build_file)
+          path = build["path"].split("@", 1)[0]
+          if (path != ".github/workflows/snapcraft-build.yml"
+                  or build["head_sha"] != sys.argv[2]
+                  or build["conclusion"] != "success"):
+              raise SystemExit("Select a successful Licasa build run for this exact commit")
+          print(f"Verified build run {build['id']} for {build['head_sha']}")
+          PY
+      - name: Require a new GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+        run: |
+          status="$(curl --silent --show-error --retry 3 -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          test "$status" = 404
+
+  verify_artifacts:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      revision: ${{ steps.edge.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-linux-amd64
+          path: dist
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-snap-amd64
+          path: dist/snap
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+      - name: Check package hashes and embedded source commit
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends squashfs-tools
+          (cd dist/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
+          test "$(dpkg-deb --field "dist/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
+          (cd dist/appimage && sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256")
+          (cd dist/appimage && sha256sum --check install-licasa-appimage.sh.sha256)
+          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
+          source_commit="$(unsquashfs -cat "dist/snap/licasa_${VERSION}_amd64.snap" \
+            usr/share/licasa/source-commit)"
+          test "$source_commit" = "$GITHUB_SHA"
+      - name: Verify edge still points to this Snap
+        id: edge
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          sudo snap set system experimental.user-daemons=false
+          sudo snap install --channel=edge licasa
+          python3 tools/verify_snap_install.py --version "$VERSION" \
+            --source-sha "$GITHUB_SHA" \
+            --output build/qualification/snap-edge-publish-smoke.json
+          revision="$(snap list licasa | awk 'NR == 2 {print $3}')"
+          test "$revision" -gt 0
+          expected="$(cut -d' ' -f1 "dist/snap/licasa_${VERSION}_amd64.snap.sha256")"
+          actual="$(sudo sha256sum "/var/lib/snapd/snaps/licasa_${revision}.snap" | cut -d' ' -f1)"
+          test "$actual" = "$expected"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+  publish_snap:
+    needs: [preflight, verify_artifacts]
+    runs-on: ubuntu-24.04
+    environment: snap-beta
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Require Store credentials
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: test -n "$SNAPCRAFT_STORE_CREDENTIALS"
+      - name: Promote the checked revision to beta
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          REVISION: ${{ needs.verify_artifacts.outputs.revision }}
+        run: |
+          sudo snap install snapcraft --classic
+          snapcraft release licasa "$REVISION" beta
+      - name: Install and verify beta
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          REVISION: ${{ needs.verify_artifacts.outputs.revision }}
+        run: |
+          sudo snap set system experimental.user-daemons=false
+          sudo snap install --channel=beta licasa
+          for attempt in $(seq 1 10); do
+            if [ "$(snap list licasa | awk 'NR == 2 {print $3}')" = "$REVISION" ]; then
+              break
+            fi
+            sleep 20
+            sudo snap refresh --channel=beta licasa
+          done
+          test "$(snap list licasa | awk 'NR == 2 {print $3}')" = "$REVISION"
+          python3 tools/verify_snap_install.py --version "$VERSION" \
+            --source-sha "$GITHUB_SHA" \
+            --output build/qualification/snap-beta-smoke.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: licasa-beta-snap-smoke
+          path: build/qualification/snap-beta-smoke.json
+          if-no-files-found: error
+
+  github_release:
+    needs: [preflight, verify_artifacts, publish_snap]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-linux-amd64
+          path: dist
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: licasa-snap-amd64
+          path: dist/snap
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gh
+      - name: Recheck source, versions, and checksums
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          python3 tools/check_release_version.py \
+            --channel beta --expected-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+          (cd dist/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
+          (cd dist/appimage && sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256")
+          (cd dist/appimage && sha256sum --check install-licasa-appimage.sh.sha256)
+          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
+      - name: Publish GitHub Release with checked packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SNAP_REVISION: ${{ needs.verify_artifacts.outputs.revision }}
+        run: |
+          {
+            cat "packaging/release-notes/$RELEASE_TAG.md"
+            printf "\n### Package SHA-256 checksums\n\n\`\`\`text\n"
+            cat "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256"
+            cat "dist/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256"
+            cat "dist/appimage/install-licasa-appimage.sh.sha256"
+            cat "dist/snap/licasa_${VERSION}_amd64.snap.sha256"
+            printf "\`\`\`\n"
+            printf "\nSnap beta revision: %s.\n" "$SNAP_REVISION"
+            printf "Source commit: \`%s\`.\n" "$GITHUB_SHA"
+          } > dist/release-notes.md
+          gh release create "$RELEASE_TAG" \
+            "dist/deb/licasa_${VERSION}-1_amd64.deb" \
+            "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256" \
+            "dist/appimage/Licasa-${VERSION}-x86_64.AppImage" \
+            "dist/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256" \
+            "dist/appimage/install-licasa-appimage.sh" \
+            "dist/appimage/install-licasa-appimage.sh.sha256" \
+            "dist/snap/licasa_${VERSION}_amd64.snap" \
+            "dist/snap/licasa_${VERSION}_amd64.snap.sha256" \
+            --target "$GITHUB_SHA" --title "Licasa $RELEASE_TAG" \
+            --notes-file dist/release-notes.md

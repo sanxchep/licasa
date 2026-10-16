@@ -1,9 +1,6 @@
-name: Verify and release Linux packages
+name: Build and qualify Linux packages
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -119,120 +116,94 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  store_snap:
+  build_snap:
     needs: preflight
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    outputs:
-      revision: ${{ steps.verify.outputs.revision }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-      - name: Install matching hosted Snap with user daemons disabled
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          sudo snap set system experimental.user-daemons=false
-          sudo snap install --channel=edge licasa
-          source_file=/snap/licasa/current/usr/share/licasa/source-commit
-          installed_version="$(snap list licasa | awk 'NR == 2 {print $2}')"
-          if [ "$installed_version" != "$VERSION" ] || \
-             [ ! -f "$source_file" ] || \
-             [ "$(cat "$source_file" 2>/dev/null)" != "$GITHUB_SHA" ]; then
-            echo 'Matching hosted edge build is not available. Check the snapcraft.io Builds tab before running this release workflow.' >&2
-            exit 1
-          fi
-      - name: Check hosted source and decode through strict Snap confinement
-        id: verify
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          python3 tools/verify_snap_install.py --version "$VERSION" \
-            --source-sha "$GITHUB_SHA" \
-            --output build/qualification/snap-smoke.json
-          revision="$(snap list licasa | awk 'NR == 2 {print $3}')"
-          test "$revision" -gt 0
-          echo "revision=$revision" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: licasa-store-snap-smoke
-          path: build/qualification/snap-smoke.json
-          if-no-files-found: error
-
-  publish_snap:
-    needs: [preflight, store_snap, build_and_test]
-    runs-on: ubuntu-24.04
-    environment: snap-beta
-    timeout-minutes: 30
-    steps:
-      - name: Require Store publishing credentials
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-        run: |
-          test -n "$SNAPCRAFT_STORE_CREDENTIALS"
-      - name: Install Snapcraft
-        run: sudo snap install snapcraft --classic
-      - name: Promote the verified hosted revision to beta
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-          REVISION: ${{ needs.store_snap.outputs.revision }}
-        run: snapcraft release licasa "$REVISION" beta
-
-  github_release:
-    needs: [preflight, build_and_test, publish_snap]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: write
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+      - name: Build Snap in GitHub Actions
+        id: snapcraft
+        uses: snapcore/action-build@v1
+      - name: Install and test the built Snap
+        env:
+          SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          test -f "$SNAP_FILE"
+          sudo snap set system experimental.user-daemons=false
+          sudo snap install --dangerous "$SNAP_FILE"
+          python3 tools/verify_snap_install.py --version "$VERSION" \
+            --source-sha "$GITHUB_SHA" \
+            --output build/qualification/snap-local-smoke.json
+          mkdir -p dist/snap
+          cp "$SNAP_FILE" "dist/snap/licasa_${VERSION}_amd64.snap"
+          (cd dist/snap && sha256sum "licasa_${VERSION}_amd64.snap" \
+            > "licasa_${VERSION}_amd64.snap.sha256")
+          cp build/qualification/snap-local-smoke.json dist/snap/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: licasa-snap-amd64
+          path: dist/snap/
+          if-no-files-found: error
+
+  upload_snap_edge:
+    needs: [preflight, build_snap, build_and_test]
+    runs-on: ubuntu-24.04
+    environment: snap-beta
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@v4
         with:
-          name: licasa-linux-amd64
-          path: dist
-      - name: Install GitHub CLI
+          name: licasa-snap-amd64
+          path: dist/snap
+      - name: Check the Snap artifact and Store credentials
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gh
-      - name: Recheck source version, package versions, and checksums
+          test -n "$SNAPCRAFT_STORE_CREDENTIALS"
+          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
+      - name: Upload the checked Snap to edge
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          sudo snap install snapcraft --classic
+          snapcraft upload "dist/snap/licasa_${VERSION}_amd64.snap" --release=edge
+      - name: Verify the Store's edge revision
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          python3 tools/check_release_version.py \
-            --channel beta --expected-sha "$GITHUB_SHA" \
-            --source-ref "$GITHUB_REF"
-          cd dist/deb
-          sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256"
-          test "$(dpkg-deb --field "licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
-          cd ../appimage
-          sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256"
-          sha256sum --check install-licasa-appimage.sh.sha256
-      - name: Publish GitHub Release with checked packages
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          {
-            cat "packaging/release-notes/$RELEASE_TAG.md"
-            printf "\n### Package SHA-256 checksums\n\n\`\`\`text\n"
-            cat "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256"
-            cat "dist/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256"
-            cat "dist/appimage/install-licasa-appimage.sh.sha256"
-            printf "\`\`\`\n"
-            printf "\nSource commit: \`%s\`.\n" "$GITHUB_SHA"
-          } > dist/release-notes.md
-          gh release create "$RELEASE_TAG" \
-            "dist/deb/licasa_${VERSION}-1_amd64.deb" \
-            "dist/deb/licasa_${VERSION}-1_amd64.deb.sha256" \
-            "dist/appimage/Licasa-${VERSION}-x86_64.AppImage" \
-            "dist/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256" \
-            "dist/appimage/install-licasa-appimage.sh" \
-            "dist/appimage/install-licasa-appimage.sh.sha256" \
-            --target "$GITHUB_SHA" --title "Licasa $RELEASE_TAG" \
-            --notes-file dist/release-notes.md
+          sudo snap set system experimental.user-daemons=false
+          sudo snap install --channel=edge licasa
+          for attempt in $(seq 1 10); do
+            installed_version="$(snap list licasa | awk 'NR == 2 {print $2}')"
+            source_file=/snap/licasa/current/usr/share/licasa/source-commit
+            if [ "$installed_version" = "$VERSION" ] &&
+               [ -f "$source_file" ] &&
+               [ "$(cat "$source_file")" = "$GITHUB_SHA" ]; then
+              break
+            fi
+            sleep 20
+            sudo snap refresh --channel=edge licasa
+          done
+          python3 tools/verify_snap_install.py --version "$VERSION" \
+            --source-sha "$GITHUB_SHA" \
+            --output build/qualification/snap-edge-smoke.json
+          revision="$(snap list licasa | awk 'NR == 2 {print $3}')"
+          test "$revision" -gt 0
+          expected="$(cut -d' ' -f1 "dist/snap/licasa_${VERSION}_amd64.snap.sha256")"
+          actual="$(sudo sha256sum "/var/lib/snapd/snaps/licasa_${revision}.snap" | cut -d' ' -f1)"
+          test "$actual" = "$expected"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: licasa-store-snap-smoke
+          path: build/qualification/snap-edge-smoke.json
+          if-no-files-found: error

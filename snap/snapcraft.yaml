@@ -40,8 +40,8 @@ apps:
 parts:
   licasa:
     plugin: nil
-    # Hosted Snapcraft builds check out this repository without GitHub Actions
-    # artifacts, so build the qualified Debian payload from its own source.
+    # GitHub Actions builds this Snap from its checkout. Keep the Debian payload
+    # self-contained so the Snap uses the same qualified build recipe.
     source: .
     build-packages:
       - ca-certificates

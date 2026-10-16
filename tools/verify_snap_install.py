@@ -31,7 +31,7 @@ def main() -> None:
     snap_root = Path("/snap/licasa/current").resolve(strict=True)
     commit_file = snap_root / "usr/share/licasa/source-commit"
     if not commit_file.is_file():
-        raise RuntimeError("Installed Snap has no source commit; the hosted build for this "
+        raise RuntimeError("Installed Snap has no source commit; the checked build for this "
                            "release is not available on the selected Store channel")
     source_commit = commit_file.read_text().strip()
     if args.source_sha and source_commit != args.source_sha:
