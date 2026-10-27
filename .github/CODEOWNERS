@@ -1,0 +1,12 @@
+# Notification/review ownership; hosted merge protections are applied after rollout.
+/.github/ @sanxchep
+/tools/ci_*.py @sanxchep
+/tools/check_ci_inputs.py @sanxchep
+/tools/retry_ci_verification.py @sanxchep
+/tools/build_ci_dependencies.py @sanxchep
+/tools/install_ci_dependencies.sh @sanxchep
+/packaging/ @sanxchep
+/cmake/ @sanxchep
+/tests/ @sanxchep
+/CMakeLists.txt @sanxchep
+/CMakePresets.json @sanxchep

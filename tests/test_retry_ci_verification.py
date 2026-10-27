@@ -28,10 +28,11 @@ class RetryVerificationTests(unittest.TestCase):
         self.assertEqual(call["with"]["presets"], "${{ needs.plan.outputs.presets }}")
         # PyYAML treats the YAML 1.1 key "on" as True.
         inputs = ci.get("on", ci.get(True))["workflow_call"]["inputs"]
-        presets = json.loads(inputs["presets"]["default"])
+        presets = ["release", "asan", "ubsan"]
+        self.assertEqual(inputs["profile"]["default"], "FULL")
         self.assertEqual(set(presets), {"release", "asan", "ubsan"})
         names = set()
-        for job_id in ("plan", "package_contract", "ubuntu", "debian", "wrappers", "snap"):
+        for job_id in ("plan", "public_files", "rpm_preflight", "package_contract", "ubuntu", "debian", "wrappers", "snap"):
             job = ci["jobs"][job_id]
             name = job.get("name", job_id)
             if "uses" in job:
@@ -54,7 +55,9 @@ class RetryVerificationTests(unittest.TestCase):
     def setUp(self):
         self.run = {"repository": {"full_name": "owner/repo"}, "path": ".github/workflows/ci.yml",
                     "event": "workflow_dispatch", "status": "completed", "conclusion": "failure",
-                    "head_branch": "candidate", "head_sha": "a" * 40}
+                    "head_branch": "candidate", "head_sha": "a" * 40, "id": 123, "run_attempt": 1}
+        self.original_plan = {"profile": "FULL", "complete": "true", "sha": "a" * 40,
+                              "run_id": "123", "run_attempt": "1", "cold": "false"}
         packages = retry.package_matrix(retry.load_manifest())
         self.failed = {"debian13-mate-accessibility", "ubuntu24-snap-gnome", "ubuntu24-snap-kde"}
         names = self.current_build_jobs() | {f"packages ({row['target']}, {row['artifact']})" for row in packages}
@@ -63,11 +66,12 @@ class RetryVerificationTests(unittest.TestCase):
             "mate-accessibility" in name or name.startswith("snap_desktops")
             or name in {"attest", "Required verification complete"}) else "success"} for name in sorted(names)]
         self.jobs.append({"name": "retry", "status": "completed", "conclusion": "skipped"})
+        self.jobs.append({"name": "reproducibility", "status": "completed", "conclusion": "skipped"})
         self.artifacts = [{"name": name, "expired": False}
-                          for name in retry.PACKAGE_ARTIFACTS | {"licasa-verification-evidence"}]
+                          for name in retry.PACKAGE_ARTIFACTS | {"licasa-verification-evidence", "verification-plan"}]
 
     def plan(self):
-        return retry.retry_plan(self.run, self.jobs, self.artifacts, repository="owner/repo", branch="candidate")
+        return retry.retry_plan(self.run, self.jobs, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
 
     def test_selects_only_failed_platforms_and_preserves_original_candidate(self):
         plan = self.plan()
@@ -86,7 +90,7 @@ class RetryVerificationTests(unittest.TestCase):
         self.assertEqual(legacy, retry.LEGACY_BUILD_JOBS)
         jobs = [row for row in self.jobs if row["name"] not in retry.BUILD_JOBS]
         jobs += [{"name": name, "status": "completed", "conclusion": "success"} for name in sorted(legacy)]
-        plan = retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate")
+        plan = retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
         self.assertEqual(set(plan["targets"]), self.failed)
         for name in legacy:
             for status in ("failure", "skipped", "cancelled", None):
@@ -98,11 +102,11 @@ class RetryVerificationTests(unittest.TestCase):
                         next(row for row in changed if row["name"] == name)["conclusion"] = status
                     with self.assertRaises(ValueError):
                         retry.retry_plan(self.run, changed, self.artifacts,
-                                         repository="owner/repo", branch="candidate")
+                                         repository="owner/repo", branch="candidate", plan=self.original_plan)
         mixed = jobs + [{"name": "test / Source verification complete", "status": "completed",
                          "conclusion": "success"}]
         with self.assertRaisesRegex(ValueError, "expected verification graph"):
-            retry.retry_plan(self.run, mixed, self.artifacts, repository="owner/repo", branch="candidate")
+            retry.retry_plan(self.run, mixed, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
 
     def test_failed_skipped_missing_or_duplicated_source_checks_prevent_reuse(self):
         for name in retry.BUILD_JOBS:
@@ -114,10 +118,10 @@ class RetryVerificationTests(unittest.TestCase):
                     else:
                         next(row for row in jobs if row["name"] == name)["conclusion"] = status
                     with self.assertRaises(ValueError):
-                        retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate")
+                        retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
         for jobs in (self.jobs[1:], self.jobs + [self.jobs[0]]):
             with self.assertRaises(ValueError):
-                retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate")
+                retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
 
     def test_only_the_completed_skipped_retry_router_is_accepted(self):
         self.plan()
@@ -126,19 +130,19 @@ class RetryVerificationTests(unittest.TestCase):
                 jobs = copy.deepcopy(self.jobs)
                 next(row for row in jobs if row["name"] == "retry")["conclusion"] = conclusion
                 with self.assertRaisesRegex(ValueError, "retry routing"):
-                    retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate")
+                    retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
         jobs = [row for row in self.jobs if row["name"] != "retry"]
         with self.assertRaisesRegex(ValueError, "retry routing"):
-            retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate")
+            retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
         jobs = copy.deepcopy(self.jobs)
         next(row for row in jobs if row["name"] == "retry")["status"] = "in_progress"
         with self.assertRaisesRegex(ValueError, "unfinished"):
-            retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate")
+            retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
 
     def test_unknown_skipped_jobs_and_skipped_platform_checks_still_reject(self):
         jobs = self.jobs + [{"name": "unexpected", "status": "completed", "conclusion": "skipped"}]
         with self.assertRaisesRegex(ValueError, "expected verification graph"):
-            retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate")
+            retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
         for row in self.jobs:
             if not row["name"].startswith(("packages (", "snap_desktops (")):
                 continue
@@ -146,7 +150,7 @@ class RetryVerificationTests(unittest.TestCase):
                 jobs = copy.deepcopy(self.jobs)
                 next(job for job in jobs if job["name"] == row["name"])["conclusion"] = "skipped"
                 with self.assertRaisesRegex(ValueError, "skipped or missing"):
-                    retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate")
+                    retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
 
     def test_wrong_run_or_branch_and_expired_artifacts_are_rejected(self):
         for key, value in (("head_branch", "other"), ("path", ".github/workflows/other.yml"),
@@ -154,7 +158,7 @@ class RetryVerificationTests(unittest.TestCase):
             with self.subTest(key=key):
                 run = dict(self.run, **{key: value})
                 with self.assertRaises(ValueError):
-                    retry.retry_plan(run, self.jobs, self.artifacts, repository="owner/repo", branch="candidate")
+                    retry.retry_plan(run, self.jobs, self.artifacts, repository="owner/repo", branch="candidate", plan=self.original_plan)
         self.artifacts[0]["expired"] = True
         with self.assertRaises(ValueError):
             self.plan()

@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:
@@ -11,11 +14,18 @@ permissions:
 
 jobs:
   public-files:
+    name: Check public repository files
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Check public files and ancestor history
-        run: python3 tools/check_public_files.py --history HEAD
+        env:
+          POLICY_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/public-policy"
+          git archive "$POLICY_SHA" tools/check_public_files.py | tar -x -C "$RUNNER_TEMP/public-policy"
+          python3 "$RUNNER_TEMP/public-policy/tools/check_public_files.py" --history HEAD

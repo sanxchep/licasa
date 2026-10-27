@@ -61,11 +61,12 @@ class WorkflowPermissionTests(unittest.TestCase):
         self.workflows = {path.name: yaml.safe_load(path.read_text())
                           for path in (ROOT / ".github/workflows").glob("*.yml")}
 
-    def test_release_source_call_is_isolated_from_retry_and_native_builds(self):
+    def test_release_uses_the_shared_full_graph_without_publication_permissions(self):
         calls = check_local_calls(self.workflows, "snapcraft-build.yml")
-        self.assertEqual(calls, {
-            ("snapcraft-build.yml", "verify_sanitizers", "verify-source.yml"),
-        })
+        self.assertIn(("snapcraft-build.yml", "verify_sanitizers", "ci.yml"), calls)
+        self.assertIn(("ci.yml", "test", "verify-source.yml"), calls)
+        self.assertIn(("ci.yml", "ubuntu", "build-native.yml"), calls)
+        self.assertIn(("ci.yml", "debian", "build-native.yml"), calls)
 
     def broad_ci_caller(self):
         workflows = copy.deepcopy(self.workflows)
@@ -91,7 +92,7 @@ class WorkflowPermissionTests(unittest.TestCase):
         release = self.workflows["snapcraft-build.yml"]
         self.assertEqual(release["permissions"], {"contents": "read"})
         self.assertEqual(release["jobs"]["verify_sanitizers"].get("permissions", release["permissions"]),
-                         {"contents": "read"})
+                         {"contents": "read", "actions": "read", "pull-requests": "read"})
         self.assertEqual(self.workflows["verify-source.yml"]["permissions"], {"contents": "read"})
         check_local_calls(self.workflows, "ci.yml")
 

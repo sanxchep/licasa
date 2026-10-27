@@ -16,8 +16,14 @@ def command_for(component: str, preset: str, jobs: int) -> list[str]:
         # All three source presets previously used this identical Release Qt
         # build. The application and codec sanitizer builds remain distinct.
         return [sys.executable, "tools/build_qt_backport.py", "--jobs", str(jobs)]
+    if component == "ffmpeg":
+        command = [sys.executable, "tools/build_qt_ffmpeg.py", "--work-dir",
+                   str(ROOT / "build/deps" / preset), "--jobs", str(jobs)]
+        if preset != "release":
+            command += ["--sanitizer", {"asan": "address", "ubsan": "undefined"}[preset]]
+        return command
     if component != "codecs":
-        raise ValueError("Expected quick or codecs")
+        raise ValueError("Expected quick, codecs or ffmpeg")
     command = [sys.executable, "tools/build_codecs.py", "--prefix",
                str(ROOT / "build/codecs/prefix"), "--jobs", str(jobs)]
     if preset != "release":
@@ -27,7 +33,7 @@ def command_for(component: str, preset: str, jobs: int) -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("component", choices=("quick", "codecs"))
+    parser.add_argument("component", choices=("quick", "codecs", "ffmpeg"))
     parser.add_argument("--preset", default="release", choices=("release", "asan", "ubsan"))
     parser.add_argument("--jobs", type=int, required=True)
     args = parser.parse_args()

@@ -8,6 +8,11 @@ on:
         required: true
         type: string
 
+      expected_sha:
+        description: Exact reviewed verifier commit at the selected dispatch ref
+        required: true
+        type: string
+
 permissions:
   actions: read
   contents: read
@@ -32,13 +37,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
           [[ "$BUILD_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           test "$RUNNER_ENVIRONMENT" = github-hosted
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" > "$RUNNER_TEMP/run.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/jobs.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/artifacts.json"
-          python3 tools/retry_ci_verification.py plan --run "$RUNNER_TEMP/run.json" \
+          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" --name verification-plan --dir "$RUNNER_TEMP/original-plan"
+          python3 tools/retry_ci_verification.py plan --plan "$RUNNER_TEMP/original-plan/verification-plan.json" --run "$RUNNER_TEMP/run.json" \
             --jobs "$RUNNER_TEMP/jobs.json" --artifacts "$RUNNER_TEMP/artifacts.json" --github-output "$GITHUB_OUTPUT"
 
   packages:

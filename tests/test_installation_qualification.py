@@ -129,7 +129,7 @@ class DependencyRecipeTests(unittest.TestCase):
                         self.assert_installer_prerequisites(distribution, candidate, required)
 
     def test_release_hardening_inspects_the_packaged_elf_behind_its_launcher(self):
-        workflow = (ROOT / ".github/workflows/snapcraft-build.yml").read_text()
+        workflow = (ROOT / ".github/workflows/build-native.yml").read_text()
         targets = re.findall(r"python3 /source/tools/check_hardening.py ([^\n]+)", workflow)
         self.assertEqual(len(targets), 1)
         target = shlex.split(targets[0].removesuffix("'"))[0]

@@ -1,134 +1,225 @@
 name: Build and verify
 on:
+  push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited, closed]
+  merge_group:
+    types: [checks_requested]
+  schedule:
+    - cron: '17 2 * * 1-6'
+    - cron: '43 3 * * 0'
   workflow_dispatch:
     inputs:
-      verify_candidate:
-        description: Build and qualify all package targets without publishing
-        required: false
-        type: boolean
-        default: false
+      profile:
+        description: Verification coverage; neither choice publishes
+        type: choice
+        options: [FULL, FAST]
+        default: FULL
       expected_sha:
-        description: Full source commit required for complete candidate verification
-        required: false
+        description: Exact full source commit at the selected workflow ref
+        required: true
         type: string
       retry_run_id:
-        description: Retry only failed platform checks from this completed verification run
+        description: Retry failed platforms from a completed immutable full run
         required: false
         type: string
   workflow_call:
     inputs:
       source_ref:
-        description: Exact source commit to verify
         required: true
         type: string
-      presets:
-        description: JSON array of CMake presets to verify
+      profile:
         required: false
         type: string
-        default: '["release","asan","ubsan"]'
+        default: FULL
+      cold:
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
-# Superseded PR checks are disposable; release callers must finish their gates.
+# Main/tag/schedule/release requests have independent groups, including pending
+# runs. Only obsolete branch/PR feedback may be cancelled.
 concurrency:
-  group: verify-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: verify-${{ github.workflow }}-${{ github.event_name == 'pull_request' && (github.event.action != 'edited' || github.event.changes.base) && github.event.pull_request.number || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main' && github.ref) || github.run_id }}
+  cancel-in-progress: ${{ (github.event_name == 'pull_request' && (github.event.action != 'edited' || github.event.changes.base)) || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main') }}
 
 jobs:
   retry:
-    if: ${{ inputs.retry_run_id != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.retry_run_id != '' }}
     permissions:
       actions: read
       contents: read
     uses: ./.github/workflows/retry-verification.yml
     with:
       build_run_id: ${{ inputs.retry_run_id }}
+      expected_sha: ${{ inputs.expected_sha }}
 
   plan:
     if: ${{ inputs.retry_run_id == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       sha: ${{ steps.plan.outputs.sha }}
+      policy_sha: ${{ steps.plan.outputs.policy_sha }}
       version: ${{ steps.plan.outputs.version }}
+      profile: ${{ steps.plan.outputs.profile }}
       build: ${{ steps.plan.outputs.build }}
       packages: ${{ steps.plan.outputs.packages }}
       complete: ${{ steps.plan.outputs.complete }}
       presets: ${{ steps.plan.outputs.presets }}
       matrix: ${{ steps.plan.outputs.matrix }}
+      merge_eligible: ${{ steps.plan.outputs.merge_eligible }}
+      cold: ${{ steps.plan.outputs.cold }}
+      retention: ${{ steps.plan.outputs.retention }}
+      cache_scope: ${{ steps.plan.outputs.cache_scope }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.source_ref || github.sha }}
+          ref: ${{ inputs.source_ref || (github.event_name == 'workflow_dispatch' && inputs.expected_sha) || github.sha }}
           persist-credentials: false
-          fetch-depth: 2
-      - name: Select required checks and validate the source once
+          fetch-depth: 0
+      - name: Load the reviewed policy without executing candidate code
+        env:
+          POLICY_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: |
+          [[ "$POLICY_SHA" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p "$RUNNER_TEMP/ci-policy"
+          git archive "$POLICY_SHA" tools packaging/support-matrix.json | tar -x -C "$RUNNER_TEMP/ci-policy"
+          test -f "$RUNNER_TEMP/ci-policy/tools/ci_events.py"
+      - name: Select exact coverage from the repository event
         id: plan
         env:
-          SOURCE_SHA: ${{ inputs.source_ref || github.sha }}
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_ref || (github.event_name == 'workflow_dispatch' && inputs.expected_sha) || github.sha }}
+          POLICY_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           EXPECTED_SHA: ${{ inputs.expected_sha }}
-          COMPLETE: ${{ inputs.verify_candidate || false }}
-          PRESETS: ${{ inputs.presets }}
-          EVENT: ${{ github.event_name }}
+          PROFILE: ${{ inputs.profile || 'FULL' }}
+          REUSABLE: ${{ inputs.source_ref != '' }}
+          COLD: ${{ inputs.cold || false }}
         run: |
           test "$RUNNER_ENVIRONMENT" = github-hosted
-          options=()
-          if [ "$COMPLETE" = true ]; then options+=(--complete); fi
-          if [ "$EVENT" = pull_request ]; then
-            git diff --no-renames --name-only -z HEAD^1 HEAD > "$RUNNER_TEMP/changed-files"
-            options+=(--changed-files "$RUNNER_TEMP/changed-files")
-          fi
-          python3 tools/ci_plan.py plan --event "$EVENT" --source-sha "$SOURCE_SHA" \
-            --expected-sha "$EXPECTED_SHA" --presets "$PRESETS" \
-            --github-output "$GITHUB_OUTPUT" "${options[@]}"
+          python3 "$RUNNER_TEMP/ci-policy/tools/ci_events.py" --root "$PWD" \
+            --output "$GITHUB_OUTPUT" --receipt "$RUNNER_TEMP/verification-plan.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: verification-plan
+          path: ${{ runner.temp }}/verification-plan.json
+          retention-days: ${{ steps.plan.outputs.retention }}
+          if-no-files-found: error
+
+  public_files:
+    name: Public file and history contract
+    needs: plan
+    if: ${{ needs.plan.outputs.profile != 'NONE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check public files with the reviewed policy
+        env:
+          POLICY_SHA: ${{ needs.plan.outputs.policy_sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/public-policy"
+          git archive "$POLICY_SHA" tools/check_public_files.py | tar -x -C "$RUNNER_TEMP/public-policy"
+          python3 "$RUNNER_TEMP/public-policy/tools/check_public_files.py" --history HEAD
+
+  rpm_preflight:
+    needs: [plan, package_contract]
+    if: ${{ needs.plan.outputs.complete == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - name: Check real RPM bootstrap and package lifecycle
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          docker build -f packaging/build-rpm.Dockerfile -t licasa-rpm-builder:fedora44 packaging
+          python3 tools/verify_native_lifecycle.py --manager rpm --output build/rpm-contract
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: verification-rpm-preflight
+          path: build/rpm-contract/
+          retention-days: ${{ needs.plan.outputs.retention }}
+          if-no-files-found: error
 
   package_contract:
     needs: plan
+    if: ${{ needs.plan.outputs.profile != 'NONE' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - name: Check documentation inputs
+        if: needs.plan.outputs.profile == 'DOCS'
+        run: python3 tools/check_ci_inputs.py --docs
       - name: Check package contracts and qualification regressions
+        if: needs.plan.outputs.profile != 'DOCS'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends python3-pil python3-gi python3-yaml gir1.2-glib-2.0 dbus-daemon libglib2.0-bin patchelf gcc clang-format-18
           python3 tools/check_code_style.py
           python3 tools/check_support_manifest.py
+          python3 tools/prepare_ci_tools.py --output "$RUNNER_TEMP/ci-tools"
+          python3 tools/check_ci_inputs.py --actionlint "$RUNNER_TEMP/ci-tools/actionlint"
           /usr/bin/python3 -B -m unittest discover -s tests -p 'test_*.py' -v
 
   test:
-    needs: [plan, package_contract]
-    if: ${{ !cancelled() && needs.plan.outputs.build == 'true' && needs.package_contract.result == 'success' }}
+    needs: [plan, package_contract, rpm_preflight]
+    if: ${{ !cancelled() && needs.plan.outputs.build == 'true' && needs.package_contract.result == 'success' && (needs.plan.outputs.complete != 'true' || needs.rpm_preflight.result == 'success') }}
     uses: ./.github/workflows/verify-source.yml
     with:
       source_ref: ${{ needs.plan.outputs.sha }}
       presets: ${{ needs.plan.outputs.presets }}
+      cold: ${{ needs.plan.outputs.cold == 'true' }}
+      cache_scope: ${{ needs.plan.outputs.cache_scope }}
+      retention_days: ${{ fromJSON(needs.plan.outputs.retention) }}
 
   ubuntu:
-    needs: [plan, package_contract]
-    if: ${{ !cancelled() && needs.plan.outputs.packages == 'true' && needs.package_contract.result == 'success' }}
+    needs: [plan, package_contract, rpm_preflight]
+    if: ${{ !cancelled() && needs.plan.outputs.packages == 'true' && needs.package_contract.result == 'success' && needs.rpm_preflight.result == 'success' }}
     uses: ./.github/workflows/build-native.yml
     with:
       source_ref: ${{ needs.plan.outputs.sha }}
       version: ${{ needs.plan.outputs.version }}
       target: ubuntu-24.04
+      cold: ${{ needs.plan.outputs.cold == 'true' }}
+      cache_scope: ${{ needs.plan.outputs.cache_scope }}
+      retention_days: ${{ fromJSON(needs.plan.outputs.retention) }}
       artifact: verification-ubuntu-packages
-      pr_checks: ${{ github.event_name == 'pull_request' }}
+      pr_checks: false
 
   debian:
-    needs: [plan, package_contract]
-    if: ${{ !cancelled() && needs.plan.outputs.packages == 'true' && needs.package_contract.result == 'success' }}
+    needs: [plan, package_contract, rpm_preflight]
+    if: ${{ !cancelled() && needs.plan.outputs.packages == 'true' && needs.package_contract.result == 'success' && needs.rpm_preflight.result == 'success' }}
     uses: ./.github/workflows/build-native.yml
     with:
       source_ref: ${{ needs.plan.outputs.sha }}
       version: ${{ needs.plan.outputs.version }}
       target: debian-13
+      cold: ${{ needs.plan.outputs.cold == 'true' }}
+      cache_scope: ${{ needs.plan.outputs.cache_scope }}
+      retention_days: ${{ fromJSON(needs.plan.outputs.retention) }}
       artifact: verification-debian-packages
-      pr_checks: ${{ github.event_name == 'pull_request' }}
+      pr_checks: false
 
   wrappers:
     needs: [plan, ubuntu]
@@ -159,7 +250,7 @@ jobs:
         with:
           name: verification-portable-packages
           path: build/candidate-wrappers/
-          retention-days: 90
+          retention-days: ${{ needs.plan.outputs.retention }}
           if-no-files-found: error
           compression-level: 0
 
@@ -216,7 +307,7 @@ jobs:
         with:
           name: verification-snap
           path: build/candidate-snap/
-          retention-days: 90
+          retention-days: ${{ needs.plan.outputs.retention }}
           if-no-files-found: error
           compression-level: 0
 
@@ -256,7 +347,7 @@ jobs:
         with:
           name: verification-outcome-${{ matrix.target }}
           path: build/candidate-reports/
-          retention-days: 90
+          retention-days: ${{ needs.plan.outputs.retention }}
           if-no-files-found: error
 
   snap_desktops:
@@ -311,7 +402,7 @@ jobs:
         with:
           name: verification-outcome-snap-${{ matrix.desktop }}
           path: build/candidate-reports/
-          retention-days: 90
+          retention-days: ${{ needs.plan.outputs.retention }}
           if-no-files-found: error
 
   attest:
@@ -345,6 +436,10 @@ jobs:
           pattern: verification-outcome-*
           path: build/candidate-evidence
           merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: verification-plan
+          path: build/candidate-evidence
       - name: Bind all outcomes to the exact candidate
         env:
           SOURCE_SHA: ${{ needs.plan.outputs.sha }}
@@ -358,21 +453,69 @@ jobs:
         with:
           name: licasa-verification-evidence
           path: build/candidate-evidence/
-          retention-days: 90
+          retention-days: ${{ needs.plan.outputs.retention }}
+          if-no-files-found: error
+
+  reproducibility:
+    needs: [plan, attest]
+    if: ${{ needs.plan.outputs.cold == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.policy_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: licasa-verification-evidence
+          path: build/reproducibility
+      - name: Compare cold outputs with a retained same-source main verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/ci_reproducibility.py --current build/reproducibility/qualification.json \
+            --output build/reproducibility/comparison.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: verification-reproducibility
+          path: build/reproducibility/
+          retention-days: ${{ needs.plan.outputs.retention }}
           if-no-files-found: error
 
   result:
-    name: Required verification complete
-    needs: [plan, package_contract, test, ubuntu, debian, wrappers, snap, packages, snap_desktops, attest]
+    name: ${{ needs.plan.outputs.merge_eligible == 'true' && 'Required verification complete' || 'Verification feedback complete' }}
+    needs: [plan, public_files, package_contract, rpm_preflight, test, ubuntu, debian, wrappers, snap, packages, snap_desktops, attest, reproducibility, retry]
     if: ${{ always() && inputs.retry_run_id == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.source_ref || github.sha }}
+          ref: ${{ needs.plan.outputs.policy_sha || github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: verification-plan
+          path: build/verification-result
       - name: Reject failed, cancelled, missing or skipped required checks
         env:
           CI_RESULTS: ${{ toJSON(needs) }}
         run: python3 tools/ci_plan.py check
+      - name: Record complete source and coverage identity
+        env:
+          CI_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 tools/ci_receipt.py create --plan build/verification-result/verification-plan.json \
+            --output build/verification-result/verification-result.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: verification-result
+          path: build/verification-result/
+          retention-days: ${{ needs.plan.outputs.retention || 90 }}
+          if-no-files-found: error

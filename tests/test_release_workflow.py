@@ -35,26 +35,35 @@ class ReleaseWorkflowTests(unittest.TestCase):
                          for path in (ROOT / ".github/workflows").glob("*.yml")}
         cls.jobs = cls.workflows["snapcraft-build.yml"]["jobs"]
 
-    def test_publication_still_requires_every_original_platform_gate(self):
-        common = {"preflight", "verify_sanitizers", "build_ubuntu", "portable_packages", "build_snap"}
-        for publication, required in (("upload_snap_edge", common),
-                                      ("github_prerelease", common | {"build_debian", "upload_snap_edge"})):
-            with self.subTest(publication=publication):
-                self.assertTrue(required <= ancestors(self.jobs, publication))
-        # Success-only dependency semantics must remain in force at every release gate.
+    def test_publication_requires_complete_qualified_candidate_and_explicit_intent(self):
+        for publication in ("upload_snap_edge", "github_prerelease"):
+            self.assertTrue({"preflight", "verify_sanitizers", "stage_candidate"} <= ancestors(self.jobs, publication))
+        self.assertIn("upload_snap_edge", ancestors(self.jobs, "github_prerelease"))
         for job in self.jobs.values():
             self.assertNotIn("if", job)
             self.assertFalse(job.get("continue-on-error", False))
-        self.assertEqual(self.jobs["upload_snap_edge"]["environment"], "snap-beta")
+        for job in ("upload_snap_edge", "github_prerelease"):
+            self.assertEqual(self.jobs[job]["environment"], "snap-beta")
+        call = self.jobs["verify_sanitizers"]
+        self.assertEqual(call["uses"], "./.github/workflows/ci.yml")
+        self.assertEqual(call["with"]["profile"], "FULL")
+        scripts = "\n".join(step.get("run", "") for step in self.jobs["preflight"]["steps"])
+        self.assertIn('test "$APPROVED" = true', scripts)
+        self.assertIn('test "$GITHUB_SHA" = "$EXPECTED_SHA"', scripts)
 
-    def test_snap_and_portable_qualification_can_start_from_the_same_checked_build(self):
-        for name in ("build_snap", "portable_packages"):
-            self.assertEqual(dependencies(self.jobs[name]), {"preflight", "build_ubuntu"})
-        self.assertNotIn("portable_packages", ancestors(self.jobs, "build_snap"))
-        self.assertNotIn("build_snap", ancestors(self.jobs, "portable_packages"))
-        downloads = [step["with"]["name"] for step in self.jobs["build_snap"]["steps"]
-                     if step.get("uses", "").startswith("actions/download-artifact@")]
-        self.assertEqual(downloads, ["licasa-ubuntu-deb"])
+    def test_release_consumes_the_same_run_packages_without_rebuilding(self):
+        stage = self.jobs["stage_candidate"]
+        self.assertEqual(dependencies(stage), {"preflight", "verify_sanitizers"})
+        downloads = {step.get("with", {}).get("name") for step in stage["steps"]
+                     if step.get("uses", "").startswith("actions/download-artifact@")}
+        self.assertTrue({"verification-ubuntu-packages", "verification-debian-packages",
+                         "verification-portable-packages", "verification-snap",
+                         "licasa-verification-evidence", "verification-result"} <= downloads)
+        scripts = "\n".join(step.get("run", "") for step in stage["steps"])
+        self.assertIn("tools/ci_receipt.py check", scripts)
+        self.assertIn("tools/qualification_evidence.py check", scripts)
+        self.assertNotIn("package_rpm.py", scripts)
+        self.assertNotIn("snapcraft upload", scripts)
 
     def test_output_references_have_direct_dependencies_in_every_workflow(self):
         for workflow, contents in self.workflows.items():
@@ -63,35 +72,25 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 with self.subTest(workflow=workflow, job=name):
                     self.assertTrue(references <= dependencies(job), references - dependencies(job))
 
-    def test_all_package_verifiers_and_failure_evidence_survive_the_split(self):
-        required = {
-            "build_ubuntu": {"verify-fresh-build.sh", "check_hardening.py", "verify_deb_container.py"},
-            "build_debian": {"build_debian_deb.py", "verify_deb_container.py"},
-            "portable_packages": {"verify_appimage_container.py", "verify_appimage_fedora.py",
-                                  "verify_appimage_desktops.py", "package_rpm.py", "verify_rpm_container.py",
-                                  "package_arch.py", "verify_arch_package.py"},
-            "build_snap": {"verify_snap_install.py"},
-            "upload_snap_edge": {"verify_snap_install.py"},
-            "preflight": {"verify_native_lifecycle.py"},
-        }
-        for job, tools in required.items():
-            scripts = "\n".join(step.get("run", "") for step in self.jobs[job]["steps"])
-            for tool in tools:
-                with self.subTest(job=job, tool=tool):
-                    self.assertIn(tool, scripts)
-        failure_upload = next(step for step in self.jobs["build_snap"]["steps"]
-                              if step.get("with", {}).get("name") == "failed-snap-verification")
-        self.assertIn("failure()", failure_upload["if"])
-        self.assertIn("snap-local-smoke*", failure_upload["with"]["path"])
+    def test_shared_graph_retains_native_hardening_rpm_and_all_qualifiers(self):
+        ci = self.workflows["ci.yml"]["jobs"]
+        self.assertIn("verify_native_lifecycle.py", str(ci["rpm_preflight"]))
+        self.assertIn("qualification_evidence.py run-target", str(ci["packages"]))
+        self.assertIn("qualification_evidence.py run-target", str(ci["snap_desktops"]))
+        self.assertIn("verify_snap_install.py", str(ci["snap"]))
+        native = self.workflows["build-native.yml"]["jobs"]["build"]
+        self.assertIn("check_hardening.py /tmp/licasa-package/usr/bin/licasa.bin", str(native))
+        for job in ("snap", "packages", "snap_desktops", "attest", "rpm_preflight"):
+            self.assertTrue(any(step.get("if") == "always()" for step in ci[job]["steps"]))
 
     def test_complete_public_artifact_contract_is_retained(self):
         exports = {step["with"]["name"]: (job, step["with"]["path"])
                    for job, value in self.jobs.items() for step in value.get("steps", [])
                    if step.get("uses", "").startswith("actions/upload-artifact@")}
-        self.assertEqual(exports["licasa-linux-amd64"], ("portable_packages", "dist/"))
-        self.assertEqual(exports["licasa-debian13-amd64"][0], "build_debian")
-        self.assertEqual(exports["licasa-snap-amd64"][0], "build_snap")
-        scripts = "\n".join(step.get("run", "") for step in self.jobs["portable_packages"]["steps"])
+        self.assertEqual(exports["licasa-linux-amd64"][0], "stage_candidate")
+        self.assertEqual(exports["licasa-debian13-amd64"][0], "stage_candidate")
+        self.assertEqual(exports["licasa-snap-amd64"][0], "stage_candidate")
+        scripts = exports["licasa-linux-amd64"][1]
         for directory in ("deb", "appimage", "rpm", "arch"):
             self.assertIn(f"dist/{directory}", scripts)
         for name in ("qualify-candidate.yml", "publish-release.yml"):
@@ -116,92 +115,50 @@ class ReleaseWorkflowTests(unittest.TestCase):
                         "tools/check_support_manifest.py"):
             self.assertEqual(combined.count(command), 1, command)
         for script in ("packaging/install-licasa-appimage.sh", "tools/check_appimage_install.sh"):
-            self.assertIn(f"bash -n {script}", combined)
+            self.assertIn("tools/check_ci_inputs.py", combined)
+            self.assertTrue((ROOT / script).is_file())
 
 
 class ReleaseArtifactTransferTests(unittest.TestCase):
-    """Run the actual workflow transfer scripts against tiny, real Debian archives."""
+    """The new transfer boundary joins source gates with real package/report bytes."""
 
-    @classmethod
-    def setUpClass(cls):
-        cls.jobs = yaml.safe_load((ROOT / ".github/workflows/snapcraft-build.yml").read_text())["jobs"]
-        if not shutil.which("dpkg-deb"):
-            raise RuntimeError("Release artifact tests require dpkg-deb")
-
-    def write_checksum(self, path):
-        path.with_name(path.name + ".sha256").write_text(
-            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n")
-
-    def create_inputs(self, root, job, package_version):
-        deb_dir = root / ("dist/deb" if job == "portable_packages" else "build/verified-linux/deb")
-        deb_dir.mkdir(parents=True)
-        package = root / "package"
-        (package / "DEBIAN").mkdir(parents=True)
-        (package / "DEBIAN/control").write_text(
-            f"Package: licasa\nVersion: {package_version}\nArchitecture: amd64\n"
-            "Maintainer: Fixture <fixture@example.invalid>\nDescription: Artifact transfer fixture\n")
-        deb = deb_dir / f"licasa_{VERSION}-1_amd64.deb"
-        subprocess.run(["dpkg-deb", "--root-owner-group", "--build", str(package), str(deb)],
-                       capture_output=True, check=True, timeout=15)
-        (deb_dir / "source-commit.txt").write_text(SOURCE_SHA + "\n")
-        self.write_checksum(deb)
-        appimage_dir = root / "build/qualification/appimage"
-        if job == "portable_packages":
-            appimage_dir.mkdir(parents=True)
-            (appimage_dir / "source-commit.txt").write_text(SOURCE_SHA + "\n")
-            for name in (f"Licasa-{VERSION}-x86_64.AppImage", "install-licasa-appimage.sh"):
-                path = appimage_dir / name
-                path.write_bytes(b"fixture payload\n")
-                path.chmod(0o644)  # Artifact download strips executable modes.
-                self.write_checksum(path)
-        return deb, appimage_dir
-
-    def run_transfer(self, root, job):
-        step = next(step for step in self.jobs[job]["steps"] if step.get("id") == "verify_inputs")
-        return subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
-                              cwd=root, env={**os.environ, "GITHUB_SHA": SOURCE_SHA, "VERSION": VERSION},
-                              capture_output=True, text=True, timeout=15)
-
-    def test_valid_transfers_preserve_payload_and_restore_required_executables(self):
-        for job in ("build_snap", "portable_packages"):
-            with self.subTest(job=job), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                deb, appimage = self.create_inputs(root, job, VERSION + "-1")
-                result = self.run_transfer(root, job)
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                if job == "build_snap":
-                    self.assertEqual((root / "snap-input" / deb.name).read_bytes(), deb.read_bytes())
-                    self.assertEqual((root / "snap-input/source-commit.txt").read_text().strip(), SOURCE_SHA)
-                else:
-                    for name in (f"Licasa-{VERSION}-x86_64.AppImage", "install-licasa-appimage.sh"):
-                        self.assertEqual((appimage / name).stat().st_mode & 0o777, 0o755)
-
-    def test_damaged_mismatched_and_missing_inputs_fail_before_packaging(self):
-        for job in ("build_snap", "portable_packages"):
-            cases = ["deb checksum", "deb source", "deb version", "missing checksum"]
-            if job == "portable_packages":
-                cases += ["appimage checksum", "appimage source", "installer checksum"]
-            for case in cases:
-                with self.subTest(job=job, case=case), tempfile.TemporaryDirectory() as temporary:
-                    root = Path(temporary)
-                    deb, appimage = self.create_inputs(root, job, "0.8.1-1" if case == "deb version"
-                                                      else VERSION + "-1")
-                    if case == "deb checksum":
-                        deb.write_bytes(deb.read_bytes() + b"corrupted")
-                    elif case == "deb source":
-                        (deb.parent / "source-commit.txt").write_text("b" * 40 + "\n")
-                    elif case == "missing checksum":
-                        deb.with_name(deb.name + ".sha256").unlink()
-                    elif case == "appimage checksum":
-                        (appimage / f"Licasa-{VERSION}-x86_64.AppImage").write_bytes(b"corrupted")
-                    elif case == "appimage source":
-                        (appimage / "source-commit.txt").write_text("b" * 40 + "\n")
-                    elif case == "installer checksum":
-                        (appimage / "install-licasa-appimage.sh").write_bytes(b"corrupted")
-                    result = self.run_transfer(root, job)
-                    self.assertNotEqual(result.returncode, 0, case)
-                    if job == "build_snap":
-                        self.assertFalse((root / "snap-input").exists())
+    def test_exact_package_evidence_and_full_receipt_must_both_pass_before_transfer(self):
+        # Reuse the existing report-contract fixture; no package managers or
+        # publishing commands run. The source gate is independently exercised
+        # through real serialized receipts and file hashes.
+        from test_qualification_evidence import QualificationEvidenceTests
+        from ci_receipt import create, validate
+        from ci_plan import make_plan
+        from unittest.mock import patch
+        import qualification_evidence as evidence
+        fixture = QualificationEvidenceTests()
+        fixture.setUp()
+        try:
+            plan = {**make_plan("push", True, []), "sha": "a" * 40, "policy_sha": "b" * 40,
+                    "run_id": "123", "run_attempt": "1", "version": "1.2.3"}
+            names = {"plan", "public_files", "package_contract", "rpm_preflight", "test",
+                     "ubuntu", "debian", "wrappers", "snap", "packages", "snap_desktops", "attest"}
+            needs = {name: {"result": "success"} for name in names}
+            needs["plan"]["outputs"] = plan
+            receipt = create(plan, needs, "owner/repo", "123", "1")
+            validate(receipt, repository="owner/repo", source="a" * 40, version="1.2.3", run_id="123", attempt="1")
+            arguments = dict(source_sha="a" * 40, build_run_id="123", version="1.2.3",
+                             packages=fixture.packages, evidence=fixture.reports, manifest_path=fixture.manifest_path)
+            with patch.object(evidence, "MANIFEST", fixture.manifest_path):
+                evidence.validate(fixture.attestation, fixture.manifest, **arguments)
+                for artifact in fixture.attestation["packages"].values():
+                    path = fixture.packages / artifact["path"]
+                    saved = path.read_bytes()
+                    path.write_bytes(saved + b"changed after qualification")
+                    with self.assertRaises(ValueError):
+                        evidence.validate(fixture.attestation, fixture.manifest, **arguments)
+                    path.write_bytes(saved)
+                incomplete = dict(receipt, profile="FAST")
+                with self.assertRaises(ValueError):
+                    validate(incomplete, repository="owner/repo", source="a" * 40,
+                             version="1.2.3", run_id="123", attempt="1")
+        finally:
+            fixture.doCleanups()
 
 
 if __name__ == "__main__":

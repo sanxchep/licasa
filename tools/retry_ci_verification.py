@@ -25,15 +25,16 @@ VERIFIER_FILES = {
     "tests/test_retry_ci_verification.py", "tests/test_qualification_evidence.py",
     "tests/test_mate_accessibility_wrapper.py", "tests/test_snap_dialog_qualification.py",
 }
-COMMON_BUILD_JOBS = {"plan", "package_contract", "ubuntu / build", "debian / build", "wrappers", "snap"}
-BUILD_JOBS = COMMON_BUILD_JOBS | {
+LEGACY_COMMON_BUILD_JOBS = {"plan", "package_contract", "ubuntu / build", "debian / build", "wrappers", "snap"}
+COMMON_BUILD_JOBS = LEGACY_COMMON_BUILD_JOBS | {"Public file and history contract", "rpm_preflight"}
+BUILD_JOBS = COMMON_BUILD_JOBS | {"test / core",
     "test / Validate source verification request", "test / Shared Qt runtime",
     "test / test (release)", "test / test (asan)", "test / test (ubsan)",
     "test / Source verification complete",
 }
 # Retained candidates created before source verification became reusable remain
 # eligible, but only when their complete original graph and source gates match.
-LEGACY_BUILD_JOBS = COMMON_BUILD_JOBS | {
+LEGACY_BUILD_JOBS = LEGACY_COMMON_BUILD_JOBS | {
     "Shared Qt runtime", "test (release)", "test (asan)", "test (ubsan)",
 }
 PACKAGE_ARTIFACTS = {"verification-ubuntu-packages", "verification-debian-packages",
@@ -60,11 +61,11 @@ def validate_verifier(candidate: str, verifier: str) -> list[str]:
 
 
 def retry_plan(run: dict, jobs: list[dict], artifacts: list[dict], *, repository: str,
-               branch: str) -> dict:
+               branch: str, plan: dict | None = None) -> dict:
     manifest = load_manifest()
     if (run.get("repository", {}).get("full_name") != repository
             or run.get("path") != ".github/workflows/ci.yml"
-            or run.get("event") != "workflow_dispatch" or run.get("status") != "completed"
+            or run.get("event") not in {"workflow_dispatch", "push", "schedule"} or run.get("status") != "completed"
             or run.get("conclusion") != "failure" or run.get("head_branch") != branch
             or not re.fullmatch(r"[0-9a-f]{40}", run.get("head_sha", ""))):
         raise ValueError("Retry requires a completed failed manual verification on this repository and branch")
@@ -83,21 +84,37 @@ def retry_plan(run: dict, jobs: list[dict], artifacts: list[dict], *, repository
                        if required <= by_name.keys()), None)
     if build_jobs is None or any(by_name[name].get("conclusion") != "success" for name in build_jobs):
         raise ValueError("Every original build and source check must have succeeded before retrying platforms")
+    cold = by_name.pop("reproducibility", None)
+    if build_jobs == BUILD_JOBS:
+        if (plan is None or plan.get("cold") != "false" or cold is None
+                or cold.get("conclusion") != "skipped"):
+            raise ValueError("Cold comparison campaigns require a full rerun; warm retry needs its exact skipped comparison route")
     packages = package_matrix(manifest)
     names = {f"packages ({row['target']}, {row['artifact']})": row for row in packages}
     desktops = {f"snap_desktops ({row['desktop']})": row["desktop"]
                 for row in manifest["targets"] if row.get("desktop")}
-    if by_name.keys() != build_jobs | names.keys() | desktops.keys() | {"attest", "Required verification complete"}:
+    final_names = {"Required verification complete", "Verification feedback complete"} & by_name.keys()
+    if len(final_names) != 1 or by_name.keys() != build_jobs | names.keys() | desktops.keys() | {"attest"} | final_names:
         raise ValueError("Previous run did not execute the complete expected verification graph")
+    final_name = next(iter(final_names))
+    if build_jobs == BUILD_JOBS:
+        if (not isinstance(plan, dict) or plan.get("profile") != "FULL"
+                or plan.get("complete") != "true" or plan.get("sha") != run["head_sha"]
+                or plan.get("run_id") != str(run.get("id"))
+                or plan.get("run_attempt") != str(run.get("run_attempt"))):
+            raise ValueError("Retry requires the exact original FULL plan and attempt")
     if any(by_name[name].get("conclusion") not in {"success", "failure"}
-           for name in names.keys() | desktops.keys() | {"attest", "Required verification complete"}):
+           for name in names.keys() | desktops.keys() | {"attest", final_name}):
         raise ValueError("Cancelled, skipped or missing checks cannot be reused")
     failed_packages = [row for name, row in names.items() if by_name[name]["conclusion"] == "failure"]
     failed_desktops = [desktop for name, desktop in desktops.items() if by_name[name]["conclusion"] == "failure"]
     if not failed_packages and not failed_desktops:
         raise ValueError("No failed platform checks to retry")
     available = [row["name"] for row in artifacts if not row.get("expired")]
-    for name in PACKAGE_ARTIFACTS | {"licasa-verification-evidence"}:
+    required_artifacts = PACKAGE_ARTIFACTS | {"licasa-verification-evidence"}
+    if build_jobs == BUILD_JOBS:
+        required_artifacts.add("verification-plan")
+    for name in required_artifacts:
         if available.count(name) != 1:
             raise ValueError(f"Missing, expired or ambiguous retained artifact: {name}")
     return {"sha": run["head_sha"], "matrix": failed_packages, "desktops": failed_desktops,
@@ -136,6 +153,7 @@ def main() -> None:
     plan.add_argument("--jobs", type=Path, required=True)
     plan.add_argument("--artifacts", type=Path, required=True)
     plan.add_argument("--github-output", type=Path, required=True)
+    plan.add_argument("--plan", type=Path)
     prepare = sub.add_parser("prepare-evidence")
     prepare.add_argument("--evidence", type=Path, required=True)
     prepare.add_argument("--targets", required=True)
@@ -153,7 +171,8 @@ def main() -> None:
             or artifacts.get("total_count") != len(artifacts["artifacts"])):
         raise ValueError("Run metadata is mismatched or incomplete; no checks can be reused")
     result = retry_plan(run, jobs["jobs"], artifacts["artifacts"],
-                        repository=os.environ["GITHUB_REPOSITORY"], branch=os.environ["GITHUB_REF_NAME"])
+                        repository=os.environ["GITHUB_REPOSITORY"], branch=os.environ["GITHUB_REF_NAME"],
+                        plan=json.loads(args.plan.read_text()) if args.plan else None)
     validate_verifier(result["sha"], os.environ["GITHUB_SHA"])
     def original(path):
         return subprocess.check_output(["git", "show", f"{result['sha']}:{path}"], cwd=ROOT, text=True)

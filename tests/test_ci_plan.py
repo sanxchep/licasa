@@ -14,7 +14,7 @@ from build_ci_dependencies import command_for
 from check_support_manifest import load_manifest
 from ci_plan import check_results, make_plan, package_matrix
 
-JOBS = {"plan", "package_contract", "test", "ubuntu", "debian", "wrappers",
+JOBS = {"plan", "public_files", "rpm_preflight", "package_contract", "test", "ubuntu", "debian", "wrappers",
         "snap", "packages", "snap_desktops", "attest"}
 
 
@@ -39,35 +39,32 @@ class CiPlanTests(unittest.TestCase):
         self.assertEqual(plan["build"], "false")
         self.assertEqual(plan["packages"], "false")
         rows = results(plan)
-        for name in JOBS - {"plan", "package_contract"}:
+        for name in JOBS - {"plan", "public_files", "package_contract"}:
             rows[name]["result"] = "skipped"
-        self.assertEqual(set(check_results(rows)), {"plan", "package_contract"})
+        self.assertEqual(set(check_results(rows)), {"plan", "public_files", "package_contract"})
 
-    def test_runtime_pr_keeps_both_native_package_contracts(self):
+    def test_runtime_pr_requires_the_full_source_and_platform_contract(self):
         for path in ("src/main.cpp", "qml/OpenDialog.qml", "packaging/build-deb.Dockerfile",
                      ".github/workflows/ci.yml", "tools/ci_plan.py", "tests/test_ci_plan.py"):
             with self.subTest(path=path):
                 plan = make_plan("pull_request", False, [path])
-                self.assertEqual(plan["build"], "true")
-                self.assertEqual(plan["packages"], "true")
-                self.assertEqual(json.loads(plan["presets"]), ["release"])
-                rows = results(plan)
-                for name in ("wrappers", "snap", "packages", "snap_desktops", "attest"):
-                    rows[name]["result"] = "skipped"
-                self.assertEqual(set(check_results(rows)),
-                                 {"plan", "package_contract", "test", "ubuntu", "debian"})
+                self.assertEqual(plan["complete"], "true")
+                self.assertEqual(json.loads(plan["presets"]), ["release", "asan", "ubsan"])
+                self.assertEqual(set(check_results(results(plan))), JOBS)
 
-    def test_release_caller_retains_its_sanitizer_selection_without_recursive_packages(self):
-        plan = make_plan("workflow_dispatch", False, [], '["asan","ubsan"]')
-        self.assertEqual(json.loads(plan["presets"]), ["asan", "ubsan"])
+    def test_explicit_feedback_cannot_select_only_sanitizers(self):
+        plan = make_plan("workflow_dispatch", False, [], profile="FAST")
+        self.assertEqual(json.loads(plan["presets"]), ["release"])
         self.assertEqual(plan["packages"], "false")
+        with self.assertRaises(ValueError):
+            make_plan("workflow_dispatch", False, [], '["asan","ubsan"]', profile="FAST")
 
     def test_invalid_requests_fail_before_building(self):
         for selected in ('[]', '["release","release"]', '["unknown"]', '"release"', '[null]'):
             with self.subTest(selected=selected), self.assertRaises(ValueError):
                 make_plan("workflow_dispatch", False, [], selected)
         with self.assertRaises(ValueError):
-            make_plan("pull_request", True, ["src/main.cpp"])
+            make_plan("pull_request", True, ["src/main.cpp"], profile="unknown")
 
     def test_every_missing_failed_cancelled_or_skipped_full_gate_fails_completion(self):
         good = results(make_plan("workflow_dispatch", True, []))
@@ -125,10 +122,10 @@ class CiPlanTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
         final = workflow.split("  result:\n", 1)[1]
         dependency_names = set(re.search(r"needs: \[([^]]+)\]", final)[1].replace(" ", "").split(","))
-        self.assertEqual(dependency_names, JOBS)
+        self.assertEqual(dependency_names, JOBS | {"retry", "reproducibility"})
         for name in ("ubuntu", "debian"):
             block = workflow.split(f"  {name}:\n", 1)[1].split("\n  ", 1)[0]
-            self.assertIn("needs: [plan, package_contract]", block)
+            self.assertIn("needs: [plan, package_contract, rpm_preflight]", block)
             self.assertNotIn("test", re.search(r"needs: (.*)", block)[1])
         for removed in ("candidate_request", "candidate_verification", "candidate_result", "scope"):
             self.assertNotIn(f"\n  {removed}:\n", workflow)

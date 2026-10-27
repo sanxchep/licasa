@@ -19,6 +19,19 @@ on:
         type: boolean
         default: false
 
+      cold:
+        required: false
+        type: boolean
+        default: false
+      cache_scope:
+        required: false
+        type: string
+        default: trusted
+      retention_days:
+        required: false
+        type: number
+        default: 90
+
 permissions:
   contents: read
 
@@ -51,8 +64,8 @@ jobs:
           pull: true
           push: false
           tags: licasa-verification:${{ inputs.target }}
-          cache-from: type=gha,scope=package-ci-${{ inputs.target }}
-          cache-to: type=gha,scope=package-ci-${{ inputs.target }},mode=min,ignore-error=true
+          cache-from: ${{ !inputs.cold && format('type=gha,scope=package-ci-{0}-{1}', inputs.cache_scope, inputs.target) || '' }}
+          cache-to: ${{ !inputs.cold && format('type=gha,scope=package-ci-{0}-{1},mode=min,ignore-error=true', inputs.cache_scope, inputs.target) || '' }}
       - name: Check native container test and report contracts
         env:
           TARGET: ${{ inputs.target }}
@@ -63,11 +76,12 @@ jobs:
               python3 -B /source/tests/test_dialog_recovery.py -v
             '
       - name: Restore only exact native dependency outputs
+        if: ${{ !inputs.cold }}
         id: dependencies
         uses: actions/cache@v5
         with:
           path: build/ci-package-dependencies/${{ inputs.target }}
-          key: package-ci-deps-v1-${{ inputs.target }}-${{ runner.arch }}-${{ steps.builder.outputs.imageid }}-${{ hashFiles('packaging/*.lock.json', 'packaging/patches/**', 'packaging/qt-runtime-modules.json', 'packaging/verify-fresh-build.sh', 'tools/build_codecs.py', 'tools/build_qt_backport.py', 'tools/build_qt_ffmpeg.py', 'tools/verify_qt_ffmpeg_wakeup.py', 'tools/build_ubuntu_deb.py', 'tools/build_debian_deb.py', 'tools/build_ci_packages.py', 'tools/source_cache.py', 'tools/runtime_profiles.py', 'tools/qt_runtime.py', 'cmake/strip_codec_rpath.cmake', 'cmake/LicasaRuntimeProfiles.cmake') }}
+          key: package-ci-deps-v2-${{ inputs.cache_scope }}-${{ inputs.target }}-${{ runner.arch }}-${{ steps.builder.outputs.imageid }}-${{ hashFiles('packaging/codecs.lock.json', 'packaging/qt-backport.lock.json', 'packaging/qt-ffmpeg.lock.json', 'packaging/qt-ffmpeg-debian.lock.json', 'packaging/patches/**', 'packaging/qt-runtime-modules.json', 'packaging/verify-fresh-build.sh', 'tools/build_codecs.py', 'tools/build_qt_backport.py', 'tools/build_qt_ffmpeg.py', 'tools/verify_qt_ffmpeg_wakeup.py', 'tools/build_ubuntu_deb.py', 'tools/build_debian_deb.py', 'tools/build_ci_packages.py', 'tools/source_cache.py', 'tools/runtime_profiles.py', 'tools/qt_runtime.py', 'cmake/strip_codec_rpath.cmake', 'cmake/LicasaRuntimeProfiles.cmake') }}
       - name: Build and test the canonical native runtime and packages
         env:
           TARGET: ${{ inputs.target }}
@@ -107,6 +121,19 @@ jobs:
               ;;
           esac
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - name: Verify packaged ELF hardening behind the launcher
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -o pipefail
+          docker run --rm --network none -v "$PWD:/source:ro" \
+            -v "$PWD/build/candidate-native/$TARGET:/packages:ro" \
+            "licasa-verification:$TARGET" bash -ec '
+              packages=(/packages/licasa_*.deb)
+              test "${#packages[@]}" = 1
+              dpkg-deb -x "${packages[0]}" /tmp/licasa-package
+              python3 /source/tools/check_hardening.py /tmp/licasa-package/usr/bin/licasa.bin
+            ' | tee build/candidate-build-reports/hardening.json
       - name: Exercise pull-request package contracts
         if: inputs.pr_checks
         env:
@@ -139,7 +166,7 @@ jobs:
         with:
           name: ${{ inputs.artifact }}
           path: build/candidate-packages/
-          retention-days: 90
+          retention-days: ${{ inputs.retention_days }}
           if-no-files-found: error
           compression-level: 0
       - uses: actions/upload-artifact@v7
@@ -150,5 +177,5 @@ jobs:
             build/candidate-build-reports/
             build/candidate-native/${{ inputs.target }}/*.json
             build/candidate-native/${{ inputs.target }}/qt-runtime-memory/
-          retention-days: 90
+          retention-days: ${{ inputs.retention_days }}
           if-no-files-found: error

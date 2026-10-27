@@ -49,7 +49,7 @@ class SourceWorkflowTests(unittest.TestCase):
             self.assertEqual(source_presets(json.dumps(selected)), selected)
 
     def test_completion_rejects_each_missing_failed_cancelled_or_skipped_gate(self):
-        good = {name: {"result": "success"} for name in ("plan", "quick", "test")}
+        good = {name: {"result": "success"} for name in ("plan", "quick", "core", "test")}
         self.assertEqual(set(check_source_results(good)), set(good))
         for name in good:
             for status in ("failure", "cancelled", "skipped", "", None):
@@ -62,7 +62,7 @@ class SourceWorkflowTests(unittest.TestCase):
                     check_source_results(changed)
 
     def test_completion_command_fails_closed_on_serialized_needs(self):
-        needs = {name: {"result": "success"} for name in ("plan", "quick", "test")}
+        needs = {name: {"result": "success"} for name in ("plan", "quick", "core", "test")}
         for status, expected in (("success", 0), ("skipped", 1), ("failure", 1), ("cancelled", 1)):
             needs["test"]["result"] = status
             with self.subTest(status=status):
@@ -72,10 +72,10 @@ class SourceWorkflowTests(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stderr)
 
     def test_validation_precedes_expensive_work_and_completion_always_runs(self):
-        self.assertEqual(set(self.jobs), {"plan", "quick", "test", "result"})
+        self.assertEqual(set(self.jobs), {"plan", "quick", "core", "test", "result"})
         self.assertEqual(self.jobs["quick"]["needs"], "plan")
         self.assertEqual(set(self.jobs["test"]["needs"]), {"plan", "quick"})
-        self.assertEqual(set(self.jobs["result"]["needs"]), {"plan", "quick", "test"})
+        self.assertEqual(set(self.jobs["result"]["needs"]), {"plan", "quick", "core", "test"})
         self.assertEqual(self.jobs["result"]["if"], "${{ always() }}")
         for job in self.jobs.values():
             checkout = job["steps"][0]
@@ -86,18 +86,17 @@ class SourceWorkflowTests(unittest.TestCase):
         self.assertEqual(plan["env"]["SOURCE_SHA"], "${{ inputs.source_ref }}")
         self.assertEqual(plan["env"]["PRESETS"], "${{ inputs.presets }}")
 
-    def test_both_callers_share_source_steps_and_the_release_keeps_both_sanitizers(self):
-        for name, job_id in (("ci.yml", "test"), ("snapcraft-build.yml", "verify_sanitizers")):
-            workflow = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
-            call = workflow["jobs"][job_id]
-            with self.subTest(workflow=name):
-                self.assertEqual(call["uses"], "./.github/workflows/verify-source.yml")
-                self.assertNotIn("steps", call)
-            if name == "snapcraft-build.yml":
-                self.assertEqual(json.loads(call["with"]["presets"]), ["asan", "ubsan"])
-        matrix = self.jobs["test"]["strategy"]
-        self.assertFalse(matrix["fail-fast"])
-        self.assertEqual(matrix["matrix"]["preset"], "${{ fromJSON(needs.plan.outputs.presets) }}")
+    def test_ci_and_release_use_the_same_complete_graph(self):
+        ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        release = yaml.safe_load((ROOT / ".github/workflows/snapcraft-build.yml").read_text())
+        self.assertEqual(ci["jobs"]["test"]["uses"], "./.github/workflows/verify-source.yml")
+        call = release["jobs"]["verify_sanitizers"]
+        self.assertEqual(call["uses"], "./.github/workflows/ci.yml")
+        self.assertEqual(call["with"]["profile"], "FULL")
+        self.assertNotIn("steps", call)
+        self.assertFalse(self.jobs["test"]["strategy"]["fail-fast"])
+        self.assertEqual(self.jobs["test"]["strategy"]["matrix"]["preset"],
+                         "${{ fromJSON(needs.plan.outputs.presets) }}")
 
     def test_shared_runtime_transfer_preserves_executable_and_symlink(self):
         quick_steps = self.jobs["quick"]["steps"]
@@ -130,7 +129,7 @@ class SourceWorkflowTests(unittest.TestCase):
                        if step.get("name") == "Restore exact private dependencies")
         self.assertIn("${{ matrix.preset }}", private["key"])
         self.assertIn("${{ steps.toolchain.outputs.digest }}", private["key"])
-        self.assertIn("packaging/*.lock.json", private["key"])
+        self.assertIn("packaging/codecs.lock.json", private["key"])
         self.assertNotIn("restore-keys", private)
         fingerprint = next(step for step in steps
                            if step.get("name") == "Fingerprint the installed dependency toolchain")
@@ -144,7 +143,7 @@ class SourceWorkflowTests(unittest.TestCase):
         local = next(step for step in steps if step.get("id") == "quick_dependencies")
         producer = next(step for step in self.jobs["quick"]["steps"]
                         if step.get("id") == "dependencies")
-        self.assertEqual(local["if"], "steps.toolchain.outputs.shared_runtime == 'false'")
+        self.assertEqual(local["if"], "${{ !inputs.cold && steps.toolchain.outputs.shared_runtime == 'false' }}")
         self.assertEqual(local["with"], producer["with"])
         self.assertNotIn("restore-keys", local["with"])
         builder = next(step for step in steps
@@ -265,7 +264,9 @@ class ToolchainRuntimeWorkflowTests(unittest.TestCase):
         """Resolve only the explicit output comparisons used by these runtime steps."""
         values = {"toolchain.shared_runtime": outputs["shared_runtime"],
                   "quick_dependencies.cache-hit": cache_hit}
-        for term in step.get("if", "").split(" && "):
+        condition = step.get("if", "").removeprefix("${{ ").removesuffix(" }}")
+        condition = condition.removeprefix("!inputs.cold && ")
+        for term in condition.split(" && "):
             if not term:
                 continue
             match = re.fullmatch(r"steps\.([a-z_]+)\.outputs\.([a-z_-]+) (==|!=) '(true|false)'", term)

@@ -12,6 +12,18 @@ on:
         required: false
         type: string
         default: '["release","asan","ubsan"]'
+      cold:
+        required: false
+        type: boolean
+        default: false
+      cache_scope:
+        required: false
+        type: string
+        default: trusted
+      retention_days:
+        required: false
+        type: number
+        default: 90
 
 permissions:
   contents: read
@@ -64,11 +76,12 @@ jobs:
           printf 'Shared Qt producer toolchain: %s\n' "$digest"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Restore exact shared Qt runtime
+        if: ${{ !inputs.cold }}
         id: dependencies
         uses: actions/cache@v5
         with:
           path: build/deps/qt-backport-runtime
-          key: source-quick-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('packaging/qt-backport.lock.json', 'packaging/patches/**', 'tools/build_ci_dependencies.py', 'tools/build_qt_backport.py', 'tools/runtime_profiles.py', 'tools/source_cache.py') }}
+          key: source-quick-v2-${{ inputs.cache_scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('packaging/qt-backport.lock.json', 'packaging/patches/**', 'tools/build_ci_dependencies.py', 'tools/build_qt_backport.py', 'tools/runtime_profiles.py', 'tools/source_cache.py') }}
       - name: Build the identical Release Qt runtime once
         if: steps.dependencies.outputs.cache-hit != 'true'
         run: python3 tools/build_ci_dependencies.py quick --jobs "$(nproc)"
@@ -78,7 +91,7 @@ jobs:
         with:
           name: verification-qt-quick
           path: build/quick-runtime.tar.gz
-          retention-days: 7
+          retention-days: ${{ inputs.retention_days }}
           if-no-files-found: error
       - name: Retain the shared runtime toolchain inventory
         uses: actions/upload-artifact@v7
@@ -86,7 +99,86 @@ jobs:
         with:
           name: verification-toolchain-quick
           path: build/toolchain/
-          retention-days: 7
+          retention-days: ${{ inputs.retention_days }}
+
+  core:
+    needs: [plan, quick]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - name: Install the source-check toolchain
+        run: sudo bash tools/install_ci_dependencies.sh
+      - name: Fingerprint the installed dependency toolchain
+        id: toolchain
+        env:
+          EXPECTED_TOOLCHAIN: ${{ needs.quick.outputs.toolchain }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/toolchain
+          dpkg-query -W -f='${Package}=${Version}\n' | LC_ALL=C sort > build/toolchain/packages.txt
+          test -s build/toolchain/packages.txt
+          digest="$(sha256sum build/toolchain/packages.txt | cut -d' ' -f1)"
+          printf '%s\n' "$digest" > build/toolchain/digest.txt
+          printf '%s\n' "$EXPECTED_TOOLCHAIN" > build/toolchain/producer-digest.txt
+          [[ "$EXPECTED_TOOLCHAIN" =~ ^[0-9a-f]{64}$ ]]
+          printf 'Current toolchain: %s\nShared Qt producer toolchain: %s\n' "$digest" "$EXPECTED_TOOLCHAIN"
+          if [ "$digest" = "$EXPECTED_TOOLCHAIN" ]; then
+            shared_runtime=true
+            echo 'Using the shared Qt runtime: installed package inventories match exactly.'
+            echo shared > build/toolchain/runtime-source.txt
+          else
+            shared_runtime=false
+            echo 'Runner inventories differ; using only a Qt cache or build for the current toolchain.'
+            echo local > build/toolchain/runtime-source.txt
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "shared_runtime=$shared_runtime" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v8
+        if: steps.toolchain.outputs.shared_runtime == 'true'
+        with:
+          name: verification-qt-quick
+          path: build/shared-runtime
+      - name: Restore the same verified Qt runtime
+        if: steps.toolchain.outputs.shared_runtime == 'true'
+        run: |
+          mkdir -p build/deps
+          tar -C build/deps -xzf build/shared-runtime/quick-runtime.tar.gz
+      - name: Restore exact runner-local Qt runtime
+        if: ${{ !inputs.cold && steps.toolchain.outputs.shared_runtime == 'false' }}
+        id: quick_dependencies
+        uses: actions/cache@v5
+        with:
+          path: build/deps/qt-backport-runtime
+          # Reuse only the identical recipe and current installed-package inventory.
+          key: source-quick-v2-${{ inputs.cache_scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('packaging/qt-backport.lock.json', 'packaging/patches/**', 'tools/build_ci_dependencies.py', 'tools/build_qt_backport.py', 'tools/runtime_profiles.py', 'tools/source_cache.py') }}
+      - name: Build Qt for the current runner toolchain
+        if: steps.toolchain.outputs.shared_runtime == 'false' && steps.quick_dependencies.outputs.cache-hit != 'true'
+        run: python3 tools/build_ci_dependencies.py quick --jobs "$(nproc)"
+      - name: Require the selected Qt runtime before configuring tests
+        run: test -s build/deps/qt-backport-runtime/libQt6Quick.so.6.4.2
+      - name: Configure and verify the core source profile
+        run: |
+          cmake -S . -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+            -DLICASA_BUILD_DIAGNOSTICS=ON -DLICASA_ENABLE_HEIF=OFF -DLICASA_ENABLE_JXL=OFF \
+            -DLICASA_ENABLE_RAW=OFF -DLICASA_ENABLE_AVIF=OFF -DLICASA_ENABLE_APNG=OFF \
+            -DLICASA_ENABLE_MOTION_PLAYBACK=OFF -DLICASA_ENABLE_JP2=OFF \
+            -DLICASA_QT_QUICK_BACKPORT_LIBRARY="$PWD/build/deps/qt-backport-runtime/libQt6Quick.so.6.4.2"
+          cmake --build build/core --parallel "$(nproc)"
+          cmake --build build/core --target all_qmllint --parallel 2
+          ctest --test-dir build/core --output-on-failure
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: verification-core
+          path: |
+            build/toolchain/
+            build/core/Testing/Temporary/LastTest.log
+          retention-days: ${{ inputs.retention_days }}
+          if-no-files-found: error
 
   test:
     needs: [plan, quick]
@@ -139,31 +231,33 @@ jobs:
           mkdir -p build/deps
           tar -C build/deps -xzf build/shared-runtime/quick-runtime.tar.gz
       - name: Restore exact runner-local Qt runtime
-        if: steps.toolchain.outputs.shared_runtime == 'false'
+        if: ${{ !inputs.cold && steps.toolchain.outputs.shared_runtime == 'false' }}
         id: quick_dependencies
         uses: actions/cache@v5
         with:
           path: build/deps/qt-backport-runtime
           # Reuse only the identical recipe and current installed-package inventory.
-          key: source-quick-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('packaging/qt-backport.lock.json', 'packaging/patches/**', 'tools/build_ci_dependencies.py', 'tools/build_qt_backport.py', 'tools/runtime_profiles.py', 'tools/source_cache.py') }}
+          key: source-quick-v2-${{ inputs.cache_scope }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('packaging/qt-backport.lock.json', 'packaging/patches/**', 'tools/build_ci_dependencies.py', 'tools/build_qt_backport.py', 'tools/runtime_profiles.py', 'tools/source_cache.py') }}
       - name: Build Qt for the current runner toolchain
         if: steps.toolchain.outputs.shared_runtime == 'false' && steps.quick_dependencies.outputs.cache-hit != 'true'
         run: python3 tools/build_ci_dependencies.py quick --jobs "$(nproc)"
       - name: Require the selected Qt runtime before configuring tests
         run: test -s build/deps/qt-backport-runtime/libQt6Quick.so.6.4.2
       - name: Restore exact private dependencies
+        if: ${{ !inputs.cold }}
         id: dependencies
         uses: actions/cache@v5
         with:
           path: build/codecs/prefix
           # No fallback keys: release/ASan/UBSan and ABI revisions stay separate.
-          key: source-codecs-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.preset }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('packaging/*.lock.json', 'packaging/patches/**', 'tools/build_codecs.py', 'tools/build_qt_backport.py', 'tools/runtime_profiles.py', 'tools/qt_runtime.py', 'packaging/qt-runtime-modules.json', 'cmake/LicasaRuntimeProfiles.cmake', 'tools/source_cache.py', 'cmake/strip_codec_rpath.cmake', 'tools/build_ci_dependencies.py') }}
+          key: source-codecs-v3-${{ inputs.cache_scope }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.preset }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('packaging/codecs.lock.json', 'packaging/qt-backport.lock.json', 'packaging/qt-ffmpeg.lock.json', 'packaging/qt-ffmpeg-debian.lock.json', 'packaging/patches/**', 'tools/build_codecs.py', 'tools/build_qt_backport.py', 'tools/runtime_profiles.py', 'tools/qt_runtime.py', 'packaging/qt-runtime-modules.json', 'cmake/LicasaRuntimeProfiles.cmake', 'tools/source_cache.py', 'cmake/strip_codec_rpath.cmake', 'tools/build_ci_dependencies.py') }}
       - name: Cache compiler outputs
+        if: ${{ !inputs.cold }}
         uses: actions/cache@v5
         with:
           path: ~/.cache/ccache
-          key: native-ccache-v1-${{ runner.arch }}-${{ matrix.preset }}-${{ steps.toolchain.outputs.digest }}-${{ github.sha }}-${{ github.run_id }}
-          restore-keys: native-ccache-v1-${{ runner.arch }}-${{ matrix.preset }}-${{ steps.toolchain.outputs.digest }}-
+          key: native-ccache-v2-${{ inputs.cache_scope }}-${{ runner.arch }}-${{ matrix.preset }}-${{ steps.toolchain.outputs.digest }}-${{ github.sha }}-${{ github.run_id }}
+          restore-keys: native-ccache-v2-${{ inputs.cache_scope }}-${{ runner.arch }}-${{ matrix.preset }}-${{ steps.toolchain.outputs.digest }}-
       - name: Configure bounded compiler caching
         run: |
           ccache --max-size=400M
@@ -174,14 +268,29 @@ jobs:
         env:
           PRESET: ${{ matrix.preset }}
         run: python3 tools/build_ci_dependencies.py codecs --preset "$PRESET" --jobs "$(nproc)"
+      - name: Restore exact matching FFmpeg plugin
+        if: ${{ !inputs.cold }}
+        id: ffmpeg
+        uses: actions/cache@v5
+        with:
+          path: build/deps/${{ matrix.preset }}/qt-ffmpeg-runtime-*
+          key: source-ffmpeg-v1-${{ inputs.cache_scope }}-${{ matrix.preset }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('packaging/qt-ffmpeg*.lock.json', 'packaging/patches/**', 'tools/build_qt_ffmpeg.py', 'tools/verify_qt_ffmpeg_wakeup.py', 'tools/runtime_profiles.py', 'tools/source_cache.py') }}
+      - name: Build the matching instrumented media backend
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        env:
+          PRESET: ${{ matrix.preset }}
+        run: python3 tools/build_ci_dependencies.py ffmpeg --preset "$PRESET" --jobs "$(nproc)"
       - name: Configure the application and matching sanitizer tests
         run: |
           cmake --preset ${{ matrix.preset }} \
             -DLICASA_ENABLE_HEIF=ON -DLICASA_ENABLE_JXL=ON -DLICASA_ENABLE_RAW=ON \
             -DLICASA_ENABLE_AVIF=ON -DLICASA_ENABLE_APNG=ON \
+            -DLICASA_ENABLE_JP2=ON -DLICASA_ENABLE_MOTION_PLAYBACK=ON \
+            -DLICASA_QT_FFMPEG_PLUGIN="$PWD/build/deps/${{ matrix.preset }}/qt-ffmpeg-runtime-${{ matrix.preset == 'asan' && 'address' || matrix.preset == 'ubsan' && 'undefined' || 'release' }}/libffmpegmediaplugin.so" \
             -DCMAKE_PREFIX_PATH="$PWD/build/codecs/prefix" \
             -DLICASA_QT_QUICK_BACKPORT_LIBRARY="$PWD/build/deps/qt-backport-runtime/libQt6Quick.so.6.4.2"
       - run: cmake --build --preset ${{ matrix.preset }} --parallel "$(nproc)"
+      - run: cmake --build --preset ${{ matrix.preset }} --target all_qmllint --parallel 2
       - run: ctest --preset ${{ matrix.preset }}
       - name: Verify installed release
         if: matrix.preset == 'release'
@@ -197,7 +306,8 @@ jobs:
         if: always()
         with:
           name: verification-${{ matrix.preset }}
-          retention-days: 7
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
           path: |
             build/toolchain/
             build/${{ matrix.preset }}/Testing/Temporary/LastTest.log
@@ -209,7 +319,7 @@ jobs:
 
   result:
     name: Source verification complete
-    needs: [plan, quick, test]
+    needs: [plan, quick, core, test]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

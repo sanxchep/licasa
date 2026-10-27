@@ -50,7 +50,7 @@ class HostedCandidateTests(unittest.TestCase):
         self.assertIn("always()", result)
         self.assertIn("CI_RESULTS: ${{ toJSON(needs) }}", result)
         self.assertIn("python3 tools/ci_plan.py check", result)
-        self.assertIn("SOURCE_SHA: ${{ inputs.source_ref || github.sha }}", workflow)
+        self.assertIn("SOURCE_SHA: ${{ inputs.source_ref || (github.event_name == 'workflow_dispatch' && inputs.expected_sha) || github.sha }}", workflow)
         self.assertIn("EXPECTED_SHA: ${{ inputs.expected_sha }}", workflow)
         self.assertIn("${{ fromJSON(needs.plan.outputs.matrix) }}", workflow)
         self.assertIn("desktop: [gnome, kde]", workflow)

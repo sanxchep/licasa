@@ -33,54 +33,60 @@ def source_plan(source_sha: str, actual_sha: str, dirty: str, presets: str,
 
 
 def check_source_results(needs: dict) -> list[str]:
-    required = {"plan", "quick", "test"}
+    required = {"plan", "quick", "core", "test"}
     failed = sorted(name for name in required if needs.get(name, {}).get("result") != "success")
     if failed:
         raise ValueError("Required source verification did not pass: " + ", ".join(failed))
     return sorted(required)
 
 
-def make_plan(event: str, complete: bool, changed_paths: list[str], presets: str = "") -> dict:
-    if complete and event != "workflow_dispatch":
-        raise ValueError("Complete candidate verification requires manual dispatch")
+def make_plan(event: str, complete: bool, changed_paths: list[str], presets: str = "",
+              *, profile: str = "") -> dict:
+    if not profile:
+        profile = "FULL" if complete or event != "pull_request" else (
+            "DOCS" if changed_paths and all(p in {"README.md", "LICENSE"} for p in changed_paths)
+            else "FULL")
+    if profile not in {"FULL", "FAST", "DOCS", "NONE"}:
+        raise ValueError("Unknown verification profile")
     selected = source_presets(presets or json.dumps(
-        ["release"] if event == "pull_request" else ["release", "asan", "ubsan"]))
-    if complete and set(selected) != {"release", "asan", "ubsan"}:
-        raise ValueError("Complete candidate verification requires all three source presets")
-    build = event != "pull_request" or any(
-        path and not (path.endswith(".md") or path == "LICENSE") for path in changed_paths)
-    packages = complete or (event == "pull_request" and any(
-        path and not path.endswith(".md") and (
-            path.startswith(("src/", "qml/", "cmake/", "packaging/", "snap/", "tools/",
-                             "tests/", ".github/workflows/", "assets/icons/"))
-            or path in {"CMakeLists.txt", "CMakePresets.json", "assets/licasa.png"})
-        for path in changed_paths))
-    return {"build": str(build).lower(), "packages": str(packages).lower(),
-            "complete": str(complete).lower(), "presets": json.dumps(selected)}
+        ["release", "asan", "ubsan"] if profile == "FULL" else ["release"]))
+    if profile == "FULL" and set(selected) != {"release", "asan", "ubsan"}:
+        raise ValueError("Full verification requires all three source presets")
+    if profile != "FULL" and selected != ["release"]:
+        raise ValueError("Reduced verification cannot masquerade as a full source matrix")
+    return {"profile": profile, "build": str(profile in {"FAST", "FULL"}).lower(),
+            "packages": str(profile == "FULL").lower(),
+            "complete": str(profile == "FULL").lower(), "presets": json.dumps(selected)}
 
 
 def check_results(needs: dict) -> list[str]:
     if needs.get("plan", {}).get("result") != "success":
         raise ValueError("CI planning did not succeed")
     outputs = needs["plan"].get("outputs", {})
-    for name in ("build", "packages", "complete"):
-        if outputs.get(name) not in {"true", "false"}:
-            raise ValueError(f"Missing or invalid CI plan output: {name}")
-    if outputs["complete"] == "true" and (
-            outputs["build"] != "true" or outputs["packages"] != "true"):
-        raise ValueError("Complete verification cannot omit source or package builds")
-    required = {"plan", "package_contract"}
-    if outputs["build"] == "true":
+    profile = outputs.get("profile")
+    if profile not in {"FULL", "FAST", "DOCS", "NONE"}:
+        raise ValueError("Missing or invalid verification profile")
+    expected = make_plan("completion", profile == "FULL", [], profile=profile)
+    if any(outputs.get(key) != expected[key] for key in ("build", "packages", "complete", "presets")):
+        raise ValueError("Contradictory verification plan")
+    required = {"plan"}
+    if profile != "NONE":
+        required.update(("public_files", "package_contract"))
+    if profile in {"FAST", "FULL"}:
         required.add("test")
-    if outputs["packages"] == "true":
-        required.update(("ubuntu", "debian"))
-    if outputs["complete"] == "true":
-        required.update(("wrappers", "snap", "packages", "snap_desktops", "attest"))
+    if profile == "FULL":
+        required.update(("rpm_preflight", "ubuntu", "debian", "wrappers", "snap",
+                         "packages", "snap_desktops", "attest"))
+    if profile == "FULL" and outputs.get("cold") == "true":
+        required.add("reproducibility")
     failed = sorted(name for name in required if needs.get(name, {}).get("result") != "success")
     failed += sorted(name for name, job in needs.items()
                      if name not in required and job.get("result") not in {"success", "skipped"})
     if failed:
         raise ValueError("Required CI verification did not pass: " + ", ".join(failed))
+    # Draft/branch feedback never emits an eligible success for the merge-required gate.
+    if outputs.get("merge_eligible") == "true" and profile not in {"FULL", "DOCS"}:
+        raise ValueError("Reduced feedback does not satisfy merge verification")
     return sorted(required)
 
 

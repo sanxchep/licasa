@@ -2,6 +2,16 @@ name: Build and qualify Linux packages
 
 on:
   workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact reviewed main commit to qualify and publish as a prerelease
+        required: true
+        type: string
+      approve_prerelease:
+        description: Explicitly authorize Store edge and GitHub prerelease publication
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -9,6 +19,7 @@ permissions:
 concurrency:
   group: licasa-release
   cancel-in-progress: false
+  queue: max
 
 jobs:
   preflight:
@@ -22,6 +33,16 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: false
+      - name: Require explicit publication intent and exact reviewed main source
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          APPROVED: ${{ inputs.approve_prerelease }}
+        run: |
+          test "$APPROVED" = true
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
       - name: Check source, new version, stable grade, and notes
         id: version
         run: |
@@ -43,327 +64,96 @@ jobs:
             echo "Expected no existing GitHub Release; API returned $status" >&2
             exit 1
           fi
-      - name: Check source and installer contracts once before building
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-pil python3-gi python3-yaml gir1.2-glib-2.0 dbus-daemon libglib2.0-bin patchelf gcc clang-format-18
-          python3 tools/check_code_style.py
-          python3 tools/check_support_manifest.py
-          /usr/bin/python3 -B -m unittest discover -s tests -p 'test_*.py' -v
-          bash -n packaging/install-licasa-appimage.sh
-          bash -n tools/check_appimage_install.sh
-      - name: Check RPM dependency bootstrap and lifecycle before building
-        run: |
-          docker build -f packaging/build-rpm.Dockerfile -t licasa-rpm-builder:fedora44 packaging
-          python3 tools/verify_native_lifecycle.py --manager rpm --output build/rpm-contract
-      - name: Retain RPM preflight evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: rpm-preflight-contract
-          path: build/rpm-contract/
-          if-no-files-found: warn
-          retention-days: 90
-
   verify_sanitizers:
+    name: Verify the complete exact candidate
     needs: preflight
-    uses: ./.github/workflows/verify-source.yml
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: ./.github/workflows/ci.yml
     with:
       source_ref: ${{ github.sha }}
-      presets: '["asan","ubsan"]'
+      profile: FULL
 
-  build_ubuntu:
-    name: Ubuntu build and installation
+  stage_candidate:
     needs: [preflight, verify_sanitizers]
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-      - name: Require an ephemeral hosted VM
-        run: test "$RUNNER_ENVIRONMENT" = github-hosted
-      - uses: docker/setup-buildx-action@v3
-      - name: Cache the Ubuntu build environment
-        id: builder
-        uses: docker/build-push-action@v7
-        with:
-          context: packaging
-          file: packaging/build-deb.Dockerfile
-          load: true
-          pull: true
-          tags: licasa-deb-builder:release
-          cache-from: type=gha,scope=licasa-deb-builder
-          cache-to: type=gha,scope=licasa-deb-builder,mode=min,ignore-error=true
-      - name: Restore exact Ubuntu private dependencies
-        id: dependencies
-        uses: actions/cache/restore@v5
-        with:
-          path: |
-            build/release-dependencies/codecs
-            build/release-dependencies/quick
-            build/release-dependencies/ffmpeg
-          key: ubuntu-release-deps-v2-${{ runner.arch }}-${{ steps.builder.outputs.imageid }}-${{ hashFiles('packaging/*.lock.json', 'packaging/patches/**', 'tools/build_codecs.py', 'tools/build_qt_backport.py', 'tools/runtime_profiles.py', 'tools/qt_runtime.py', 'packaging/qt-runtime-modules.json', 'cmake/LicasaRuntimeProfiles.cmake', 'tools/build_qt_ffmpeg.py', 'tools/verify_qt_ffmpeg_wakeup.py', 'tools/build_ubuntu_deb.py', 'tools/source_cache.py', 'cmake/strip_codec_rpath.cmake', 'packaging/verify-fresh-build.sh') }}
-      - name: Build and test from a clean Ubuntu 24.04 image
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-          REUSE_DEPENDENCIES: ${{ steps.dependencies.outputs.cache-hit == 'true' }}
-        run: |
-          mkdir -p build/qualification/deb build/qualification/appimage
-          mkdir -p build/release-dependencies/{codecs,quick,ffmpeg}
-          docker run --rm -e LICASA_MAX_JOBS=3 -e LICASA_REUSE_DEPENDENCIES="$REUSE_DEPENDENCIES" \
-            -v "$PWD:/source:ro" -v "$PWD/build/qualification/deb:/output" \
-            -v "$PWD/build/release-dependencies/codecs:/work/licasa/build/codecs/release-prefix" \
-            -v "$PWD/build/release-dependencies/quick:/work/licasa/build/deps/qt-backport-runtime" \
-            -v "$PWD/build/release-dependencies/ffmpeg:/work/licasa/build/deps/qt-ffmpeg-runtime-release" \
-            licasa-deb-builder:release bash /source/packaging/verify-fresh-build.sh
-          mv "build/qualification/deb/Licasa-${VERSION}-x86_64.AppImage" \
-            "build/qualification/deb/Licasa-${VERSION}-x86_64.AppImage.sha256" \
-            build/qualification/appimage/
-          docker run --rm -e VERSION="$VERSION" -v "$PWD:/source:ro" \
-            -v "$PWD/build/qualification/deb:/output:ro" \
-            licasa-deb-builder:release bash -ec '
-              dpkg-deb --extract "/output/licasa_${VERSION}-1_amd64.deb" /tmp/licasa-package
-              python3 /source/tools/check_hardening.py /tmp/licasa-package/usr/bin/licasa.bin'
-      - name: Save verified private dependencies before package installation checks
-        if: steps.dependencies.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            build/release-dependencies/codecs
-            build/release-dependencies/quick
-            build/release-dependencies/ffmpeg
-          key: ${{ steps.dependencies.outputs.cache-primary-key }}
-      - name: Install deb on clean Ubuntu and decode samples
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: python3 tools/verify_deb_container.py "build/qualification/deb/licasa_${VERSION}-1_amd64.deb"
-      - name: Save checked Ubuntu inputs for independent packaging
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          (cd build/qualification/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
-          test "$(dpkg-deb --field "build/qualification/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
-          (cd build/qualification/appimage && sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256")
-          mkdir -p dist/deb dist/appimage
-          git rev-parse HEAD > dist/deb/source-commit.txt
-          cp "build/qualification/deb/licasa_${VERSION}-1_amd64.deb" dist/deb/
-          cp "build/qualification/deb/licasa_${VERSION}-1_amd64.deb.sha256" dist/deb/
-          cp build/qualification/deb/install-smoke.json dist/deb/
-          cp "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage" dist/appimage/
-          cp "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256" dist/appimage/
-          cp dist/deb/source-commit.txt dist/appimage/
-          cp packaging/install-licasa-appimage.sh dist/appimage/
-          (cd dist/appimage && sha256sum install-licasa-appimage.sh > install-licasa-appimage.sh.sha256)
-      - uses: actions/upload-artifact@v7
-        with:
-          name: licasa-ubuntu-deb
-          path: dist/deb/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 90
-      - uses: actions/upload-artifact@v7
-        with:
-          name: licasa-appimage-input
-          path: dist/appimage/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 90
-
-  portable_packages:
-    name: AppImage, Fedora and Arch qualification
-    needs: [preflight, build_ubuntu]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-      - name: Require an ephemeral hosted VM
-        run: test "$RUNNER_ENVIRONMENT" = github-hosted
-      - uses: actions/download-artifact@v8
-        with:
-          name: licasa-ubuntu-deb
-          path: dist/deb
-      - uses: actions/download-artifact@v8
-        with:
-          name: licasa-appimage-input
-          path: build/qualification/appimage
-      - name: Verify transferred Ubuntu and AppImage inputs
-        id: verify_inputs
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          test "$(cat dist/deb/source-commit.txt)" = "$GITHUB_SHA"
-          test "$(cat build/qualification/appimage/source-commit.txt)" = "$GITHUB_SHA"
-          (cd dist/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
-          test "$(dpkg-deb --field "dist/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
-          (cd build/qualification/appimage && sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256" install-licasa-appimage.sh.sha256)
-          chmod 755 "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage" \
-            build/qualification/appimage/install-licasa-appimage.sh
-      - name: Verify AppImage on clean Ubuntu, Fedora, and Arch
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          python3 tools/verify_appimage_container.py "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage"
-          python3 tools/verify_appimage_fedora.py "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage"
-          python3 tools/verify_appimage_desktops.py "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage"
-      - name: Build and install Fedora and Arch packages
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          appimage="build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage"
-          python3 tools/package_rpm.py "$appimage"
-          python3 tools/verify_rpm_container.py \
-            "build/qualification/rpm/licasa-appimage-${VERSION}-1.fc44.x86_64.rpm"
-          python3 tools/package_arch.py "$appimage"
-          python3 tools/verify_arch_package.py \
-            "build/qualification/arch/licasa-appimage-${VERSION}-1-x86_64.pkg.tar.zst"
-      - name: Save checked portable packages and test reports
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          mkdir -p dist/appimage
-          cp "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage" dist/appimage/
-          cp "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256" dist/appimage/
-          cp build/qualification/appimage/source-commit.txt dist/appimage/
-          cp build/qualification/appimage/install-licasa-appimage.sh dist/appimage/
-          cp build/qualification/appimage/install-licasa-appimage.sh.sha256 dist/appimage/
-          cp build/qualification/appimage/install-smoke.json dist/appimage/
-          cp build/qualification/appimage/fedora-smoke.json dist/appimage/
-          cp build/qualification/appimage/desktop-smoke.json dist/appimage/
-          mkdir -p dist/rpm dist/arch
-          cp "build/qualification/rpm/licasa-appimage-${VERSION}-1.fc44.x86_64.rpm" dist/rpm/
-          cp "build/qualification/rpm/licasa-appimage-${VERSION}-1.fc44.x86_64.rpm.sha256" dist/rpm/
-          cp build/qualification/rpm/install-smoke.json dist/rpm/
-          cp "build/qualification/arch/licasa-appimage-${VERSION}-1-x86_64.pkg.tar.zst" dist/arch/
-          cp "build/qualification/arch/licasa-appimage-${VERSION}-1-x86_64.pkg.tar.zst.sha256" dist/arch/
-          cp build/qualification/arch/PKGBUILD dist/arch/
-          cp build/qualification/arch/PKGBUILD.sha256 dist/arch/
-          cp build/qualification/arch/native_lifecycle.py dist/arch/
-          cp build/qualification/arch/licasa.install dist/arch/
-          cp build/qualification/arch/licasa-lifecycle.hook dist/arch/
-          cp build/qualification/arch/PKGBUILD.sources.sha256 dist/arch/
-          (cd dist/arch && sha256sum --check PKGBUILD.sources.sha256)
-          cp build/qualification/arch/install-smoke.json dist/arch/
-      - uses: actions/upload-artifact@v7
-        with:
-          name: licasa-linux-amd64
-          path: dist/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 90
-
-  build_debian:
-    # This target is built wholly in Debian; never reuse the Ubuntu private ABI.
-    needs: [preflight, verify_sanitizers]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-      - name: Build the Debian 13 native environment
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          docker build --pull -f packaging/build-debian.Dockerfile -t licasa-debian13-builder packaging
-      - name: Build and test a fresh Debian source copy
-        run: |
-          mkdir -p build/qualification/debian13
-          docker run --rm -v "$PWD:/source:ro" \
-            -v "$PWD/build/qualification/debian13:/output" \
-            licasa-debian13-builder bash -ec '
-              set -o pipefail
-              mkdir -p /work/licasa
-              tar -C /source --exclude="./build*" --exclude="./cmake-build-*" \
-                --exclude="./.git" --exclude="./.idea" --exclude="./private-validation" \
-                --exclude="./CMakeUserPresets.json" -cf - . | tar -C /work/licasa -xf -
-              cd /work/licasa
-              python3 tools/build_debian_deb.py --jobs 3 --output-dir /output'
-      - name: Qualify installation and dialogs against Debian libraries
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          python3 tools/verify_deb_container.py \
-            "build/qualification/debian13/licasa_${VERSION}-1+deb13_amd64.deb" \
-            --target debian-13 --output build/qualification/debian13/install-smoke.json
-          git rev-parse HEAD > build/qualification/debian13/source-commit.txt
-      - uses: actions/upload-artifact@v7
-        with:
-          name: licasa-debian13-amd64
-          path: build/qualification/debian13/
-          if-no-files-found: error
-          retention-days: 90
-
-  build_snap:
-    # Repackage the checked Ubuntu payload alongside portable qualification.
-    needs: [preflight, build_ubuntu]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Require an ephemeral hosted VM
-        run: test "$RUNNER_ENVIRONMENT" = github-hosted
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
-          name: licasa-ubuntu-deb
-          path: build/verified-linux/deb
-      - name: Prepare the verified same-run Ubuntu payload
-        id: verify_inputs
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          test "$(cat build/verified-linux/deb/source-commit.txt)" = "$GITHUB_SHA"
-          (cd build/verified-linux/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
-          test "$(dpkg-deb --field "build/verified-linux/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
-          mkdir -p snap-input
-          cp "build/verified-linux/deb/licasa_${VERSION}-1_amd64.deb" snap-input/
-          cp "build/verified-linux/deb/licasa_${VERSION}-1_amd64.deb.sha256" snap-input/
-          cp build/verified-linux/deb/source-commit.txt snap-input/
-      - name: Build Snap in GitHub Actions
-        id: snapcraft
-        uses: snapcore/action-build@v1
-      - name: Install and test the built Snap
-        env:
-          SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          test -f "$SNAP_FILE"
-          sudo snap set system experimental.user-daemons=false
-          sudo snap install --dangerous "$SNAP_FILE"
-          python3 tools/verify_snap_install.py --version "$VERSION" \
-            --source-sha "$GITHUB_SHA" \
-            --output build/qualification/snap-local-smoke.json
-          mkdir -p dist/snap
-          cp "$SNAP_FILE" "dist/snap/licasa_${VERSION}_amd64.snap"
-          (cd dist/snap && sha256sum "licasa_${VERSION}_amd64.snap" \
-            > "licasa_${VERSION}_amd64.snap.sha256")
-          cp build/qualification/snap-local-smoke.json dist/snap/
-      - name: Retain failed Snap and verification evidence
-        if: failure() && steps.snapcraft.outcome == 'success'
-        uses: actions/upload-artifact@v7
+          name: verification-ubuntu-packages
+          path: dist
+      - uses: actions/download-artifact@v8
         with:
-          name: failed-snap-verification
+          name: verification-debian-packages
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: verification-portable-packages
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: verification-snap
+          path: dist/snap
+      - uses: actions/download-artifact@v8
+        with:
+          name: licasa-verification-evidence
+          path: build/full-evidence
+      - uses: actions/download-artifact@v8
+        with:
+          name: verification-result
+          path: build/full-evidence
+      - name: Require FULL gates and the exact already-qualified package bytes
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          python3 tools/ci_receipt.py check --receipt build/full-evidence/verification-result.json \
+            --source-sha "$SOURCE_SHA" --version "$VERSION"
+          python3 tools/qualification_evidence.py check --source-sha "$SOURCE_SHA" \
+            --build-run-id "$GITHUB_RUN_ID" --version "$VERSION" --packages dist --evidence build/full-evidence
+      - uses: actions/upload-artifact@v7
+        with:
+          name: licasa-linux-amd64
           path: |
-            ${{ steps.snapcraft.outputs.snap }}
-            build/qualification/snap-local-smoke*
-          if-no-files-found: warn
-          compression-level: 0
+            dist/deb/
+            dist/appimage/
+            dist/rpm/
+            dist/arch/
+          if-no-files-found: error
           retention-days: 90
+          compression-level: 0
+      - uses: actions/upload-artifact@v7
+        with:
+          name: licasa-debian13-amd64
+          path: dist/debian13/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
       - uses: actions/upload-artifact@v7
         with:
           name: licasa-snap-amd64
           path: dist/snap/
           if-no-files-found: error
+          retention-days: 90
           compression-level: 0
+      - uses: actions/upload-artifact@v7
+        with:
+          name: licasa-full-verification
+          path: build/full-evidence/
+          if-no-files-found: error
           retention-days: 90
 
   upload_snap_edge:
     # Keep every portable check before the first Store publication.
-    needs: [preflight, build_snap, portable_packages]
+    needs: [preflight, stage_candidate]
     runs-on: ubuntu-24.04
     environment: snap-beta
     timeout-minutes: 45
@@ -373,6 +163,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           name: licasa-snap-amd64
@@ -425,9 +216,10 @@ jobs:
           if-no-files-found: error
 
   github_prerelease:
-    needs: [preflight, build_debian, upload_snap_edge]
+    needs: [preflight, stage_candidate, upload_snap_edge]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    environment: snap-beta
     permissions:
       actions: read
       contents: write
@@ -435,6 +227,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
           fetch-depth: 0
       - uses: actions/download-artifact@v8
         with:
