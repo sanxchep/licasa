@@ -125,7 +125,7 @@ jobs:
             -v "$PWD/build/qualification/deb:/output:ro" \
             licasa-deb-builder:release bash -ec '
               dpkg-deb --extract "/output/licasa_${VERSION}-1_amd64.deb" /tmp/licasa-package
-              python3 /source/tools/check_hardening.py /tmp/licasa-package/usr/bin/licasa'
+              python3 /source/tools/check_hardening.py /tmp/licasa-package/usr/bin/licasa.bin'
       - name: Save verified private dependencies before package installation checks
         if: steps.dependencies.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5

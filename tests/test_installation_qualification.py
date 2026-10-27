@@ -2,10 +2,14 @@
 """Guard the minimal-runtime qualification boundary before desktop tools are added."""
 
 import ast
+import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +22,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DependencyRecipeTests(unittest.TestCase):
+    def test_release_hardening_inspects_the_packaged_elf_behind_its_launcher(self):
+        workflow = (ROOT / ".github/workflows/snapcraft-build.yml").read_text()
+        targets = re.findall(r"python3 /source/tools/check_hardening.py ([^\n]+)", workflow)
+        self.assertEqual(len(targets), 1)
+        target = shlex.split(targets[0].removesuffix("'"))[0]
+        self.assertTrue(target.startswith("/tmp/licasa-package/"))
+        with tempfile.TemporaryDirectory(prefix="licasa release hardening ") as temporary:
+            root = Path(temporary)
+            binary = root / "usr/bin/licasa.bin"
+            binary.parent.mkdir(parents=True)
+            compiler = shutil.which("cc")
+            self.assertIsNotNone(compiler, "The package-contract toolchain requires a C compiler")
+            subprocess.run([compiler, "-x", "c", "-", "-o", str(binary), "-fPIE", "-pie",
+                            "-Wl,-z,relro", "-Wl,-z,now"], input="int main(void) { return 0; }\n",
+                           text=True, capture_output=True, check=True, timeout=20)
+            launcher = binary.with_name("licasa")
+            launcher.write_text('#!/bin/sh\nexec "$(dirname "$0")/licasa.bin" "$@"\n')
+            selected = root / target.removeprefix("/tmp/licasa-package/")
+            result = subprocess.run([sys.executable, str(ROOT / "tools/check_hardening.py"), str(selected)],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertTrue(all(report["checks"].values()))
+            self.assertEqual(report["sha256"], hashlib.sha256(binary.read_bytes()).hexdigest())
+
     def test_wrapper_packages_cover_normal_launchers_and_recover_from_the_copied_apprun(self):
         for name in ("verify_rpm_container.py", "verify_arch_package.py"):
             with self.subTest(tool=name), tempfile.TemporaryDirectory() as temporary:
