@@ -1,6 +1,6 @@
 name: licasa
 title: Licasa
-version: '0.8.1'
+version: '0.9.0'
 summary: Fast, image-first photo viewer and editor
 description: |
   Licasa opens photographs in a focused, image-sized window. Browse, zoom,
