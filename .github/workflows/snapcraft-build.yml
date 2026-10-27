@@ -51,6 +51,7 @@ jobs:
           /usr/bin/python3 -B tests/test_appimage_packaging.py -v
           /usr/bin/python3 -B tests/test_package_qualification.py -v
           /usr/bin/python3 -B tests/test_installation_qualification.py -v
+          /usr/bin/python3 -B tests/test_snap_install_qualification.py -v
           /usr/bin/python3 -B tests/test_graphics_qualification.py -v
           /usr/bin/python3 -B tests/test_physical_graphics_qualification.py -v
           /usr/bin/python3 -B tests/test_support_contract.py -v
@@ -298,6 +299,17 @@ jobs:
           (cd dist/snap && sha256sum "licasa_${VERSION}_amd64.snap" \
             > "licasa_${VERSION}_amd64.snap.sha256")
           cp build/qualification/snap-local-smoke.json dist/snap/
+      - name: Retain failed Snap and verification evidence
+        if: failure() && steps.snapcraft.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: failed-snap-verification
+          path: |
+            ${{ steps.snapcraft.outputs.snap }}
+            build/qualification/snap-local-smoke*
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 90
       - uses: actions/upload-artifact@v7
         with:
           name: licasa-snap-amd64

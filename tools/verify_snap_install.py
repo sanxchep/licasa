@@ -16,6 +16,87 @@ from verify_installed_release import SAMPLES
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def viewer_probe_script(*, error_log: bool = False, startup_seconds: float = 12) -> str:
+    """Exercise GUI startup/logging separately from the headless control path."""
+    script = r'''
+set -eu
+work=$(mktemp -d)
+state=
+viewer=
+cleanup() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ -n "$viewer" ]; then
+        kill "$viewer" 2>/dev/null || true
+        wait "$viewer" 2>/dev/null || true
+    fi
+    cat "$work/viewer.log" >&2 2>/dev/null || true
+    if [ -n "$state" ]; then
+        cat "$state/licasa/errors.log" >&2 2>/dev/null || true
+        rm -rf -- "$state"
+    fi
+    rm -rf -- "$work"
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
+export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
+mkdir -m 700 "$work/runtime"
+export XDG_RUNTIME_DIR="$work/runtime"
+'''
+    if error_log:
+        script += r'''
+mkdir -p "$SNAP_USER_DATA/.local/state"
+state=$(mktemp -d "$SNAP_USER_DATA/.local/state/licasa-smoke.XXXXXX")
+export XDG_STATE_HOME="$state" XDG_RUNTIME_DIR=relative
+'''
+    script += r'''
+"$SNAP/usr/bin/licasa" "$1" >"$work/viewer.log" 2>&1 & viewer=$!
+viewer_is_alive() {
+    if ! kill -0 "$viewer" 2>/dev/null; then
+        status=0
+        wait "$viewer" || status=$?
+        viewer=
+        echo "Viewer exited before the probe completed (exit $status)." >&2
+        if [ "$status" -eq 0 ]; then status=1; fi
+        exit "$status"
+    fi
+}
+'''
+    if error_log:
+        script += r'''
+attempt=0
+until grep -Fq 'Single-instance IPC disabled' "$state/licasa/errors.log" 2>/dev/null; do
+    viewer_is_alive
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 50 ]; then
+        echo 'The GUI warning did not reach the fresh confined error log.' >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+viewer_is_alive
+'''
+    else:
+        script += f"\nsleep {float(startup_seconds)}\nviewer_is_alive\n"
+    return script
+
+
+def run_viewer_probe(script: str, *, phase: str, sample: Path, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    completed = subprocess.run(
+        ["snap", "run", "--shell", "licasa", "-c", script, "_", str(sample)],
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
+    )
+    log = output.with_suffix(f".{phase}.log")
+    log.write_text(f"phase={phase}\nexit={completed.returncode}\n"
+                   f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
+    if completed.returncode:
+        raise RuntimeError(f"Confined Snap {phase} probe failed (exit {completed.returncode}); "
+                           f"evidence: {log}\n{completed.stderr}\n{completed.stdout}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
@@ -65,27 +146,10 @@ def main() -> None:
 
         # Start and stop the viewer inside confinement: the host cannot always
         # signal a process confined by the Snap's AppArmor profile.
-        viewer_script = (
-            'export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software; '
-            'XDG_RUNTIME_DIR=$(mktemp -d); export XDG_RUNTIME_DIR; '
-            '"$SNAP/usr/bin/licasa" "$1" >/tmp/licasa-viewer.log 2>&1 & viewer=$!; '
-            'trap \'kill "$viewer" 2>/dev/null || true\' EXIT; '
-            'sleep 12; '
-            'if ! kill -0 "$viewer" 2>/dev/null; then '
-            'wait "$viewer"; cat /tmp/licasa-viewer.log; exit 1; fi; '
-            'kill "$viewer"; wait "$viewer" 2>/dev/null || true; '
-            'XDG_STATE_HOME="$SNAP_USER_DATA/.local/state" XDG_RUNTIME_DIR=relative '
-            '"$SNAP/usr/bin/licasa" --quit >/tmp/licasa-log-probe.log 2>&1; '
-            'grep -Fq "Single-instance IPC disabled" '
-            '"$SNAP_USER_DATA/.local/state/licasa/errors.log"'
-        )
-        viewer = subprocess.run(
-            ["snap", "run", "--shell", "licasa", "-c", viewer_script, "_", str(spaced_sample)],
-            cwd=ROOT, capture_output=True, text=True, timeout=30,
-        )
-        if viewer.returncode:
-            raise RuntimeError(f"Confined Snap viewer did not stay open from a cold start "
-                               f"(exit {viewer.returncode}):\n{viewer.stderr}\n{viewer.stdout}")
+        run_viewer_probe(viewer_probe_script(), phase="cold-start",
+                         sample=spaced_sample, output=args.output)
+        run_viewer_probe(viewer_probe_script(error_log=True), phase="runtime-error-log",
+                         sample=spaced_sample, output=args.output)
 
     available = set(report["read_formats"])
     missing = set(SAMPLES) - available
@@ -111,6 +175,7 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     report["source_commit"] = source_commit
     report["viewer_cold_start"] = True
+    report["runtime_error_log_probe"] = True
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(f"Confined Snap launched the viewer and decoded {len(expected)} samples: {args.output}")
 
