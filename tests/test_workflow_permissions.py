@@ -61,33 +61,39 @@ class WorkflowPermissionTests(unittest.TestCase):
         self.workflows = {path.name: yaml.safe_load(path.read_text())
                           for path in (ROOT / ".github/workflows").glob("*.yml")}
 
-    def test_release_call_graph_includes_skipped_retry_and_native_builds(self):
+    def test_release_source_call_is_isolated_from_retry_and_native_builds(self):
         calls = check_local_calls(self.workflows, "snapcraft-build.yml")
-        self.assertTrue({
-            ("snapcraft-build.yml", "verify_sanitizers", "ci.yml"),
-            ("ci.yml", "retry", "retry-verification.yml"),
-            ("ci.yml", "ubuntu", "build-native.yml"),
-            ("ci.yml", "debian", "build-native.yml"),
-        }.issubset(calls))
+        self.assertEqual(calls, {
+            ("snapcraft-build.yml", "verify_sanitizers", "verify-source.yml"),
+        })
+
+    def broad_ci_caller(self):
+        workflows = copy.deepcopy(self.workflows)
+        caller = workflows["snapcraft-build.yml"]["jobs"]["verify_sanitizers"]
+        caller["uses"] = LOCAL + "ci.yml"
+        caller["permissions"] = {"actions": "read", "contents": "read"}
+        return workflows
 
     def test_original_release_caller_without_actions_read_reproduces_failure(self):
-        workflows = copy.deepcopy(self.workflows)
+        workflows = self.broad_ci_caller()
         workflows["snapcraft-build.yml"]["jobs"]["verify_sanitizers"].pop("permissions", None)
         workflows["ci.yml"]["jobs"]["retry"]["if"] = False
         with self.assertRaisesRegex(ValueError, r"ci.yml/retry: actions:read exceeds caller actions:none"):
             check_local_calls(workflows, "snapcraft-build.yml")
 
     def test_nested_retry_cannot_escalate_to_actions_write(self):
-        workflows = copy.deepcopy(self.workflows)
+        workflows = self.broad_ci_caller()
         workflows["retry-verification.yml"]["permissions"]["actions"] = "write"
         with self.assertRaisesRegex(ValueError, r"actions:write exceeds caller actions:read"):
             check_local_calls(workflows, "snapcraft-build.yml")
 
-    def test_release_read_grant_is_scoped_to_the_reusable_caller(self):
+    def test_release_source_verification_requires_only_contents_read(self):
         release = self.workflows["snapcraft-build.yml"]
         self.assertEqual(release["permissions"], {"contents": "read"})
-        self.assertEqual(release["jobs"]["verify_sanitizers"]["permissions"],
-                         {"actions": "read", "contents": "read"})
+        self.assertEqual(release["jobs"]["verify_sanitizers"].get("permissions", release["permissions"]),
+                         {"contents": "read"})
+        self.assertEqual(self.workflows["verify-source.yml"]["permissions"], {"contents": "read"})
+        check_local_calls(self.workflows, "ci.yml")
 
     def test_undeclared_child_permissions_inherit_the_calling_job(self):
         workflows = {

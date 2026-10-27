@@ -25,8 +25,17 @@ VERIFIER_FILES = {
     "tests/test_retry_ci_verification.py", "tests/test_qualification_evidence.py",
     "tests/test_mate_accessibility_wrapper.py", "tests/test_snap_dialog_qualification.py",
 }
-BUILD_JOBS = {"plan", "package_contract", "Shared Qt runtime", "ubuntu / build", "debian / build",
-              "test (release)", "test (asan)", "test (ubsan)", "wrappers", "snap"}
+COMMON_BUILD_JOBS = {"plan", "package_contract", "ubuntu / build", "debian / build", "wrappers", "snap"}
+BUILD_JOBS = COMMON_BUILD_JOBS | {
+    "test / Validate source verification request", "test / Shared Qt runtime",
+    "test / test (release)", "test / test (asan)", "test / test (ubsan)",
+    "test / Source verification complete",
+}
+# Retained candidates created before source verification became reusable remain
+# eligible, but only when their complete original graph and source gates match.
+LEGACY_BUILD_JOBS = COMMON_BUILD_JOBS | {
+    "Shared Qt runtime", "test (release)", "test (asan)", "test (ubsan)",
+}
 PACKAGE_ARTIFACTS = {"verification-ubuntu-packages", "verification-debian-packages",
                      "verification-portable-packages", "verification-snap"}
 
@@ -70,13 +79,15 @@ def retry_plan(run: dict, jobs: list[dict], artifacts: list[dict], *, repository
     routing = by_name.pop("retry", None)
     if routing is None or routing.get("conclusion") != "skipped":
         raise ValueError("Previous verification must have skipped only its retry routing job")
-    if any(by_name.get(name, {}).get("conclusion") != "success" for name in BUILD_JOBS):
+    build_jobs = next((required for required in (BUILD_JOBS, LEGACY_BUILD_JOBS)
+                       if required <= by_name.keys()), None)
+    if build_jobs is None or any(by_name[name].get("conclusion") != "success" for name in build_jobs):
         raise ValueError("Every original build and source check must have succeeded before retrying platforms")
     packages = package_matrix(manifest)
     names = {f"packages ({row['target']}, {row['artifact']})": row for row in packages}
     desktops = {f"snap_desktops ({row['desktop']})": row["desktop"]
                 for row in manifest["targets"] if row.get("desktop")}
-    if by_name.keys() != BUILD_JOBS | names.keys() | desktops.keys() | {"attest", "Required verification complete"}:
+    if by_name.keys() != build_jobs | names.keys() | desktops.keys() | {"attest", "Required verification complete"}:
         raise ValueError("Previous run did not execute the complete expected verification graph")
     if any(by_name[name].get("conclusion") not in {"success", "failure"}
            for name in names.keys() | desktops.keys() | {"attest", "Required verification complete"}):

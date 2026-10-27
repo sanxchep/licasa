@@ -10,19 +10,54 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import retry_ci_verification as retry
 
 
 class RetryVerificationTests(unittest.TestCase):
+    def current_build_jobs(self):
+        """Build API job names from the workflows, independently of retry's sets."""
+        workflows = ROOT / ".github/workflows"
+        ci = yaml.safe_load((workflows / "ci.yml").read_text())
+        source = yaml.safe_load((workflows / "verify-source.yml").read_text())
+        call = ci["jobs"]["test"]
+        self.assertEqual(call["uses"], "./.github/workflows/verify-source.yml")
+        self.assertEqual(call["with"]["presets"], "${{ needs.plan.outputs.presets }}")
+        # PyYAML treats the YAML 1.1 key "on" as True.
+        inputs = ci.get("on", ci.get(True))["workflow_call"]["inputs"]
+        presets = json.loads(inputs["presets"]["default"])
+        self.assertEqual(set(presets), {"release", "asan", "ubsan"})
+        names = set()
+        for job_id in ("plan", "package_contract", "ubuntu", "debian", "wrappers", "snap"):
+            job = ci["jobs"][job_id]
+            name = job.get("name", job_id)
+            if "uses" in job:
+                child = yaml.safe_load((workflows / job["uses"].rsplit("/", 1)[-1]).read_text())
+                names.update(f"{name} / {value.get('name', child_id)}"
+                             for child_id, value in child["jobs"].items())
+            else:
+                names.add(name)
+        prefix = call.get("name", "test")
+        for job_id, job in source["jobs"].items():
+            name = f"{prefix} / {job.get('name', job_id)}"
+            if "strategy" in job:
+                self.assertEqual(job["strategy"]["matrix"],
+                                 {"preset": "${{ fromJSON(needs.plan.outputs.presets) }}"})
+                names.update(f"{name} ({preset})" for preset in presets)
+            else:
+                names.add(name)
+        return names
+
     def setUp(self):
         self.run = {"repository": {"full_name": "owner/repo"}, "path": ".github/workflows/ci.yml",
                     "event": "workflow_dispatch", "status": "completed", "conclusion": "failure",
                     "head_branch": "candidate", "head_sha": "a" * 40}
         packages = retry.package_matrix(retry.load_manifest())
         self.failed = {"debian13-mate-accessibility", "ubuntu24-snap-gnome", "ubuntu24-snap-kde"}
-        names = retry.BUILD_JOBS | {f"packages ({row['target']}, {row['artifact']})" for row in packages}
+        names = self.current_build_jobs() | {f"packages ({row['target']}, {row['artifact']})" for row in packages}
         names |= {"snap_desktops (gnome)", "snap_desktops (kde)", "attest", "Required verification complete"}
         self.jobs = [{"name": name, "status": "completed", "conclusion": "failure" if (
             "mate-accessibility" in name or name.startswith("snap_desktops")
@@ -42,12 +77,42 @@ class RetryVerificationTests(unittest.TestCase):
         self.assertEqual(set(plan["desktops"]), {"gnome", "kde"})
         self.assertEqual(set(plan["targets"]), self.failed)
 
+    def test_current_workflow_names_include_every_nested_source_gate(self):
+        self.assertEqual(self.current_build_jobs(), retry.BUILD_JOBS)
+
+    def test_exact_legacy_graph_remains_eligible_and_rejects_incomplete_or_mixed_graphs(self):
+        legacy = {"plan", "package_contract", "Shared Qt runtime", "ubuntu / build", "debian / build",
+                  "test (release)", "test (asan)", "test (ubsan)", "wrappers", "snap"}
+        self.assertEqual(legacy, retry.LEGACY_BUILD_JOBS)
+        jobs = [row for row in self.jobs if row["name"] not in retry.BUILD_JOBS]
+        jobs += [{"name": name, "status": "completed", "conclusion": "success"} for name in sorted(legacy)]
+        plan = retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate")
+        self.assertEqual(set(plan["targets"]), self.failed)
+        for name in legacy:
+            for status in ("failure", "skipped", "cancelled", None):
+                with self.subTest(name=name, status=status):
+                    changed = copy.deepcopy(jobs)
+                    if status is None:
+                        changed = [row for row in changed if row["name"] != name]
+                    else:
+                        next(row for row in changed if row["name"] == name)["conclusion"] = status
+                    with self.assertRaises(ValueError):
+                        retry.retry_plan(self.run, changed, self.artifacts,
+                                         repository="owner/repo", branch="candidate")
+        mixed = jobs + [{"name": "test / Source verification complete", "status": "completed",
+                         "conclusion": "success"}]
+        with self.assertRaisesRegex(ValueError, "expected verification graph"):
+            retry.retry_plan(self.run, mixed, self.artifacts, repository="owner/repo", branch="candidate")
+
     def test_failed_skipped_missing_or_duplicated_source_checks_prevent_reuse(self):
         for name in retry.BUILD_JOBS:
-            for status in ("failure", "skipped", "cancelled"):
+            for status in ("failure", "skipped", "cancelled", None):
                 with self.subTest(name=name, status=status):
                     jobs = copy.deepcopy(self.jobs)
-                    next(row for row in jobs if row["name"] == name)["conclusion"] = status
+                    if status is None:
+                        jobs = [row for row in jobs if row["name"] != name]
+                    else:
+                        next(row for row in jobs if row["name"] == name)["conclusion"] = status
                     with self.assertRaises(ValueError):
                         retry.retry_plan(self.run, jobs, self.artifacts, repository="owner/repo", branch="candidate")
         for jobs in (self.jobs[1:], self.jobs + [self.jobs[0]]):

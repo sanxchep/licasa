@@ -13,15 +13,38 @@ from check_support_manifest import ROOT, load_manifest
 from hosted_candidate import source_version, validate_requested_source
 
 
-def make_plan(event: str, complete: bool, changed_paths: list[str], presets: str = "") -> dict:
-    if complete and event != "workflow_dispatch":
-        raise ValueError("Complete candidate verification requires manual dispatch")
-    selected = json.loads(presets) if presets else (
-        ["release"] if event == "pull_request" else ["release", "asan", "ubsan"])
+def source_presets(presets: str) -> list[str]:
+    selected = json.loads(presets)
     if (not isinstance(selected, list) or not selected
             or any(not isinstance(value, str) or value not in {"release", "asan", "ubsan"}
                    for value in selected) or len(set(selected)) != len(selected)):
         raise ValueError("Expected distinct supported source verification presets")
+    return selected
+
+
+def source_plan(source_sha: str, actual_sha: str, dirty: str, presets: str,
+                runner_environment: str) -> dict:
+    if runner_environment != "github-hosted":
+        raise ValueError("Source verification requires an ephemeral hosted runner")
+    validate_requested_source(source_sha, source_sha, actual_sha)
+    if dirty:
+        raise ValueError("Source verification requires a clean source checkout")
+    return {"sha": actual_sha, "presets": json.dumps(source_presets(presets))}
+
+
+def check_source_results(needs: dict) -> list[str]:
+    required = {"plan", "quick", "test"}
+    failed = sorted(name for name in required if needs.get(name, {}).get("result") != "success")
+    if failed:
+        raise ValueError("Required source verification did not pass: " + ", ".join(failed))
+    return sorted(required)
+
+
+def make_plan(event: str, complete: bool, changed_paths: list[str], presets: str = "") -> dict:
+    if complete and event != "workflow_dispatch":
+        raise ValueError("Complete candidate verification requires manual dispatch")
+    selected = source_presets(presets or json.dumps(
+        ["release"] if event == "pull_request" else ["release", "asan", "ubsan"]))
     if complete and set(selected) != {"release", "asan", "ubsan"}:
         raise ValueError("Complete candidate verification requires all three source presets")
     build = event != "pull_request" or any(
@@ -48,7 +71,7 @@ def check_results(needs: dict) -> list[str]:
         raise ValueError("Complete verification cannot omit source or package builds")
     required = {"plan", "package_contract"}
     if outputs["build"] == "true":
-        required.update(("quick", "test"))
+        required.add("test")
     if outputs["packages"] == "true":
         required.update(("ubuntu", "debian"))
     if outputs["complete"] == "true":
@@ -82,14 +105,30 @@ def main() -> None:
     plan.add_argument("--changed-files", type=Path)
     plan.add_argument("--github-output", type=Path, required=True)
     subparsers.add_parser("check")
+    source = subparsers.add_parser("source-plan")
+    source.add_argument("--source-sha", required=True)
+    source.add_argument("--presets", required=True)
+    source.add_argument("--github-output", type=Path, required=True)
+    subparsers.add_parser("source-check")
     args = parser.parse_args()
+    if args.command == "source-check":
+        print("Required source checks passed: " + ", ".join(
+            check_source_results(json.loads(os.environ["CI_RESULTS"]))))
+        return
     if args.command == "check":
         print("Required checks passed: " + ", ".join(check_results(json.loads(os.environ["CI_RESULTS"]))))
         return
     actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()
+    if args.command == "source-plan":
+        result = source_plan(args.source_sha, actual, dirty, args.presets,
+                             os.environ.get("RUNNER_ENVIRONMENT", ""))
+        with args.github_output.open("a") as output:
+            output.writelines(f"{key}={value}\n" for key, value in result.items())
+        return
     validate_requested_source(args.source_sha,
                               args.expected_sha if args.complete else args.source_sha, actual)
-    if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip():
+    if dirty:
         raise ValueError("CI planning requires a clean source checkout")
     paths = ([value.decode() for value in args.changed_files.read_bytes().split(b"\0") if value]
              if args.changed_files else [])

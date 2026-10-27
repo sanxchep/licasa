@@ -100,128 +100,13 @@ jobs:
           python3 tools/check_support_manifest.py
           /usr/bin/python3 -B -m unittest discover -s tests -p 'test_*.py' -v
 
-  quick:
-    name: Shared Qt runtime
+  test:
     needs: [plan, package_contract]
     if: ${{ !cancelled() && needs.plan.outputs.build == 'true' && needs.package_contract.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    outputs:
-      toolchain: ${{ steps.toolchain.outputs.digest }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-          persist-credentials: false
-      - name: Install the source-check toolchain
-        run: sudo bash tools/install_ci_dependencies.sh
-      - name: Fingerprint the installed dependency toolchain
-        id: toolchain
-        run: |
-          digest="$(dpkg-query -W -f='${Package}=${Version}\n' | LC_ALL=C sort | sha256sum | cut -d' ' -f1)"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - name: Restore exact shared Qt runtime
-        id: dependencies
-        uses: actions/cache@v5
-        with:
-          path: build/deps/qt-backport-runtime
-          key: source-quick-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('packaging/qt-backport.lock.json', 'packaging/patches/**', 'tools/build_ci_dependencies.py', 'tools/build_qt_backport.py', 'tools/runtime_profiles.py', 'tools/source_cache.py') }}
-      - name: Build the identical Release Qt runtime once
-        if: steps.dependencies.outputs.cache-hit != 'true'
-        run: python3 tools/build_ci_dependencies.py quick --jobs "$(nproc)"
-      - name: Preserve runtime permissions, links and provenance
-        run: tar -C build/deps -czf build/quick-runtime.tar.gz qt-backport-runtime
-      - uses: actions/upload-artifact@v7
-        with:
-          name: verification-qt-quick
-          path: build/quick-runtime.tar.gz
-          retention-days: 7
-          if-no-files-found: error
-
-  test:
-    needs: [plan, quick]
-    if: ${{ !cancelled() && needs.plan.outputs.build == 'true' && needs.quick.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix:
-        preset: ${{ fromJSON(needs.plan.outputs.presets) }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-      - name: Install the source-check toolchain
-        run: sudo bash tools/install_ci_dependencies.sh
-      - uses: actions/download-artifact@v8
-        with:
-          name: verification-qt-quick
-          path: build/shared-runtime
-      - name: Restore the same verified Qt runtime
-        run: |
-          mkdir -p build/deps
-          tar -C build/deps -xzf build/shared-runtime/quick-runtime.tar.gz
-      - name: Fingerprint the installed dependency toolchain
-        id: toolchain
-        env:
-          EXPECTED_TOOLCHAIN: ${{ needs.quick.outputs.toolchain }}
-        run: |
-          digest="$(dpkg-query -W -f='${Package}=${Version}\n' | LC_ALL=C sort | sha256sum | cut -d' ' -f1)"
-          test "$digest" = "$EXPECTED_TOOLCHAIN"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - name: Restore exact private dependencies
-        id: dependencies
-        uses: actions/cache@v5
-        with:
-          path: build/codecs/prefix
-          # No fallback keys: release/ASan/UBSan and ABI revisions stay separate.
-          key: source-codecs-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.preset }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('packaging/*.lock.json', 'packaging/patches/**', 'tools/build_codecs.py', 'tools/build_qt_backport.py', 'tools/runtime_profiles.py', 'tools/qt_runtime.py', 'packaging/qt-runtime-modules.json', 'cmake/LicasaRuntimeProfiles.cmake', 'tools/source_cache.py', 'cmake/strip_codec_rpath.cmake', 'tools/build_ci_dependencies.py') }}
-      - name: Cache compiler outputs
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/ccache
-          key: native-ccache-v1-${{ runner.arch }}-${{ matrix.preset }}-${{ steps.toolchain.outputs.digest }}-${{ github.sha }}-${{ github.run_id }}
-          restore-keys: native-ccache-v1-${{ runner.arch }}-${{ matrix.preset }}-${{ steps.toolchain.outputs.digest }}-
-      - name: Configure bounded compiler caching
-        run: |
-          ccache --max-size=400M
-          echo 'CMAKE_C_COMPILER_LAUNCHER=ccache' >> "$GITHUB_ENV"
-          echo 'CMAKE_CXX_COMPILER_LAUNCHER=ccache' >> "$GITHUB_ENV"
-      - name: Build matching sanitizer codec dependencies
-        if: steps.dependencies.outputs.cache-hit != 'true'
-        env:
-          PRESET: ${{ matrix.preset }}
-        run: python3 tools/build_ci_dependencies.py codecs --preset "$PRESET" --jobs "$(nproc)"
-      - name: Configure the application and matching sanitizer tests
-        run: |
-          cmake --preset ${{ matrix.preset }} \
-            -DLICASA_ENABLE_HEIF=ON -DLICASA_ENABLE_JXL=ON -DLICASA_ENABLE_RAW=ON \
-            -DLICASA_ENABLE_AVIF=ON -DLICASA_ENABLE_APNG=ON \
-            -DCMAKE_PREFIX_PATH="$PWD/build/codecs/prefix" \
-            -DLICASA_QT_QUICK_BACKPORT_LIBRARY="$PWD/build/deps/qt-backport-runtime/libQt6Quick.so.6.4.2"
-      - run: cmake --build --preset ${{ matrix.preset }} --parallel "$(nproc)"
-      - run: ctest --preset ${{ matrix.preset }}
-      - name: Verify installed release
-        if: matrix.preset == 'release'
-        run: |
-          cmake --install build/release --prefix "$RUNNER_TEMP/licasa-package"
-          python3 tools/check_hardening.py "$RUNNER_TEMP/licasa-package/bin/licasa"
-          python3 tools/verify_installed_release.py "$RUNNER_TEMP/licasa-package" \
-            --output build/release/package-smoke.json
-          QT_QPA_PLATFORM=offscreen "$RUNNER_TEMP/licasa-package/bin/licasa_diagnostics" \
-            --formats tests/test-assets/formats/core-matrix/jpeg/full-hd-1920x1080.jpg \
-            > build/release/runtime-formats.json
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: verification-${{ matrix.preset }}
-          retention-days: 7
-          path: |
-            build/${{ matrix.preset }}/Testing/Temporary/LastTest.log
-            build/${{ matrix.preset }}/runtime-formats.json
-            build/${{ matrix.preset }}/package-smoke.json
-            build/${{ matrix.preset }}/raw-viewer-behavior.json
-            build/${{ matrix.preset }}/viewer-lifecycle.json
+    uses: ./.github/workflows/verify-source.yml
+    with:
+      source_ref: ${{ needs.plan.outputs.sha }}
+      presets: ${{ needs.plan.outputs.presets }}
 
   ubuntu:
     needs: [plan, package_contract]
@@ -478,7 +363,7 @@ jobs:
 
   result:
     name: Required verification complete
-    needs: [plan, package_contract, quick, test, ubuntu, debian, wrappers, snap, packages, snap_desktops, attest]
+    needs: [plan, package_contract, test, ubuntu, debian, wrappers, snap, packages, snap_desktops, attest]
     if: ${{ always() && inputs.retry_run_id == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

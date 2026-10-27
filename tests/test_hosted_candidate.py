@@ -32,7 +32,7 @@ class HostedCandidateTests(unittest.TestCase):
 
     def test_verification_has_no_publication_permissions_credentials_or_steps(self):
         workflow = "\n".join((ROOT / ".github/workflows" / name).read_text()
-                             for name in ("ci.yml", "build-native.yml"))
+                             for name in ("ci.yml", "build-native.yml", "verify-source.yml"))
         for forbidden in (
             r"\b(?:contents|packages|deployments|id-token):\s*write\b",
             r"\bsecrets\b", r"^\s+environment:", r"\bsnapcraft\s+(?:upload|release)\b",

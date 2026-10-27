@@ -43,21 +43,13 @@ jobs:
             echo "Expected no existing GitHub Release; API returned $status" >&2
             exit 1
           fi
-      - name: Check installer regressions before building
+      - name: Check source and installer contracts once before building
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-pil python3-gi python3-yaml gir1.2-glib-2.0 patchelf gcc
-          /usr/bin/python3 -B tests/test_appimage_installer.py -v
-          /usr/bin/python3 -B tests/test_appimage_packaging.py -v
-          /usr/bin/python3 -B tests/test_package_qualification.py -v
-          /usr/bin/python3 -B tests/test_installation_qualification.py -v
-          /usr/bin/python3 -B tests/test_snap_install_qualification.py -v
-          /usr/bin/python3 -B tests/test_graphics_qualification.py -v
-          /usr/bin/python3 -B tests/test_physical_graphics_qualification.py -v
-          /usr/bin/python3 -B tests/test_support_contract.py -v
-          /usr/bin/python3 -B tests/test_qualification_evidence.py -v
-          /usr/bin/python3 -B tests/test_workflow_permissions.py -v
+          sudo apt-get install -y --no-install-recommends python3-pil python3-gi python3-yaml gir1.2-glib-2.0 dbus-daemon libglib2.0-bin patchelf gcc clang-format-18
+          python3 tools/check_code_style.py
           python3 tools/check_support_manifest.py
+          /usr/bin/python3 -B -m unittest discover -s tests -p 'test_*.py' -v
           bash -n packaging/install-licasa-appimage.sh
           bash -n tools/check_appimage_install.sh
       - name: Check RPM dependency bootstrap and lifecycle before building
@@ -75,17 +67,13 @@ jobs:
 
   verify_sanitizers:
     needs: preflight
-    # Nested reusable workflows must fit this caller's token permissions,
-    # including the Actions read permission declared by the skipped retry path.
-    permissions:
-      actions: read
-      contents: read
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/verify-source.yml
     with:
       source_ref: ${{ github.sha }}
       presets: '["asan","ubsan"]'
 
-  build_and_test:
+  build_ubuntu:
+    name: Ubuntu build and installation
     needs: [preflight, verify_sanitizers]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -121,8 +109,6 @@ jobs:
           VERSION: ${{ needs.preflight.outputs.version }}
           REUSE_DEPENDENCIES: ${{ steps.dependencies.outputs.cache-hit == 'true' }}
         run: |
-          docker run --rm -v "$PWD:/source:ro" licasa-deb-builder:release \
-            bash -c 'cd /source && python3 tools/check_code_style.py'
           mkdir -p build/qualification/deb build/qualification/appimage
           mkdir -p build/release-dependencies/{codecs,quick,ffmpeg}
           docker run --rm -e LICASA_MAX_JOBS=3 -e LICASA_REUSE_DEPENDENCIES="$REUSE_DEPENDENCIES" \
@@ -152,6 +138,69 @@ jobs:
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: python3 tools/verify_deb_container.py "build/qualification/deb/licasa_${VERSION}-1_amd64.deb"
+      - name: Save checked Ubuntu inputs for independent packaging
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          (cd build/qualification/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
+          test "$(dpkg-deb --field "build/qualification/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
+          (cd build/qualification/appimage && sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256")
+          mkdir -p dist/deb dist/appimage
+          git rev-parse HEAD > dist/deb/source-commit.txt
+          cp "build/qualification/deb/licasa_${VERSION}-1_amd64.deb" dist/deb/
+          cp "build/qualification/deb/licasa_${VERSION}-1_amd64.deb.sha256" dist/deb/
+          cp build/qualification/deb/install-smoke.json dist/deb/
+          cp "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage" dist/appimage/
+          cp "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256" dist/appimage/
+          cp dist/deb/source-commit.txt dist/appimage/
+          cp packaging/install-licasa-appimage.sh dist/appimage/
+          (cd dist/appimage && sha256sum install-licasa-appimage.sh > install-licasa-appimage.sh.sha256)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: licasa-ubuntu-deb
+          path: dist/deb/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - uses: actions/upload-artifact@v7
+        with:
+          name: licasa-appimage-input
+          path: dist/appimage/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
+  portable_packages:
+    name: AppImage, Fedora and Arch qualification
+    needs: [preflight, build_ubuntu]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Require an ephemeral hosted VM
+        run: test "$RUNNER_ENVIRONMENT" = github-hosted
+      - uses: actions/download-artifact@v8
+        with:
+          name: licasa-ubuntu-deb
+          path: dist/deb
+      - uses: actions/download-artifact@v8
+        with:
+          name: licasa-appimage-input
+          path: build/qualification/appimage
+      - name: Verify transferred Ubuntu and AppImage inputs
+        id: verify_inputs
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          test "$(cat dist/deb/source-commit.txt)" = "$GITHUB_SHA"
+          test "$(cat build/qualification/appimage/source-commit.txt)" = "$GITHUB_SHA"
+          (cd dist/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
+          test "$(dpkg-deb --field "dist/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
+          (cd build/qualification/appimage && sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256" install-licasa-appimage.sh.sha256)
+          chmod 755 "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage" \
+            build/qualification/appimage/install-licasa-appimage.sh
       - name: Verify AppImage on clean Ubuntu, Fedora, and Arch
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -170,24 +219,16 @@ jobs:
           python3 tools/package_arch.py "$appimage"
           python3 tools/verify_arch_package.py \
             "build/qualification/arch/licasa-appimage-${VERSION}-1-x86_64.pkg.tar.zst"
-      - name: Save checked packages and test reports
+      - name: Save checked portable packages and test reports
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          cd build/qualification/deb
-          sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256"
-          test "$(dpkg-deb --field "licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
-          cd "$GITHUB_WORKSPACE"
-          mkdir -p dist/deb
-          git rev-parse HEAD > dist/deb/source-commit.txt
-          cp "build/qualification/deb/licasa_${VERSION}-1_amd64.deb" dist/deb/
-          cp "build/qualification/deb/licasa_${VERSION}-1_amd64.deb.sha256" dist/deb/
-          cp build/qualification/deb/install-smoke.json dist/deb/
           mkdir -p dist/appimage
           cp "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage" dist/appimage/
           cp "build/qualification/appimage/Licasa-${VERSION}-x86_64.AppImage.sha256" dist/appimage/
-          cp packaging/install-licasa-appimage.sh dist/appimage/
-          (cd dist/appimage && sha256sum install-licasa-appimage.sh > install-licasa-appimage.sh.sha256)
+          cp build/qualification/appimage/source-commit.txt dist/appimage/
+          cp build/qualification/appimage/install-licasa-appimage.sh dist/appimage/
+          cp build/qualification/appimage/install-licasa-appimage.sh.sha256 dist/appimage/
           cp build/qualification/appimage/install-smoke.json dist/appimage/
           cp build/qualification/appimage/fedora-smoke.json dist/appimage/
           cp build/qualification/appimage/desktop-smoke.json dist/appimage/
@@ -255,8 +296,8 @@ jobs:
           retention-days: 90
 
   build_snap:
-    # Repackage the exact Ubuntu payload after its full build/test/install gates.
-    needs: [preflight, build_and_test]
+    # Repackage the checked Ubuntu payload alongside portable qualification.
+    needs: [preflight, build_ubuntu]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -268,14 +309,16 @@ jobs:
         run: test "$RUNNER_ENVIRONMENT" = github-hosted
       - uses: actions/download-artifact@v8
         with:
-          name: licasa-linux-amd64
-          path: build/verified-linux
-      - name: Prepare the verified same-run Debian payload
+          name: licasa-ubuntu-deb
+          path: build/verified-linux/deb
+      - name: Prepare the verified same-run Ubuntu payload
+        id: verify_inputs
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           test "$(cat build/verified-linux/deb/source-commit.txt)" = "$GITHUB_SHA"
           (cd build/verified-linux/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
+          test "$(dpkg-deb --field "build/verified-linux/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
           mkdir -p snap-input
           cp "build/verified-linux/deb/licasa_${VERSION}-1_amd64.deb" snap-input/
           cp "build/verified-linux/deb/licasa_${VERSION}-1_amd64.deb.sha256" snap-input/
@@ -319,7 +362,8 @@ jobs:
           retention-days: 90
 
   upload_snap_edge:
-    needs: [preflight, build_snap, build_and_test]
+    # Keep every portable check before the first Store publication.
+    needs: [preflight, build_snap, portable_packages]
     runs-on: ubuntu-24.04
     environment: snap-beta
     timeout-minutes: 45
@@ -381,7 +425,7 @@ jobs:
           if-no-files-found: error
 
   github_prerelease:
-    needs: [preflight, build_snap, build_and_test, build_debian, upload_snap_edge]
+    needs: [preflight, build_debian, upload_snap_edge]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

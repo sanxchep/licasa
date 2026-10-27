@@ -14,7 +14,7 @@ from build_ci_dependencies import command_for
 from check_support_manifest import load_manifest
 from ci_plan import check_results, make_plan, package_matrix
 
-JOBS = {"plan", "package_contract", "quick", "test", "ubuntu", "debian", "wrappers",
+JOBS = {"plan", "package_contract", "test", "ubuntu", "debian", "wrappers",
         "snap", "packages", "snap_desktops", "attest"}
 
 
@@ -55,7 +55,7 @@ class CiPlanTests(unittest.TestCase):
                 for name in ("wrappers", "snap", "packages", "snap_desktops", "attest"):
                     rows[name]["result"] = "skipped"
                 self.assertEqual(set(check_results(rows)),
-                                 {"plan", "package_contract", "quick", "test", "ubuntu", "debian"})
+                                 {"plan", "package_contract", "test", "ubuntu", "debian"})
 
     def test_release_caller_retains_its_sanitizer_selection_without_recursive_packages(self):
         plan = make_plan("workflow_dispatch", False, [], '["asan","ubsan"]')
@@ -132,6 +132,11 @@ class CiPlanTests(unittest.TestCase):
             self.assertNotIn("test", re.search(r"needs: (.*)", block)[1])
         for removed in ("candidate_request", "candidate_verification", "candidate_result", "scope"):
             self.assertNotIn(f"\n  {removed}:\n", workflow)
+        source = workflow.split("  test:\n", 1)[1].split("\n  ubuntu:\n", 1)[0]
+        self.assertIn("uses: ./.github/workflows/verify-source.yml", source)
+        self.assertIn("source_ref: ${{ needs.plan.outputs.sha }}", source)
+        self.assertIn("presets: ${{ needs.plan.outputs.presets }}", source)
+        self.assertNotIn("\n  quick:\n", workflow)
         self.assertFalse((ROOT / ".github/workflows/verify-candidate.yml").exists())
         self.assertFalse((ROOT / ".github/workflows/package-interactions.yml").exists())
 
