@@ -15,7 +15,7 @@ Licasa is an image viewer and editor for the Linux desktop inspired by Google's 
 > [!CAUTION]
 > **Upgrading from 0.8.1? Fully quit Licasa before installing 0.9.0.**
 >
-> Save your edits, finish exports and close dialogs. Focus the Licasa viewer and press **Ctrl+Shift+Q**. Closing the window can leave Licasa running in the background. Do this for each running copy, including copies in other user sessions.
+> Save your edits, finish exports and close dialogs. Focus the Licasa viewer and press **Ctrl+Shift+Q**. Do this for each running copy, including copies in other user sessions if applicable.
 >
 > **Arch users: do this before starting `pacman`.** Follow the [upgrade checklist](#before-updating-an-existing-installation) below.
 
