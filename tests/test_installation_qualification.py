@@ -21,7 +21,98 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def generated_recipe(name):
+    tree = ast.parse((ROOT / "tools" / name).read_text())
+    names = {"args": SimpleNamespace(ubuntu_version="24.04", target="ubuntu-24.04")}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name)
+                        and target.id in {"HOST_RUNTIME_PACKAGES", "INSTALLER_PACKAGES"}
+                        for target in node.targets)):
+            names[node.targets[0].id] = ast.literal_eval(node.value)
+    calls = [node for node in ast.walk(tree)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+             and node.func.attr == "write_text" and isinstance(node.func.value, ast.BinOp)
+             and isinstance(node.func.value.right, ast.Constant)
+             and node.func.value.right.value == "Dockerfile"]
+    if len(calls) != 1:
+        raise AssertionError(f"Expected one Dockerfile recipe in {name}")
+    return eval(compile(ast.Expression(calls[0].args[0]), name, "eval"),
+                {"__builtins__": {}}, names)
+
+
 class DependencyRecipeTests(unittest.TestCase):
+    def installer_recipes(self):
+        return {
+            "fedora": generated_recipe("verify_appimage_fedora.py"),
+            "arch": re.sub(r"\\\n\s*", " ",
+                           (ROOT / "packaging/verify-appimage-arch.Dockerfile").read_text()),
+        }
+
+    def assert_installer_prerequisites(self, distribution, recipe, commands):
+        # These are distro package providers, not a second list of required tools.
+        # Read required commands from the real installer so a new prerequisite
+        # must be covered here before the release's expensive build can begin.
+        providers = dict.fromkeys(
+            "uname cp chmod mkdir mktemp mv rm rmdir sha256sum dirname basename cat".split(),
+            "coreutils")
+        providers.update(find="findutils", sed="sed", bash="bash",
+                         getconf="glibc-common" if distribution == "fedora" else "glibc",
+                         ldd="glibc-common" if distribution == "fedora" else "glibc",
+                         flock="util-linux-core" if distribution == "fedora" else "util-linux",
+                         python3="python3" if distribution == "fedora" else "python")
+        lines = recipe.splitlines()
+        lifecycle = next(i for i, line in enumerate(lines)
+                         if line.startswith("RUN ") and "check_appimage_install.sh" in line)
+        linkage = next(i for i, line in enumerate(lines)
+                       if line.startswith("RUN ") and "licasa_check_runtime_dependencies" in line)
+        packages = set()
+        installed_at = {}
+        for index, line in enumerate(lines[:lifecycle]):
+            if not line.startswith("RUN "):
+                continue
+            for command in line[4:].split("&&"):
+                tokens = shlex.split(command)
+                if (tokens[:2] == ["dnf", "install"]
+                        or (len(tokens) > 1 and tokens[0] == "pacman"
+                            and tokens[1] in {"-S", "-Sy", "-Syu"})):
+                    for token in tokens[2:]:
+                        if not token.startswith("-"):
+                            packages.add(token)
+                            installed_at.setdefault(token, index)
+        for command in ["bash", *commands]:
+            self.assertIn(command, providers, f"Map the new installer tool {command!r} to its distro package")
+            self.assertIn(providers[command], packages,
+                          f"{distribution}: install {providers[command]} for {command} before the lifecycle gate")
+        self.assertLess(linkage, installed_at[providers["python3"]],
+                        "Keep Python's dependencies out of the raw bundle's loader check")
+
+    def installer_commands(self):
+        installer = (ROOT / "packaging/install-licasa-appimage.sh").read_text()
+        assignments = re.findall(r"^\s*commands=\(.*\)$", installer, re.MULTILINE)
+        self.assertEqual(len(assignments), 2, "Update the contract reader if installer tool declarations change")
+        result = subprocess.run(["bash", "-ec", "\n".join(assignments) + '\nprintf "%s\\n" "${commands[@]}"'],
+                                capture_output=True, text=True, check=True, timeout=5)
+        return result.stdout.splitlines()
+
+    def test_managed_install_tools_are_declared_before_minimal_lifecycle_gate(self):
+        for distribution, recipe in self.installer_recipes().items():
+            with self.subTest(distribution=distribution):
+                self.assert_installer_prerequisites(distribution, recipe, self.installer_commands())
+
+    def test_installer_prerequisite_guard_rejects_missing_late_and_new_requirements(self):
+        commands = self.installer_commands()
+        for distribution, recipe in self.installer_recipes().items():
+            python = "python3" if distribution == "fedora" else "python"
+            without_python = re.sub(r"\b" + python + r"\b", "", recipe)
+            for scenario, candidate, required in (
+                    ("missing", without_python, commands),
+                    ("too late", without_python + f"\nRUN {'dnf install -y' if distribution == 'fedora' else 'pacman -S'} {python}\n", commands),
+                    ("new tool", recipe, commands + ["unmapped-new-installer-tool"])):
+                with self.subTest(distribution=distribution, scenario=scenario):
+                    with self.assertRaises(AssertionError):
+                        self.assert_installer_prerequisites(distribution, candidate, required)
+
     def test_release_hardening_inspects_the_packaged_elf_behind_its_launcher(self):
         workflow = (ROOT / ".github/workflows/snapcraft-build.yml").read_text()
         targets = re.findall(r"python3 /source/tools/check_hardening.py ([^\n]+)", workflow)
@@ -83,21 +174,7 @@ class DependencyRecipeTests(unittest.TestCase):
         for name in ("verify_deb_container.py", "verify_appimage_container.py",
                      "verify_appimage_fedora.py", "verify_rpm_container.py", "verify_arch_package.py"):
             with self.subTest(tool=name):
-                tree = ast.parse((ROOT / "tools" / name).read_text())
-                names = {"args": SimpleNamespace(ubuntu_version="24.04", target="ubuntu-24.04")}
-                for node in tree.body:
-                    if (isinstance(node, ast.Assign)
-                            and any(isinstance(target, ast.Name) and target.id == "HOST_RUNTIME_PACKAGES"
-                                    for target in node.targets)):
-                        names["HOST_RUNTIME_PACKAGES"] = ast.literal_eval(node.value)
-                calls = [node for node in ast.walk(tree)
-                         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                         and node.func.attr == "write_text" and isinstance(node.func.value, ast.BinOp)
-                         and isinstance(node.func.value.right, ast.Constant)
-                         and node.func.value.right.value == "Dockerfile"]
-                self.assertEqual(len(calls), 1)
-                recipe = eval(compile(ast.Expression(calls[0].args[0]), name, "eval"),
-                              {"__builtins__": {}}, names)
+                recipe = generated_recipe(name)
                 lines = recipe.splitlines()
                 check = next(index for index, line in enumerate(lines)
                              if line.startswith("RUN ") and "licasa_check_runtime_dependencies" in line)

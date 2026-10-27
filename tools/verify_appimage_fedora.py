@@ -23,6 +23,10 @@ HOST_RUNTIME_PACKAGES = (
     "libX11", "libXext", "libxcb", "libxkbcommon", "mesa-libGL", "mesa-libEGL",
     "libglvnd-opengl", "fontconfig", "harfbuzz", "dbus-libs",
 )
+# Managed installation needs these tools after the raw bundle's loader check.
+INSTALLER_PACKAGES = (
+    "bash", "coreutils", "findutils", "glibc-common", "sed", "util-linux-core", "python3",
+)
 
 
 def main() -> None:
@@ -53,12 +57,14 @@ def main() -> None:
             "licasa_check_runtime_dependencies "
             "/tmp/squashfs-root/usr/lib/licasa/lib:/tmp/squashfs-root/usr/lib "
             "/tmp/squashfs-root/usr' && rm -rf /tmp/squashfs-root\n"
+            "RUN dnf install -y --setopt=install_weak_deps=False "
+            + " ".join(INSTALLER_PACKAGES) + " && dnf clean all\n"
             "USER 65534:65534\n"
             "RUN HOME=/tmp/licasa-install-test bash /opt/check_appimage_install.sh "
             "/opt/install-licasa-appimage.sh /opt/Licasa.AppImage\n"
             "USER 0:0\n"
             "RUN dnf install -y --setopt=install_weak_deps=False "
-            "desktop-file-utils xdg-utils xorg-x11-server-Xvfb xwininfo xprop openbox weston mesa-dri-drivers python3 "
+            "desktop-file-utils xdg-utils xorg-x11-server-Xvfb xwininfo xprop openbox weston mesa-dri-drivers "
             "&& dnf clean all\n")
         tag = "licasa-appimage-fedora-verify:local"
         subprocess.run(["docker", "build", "--tag", tag, str(work)], check=True)
