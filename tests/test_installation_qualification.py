@@ -42,6 +42,21 @@ def generated_recipe(name):
 
 
 class DependencyRecipeTests(unittest.TestCase):
+    def test_rpm_lifecycle_guard_runs_after_its_python_dependency_before_payload_install(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        try:
+            import package_rpm
+            spec = package_rpm.render_spec()
+        finally:
+            sys.path.remove(str(ROOT / "tools"))
+        self.assertIsNone(re.search(r"(?m)^Requires\(pretrans\):", spec))
+        self.assertIsNone(re.search(r"(?m)^%pretrans(?:\s|$)", spec))
+        self.assertRegex(spec, r"(?m)^Requires\(pre\):\s+/usr/bin/python3$")
+        preinstall = re.search(r"(?ms)^%pre\n(.*?)(?=^%post\n)", spec)
+        self.assertIsNotNone(preinstall)
+        self.assertIn("--installation appimage-native prepare --action upgrade", preinstall[1])
+        self.assertNotIn("@NATIVE_", spec)
+
     def installer_recipes(self):
         return {
             "fedora": generated_recipe("verify_appimage_fedora.py"),

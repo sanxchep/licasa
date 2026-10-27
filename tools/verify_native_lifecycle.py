@@ -11,12 +11,14 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import time
 
 import native_lifecycle as native
+from package_rpm import render_spec
 from package_deb import write_maintainer_scripts
 
 
@@ -142,17 +144,22 @@ Summary: Disposable lifecycle fixture
 License: MIT
 BuildArch: x86_64
 AutoReqProv: no
+Requires: python3
 %description
 Disposable lifecycle package-manager fixture.
 %install
 cp -a {stage}/. %{{buildroot}}/
 """
-        for name, operation, action in (() if version == 0 else (("pretrans", "prepare", "upgrade"), ("post", "complete", "upgrade"),
-                                        ("preun", "prepare", "remove"), ("postun", "removed", "remove"))):
-            source = native.embedded_script(installation, operation, action).removeprefix("#!/bin/sh\n")
-            if action == "remove":
-                source = source.replace("set -eu\n", 'set -eu\n[ "${1:-0}" -eq 0 ] || exit 0\n', 1)
-            spec += f"\n%{name}\n" + source.replace("%", "%%")
+        if version != 0:
+            # Exercise the production phases/dependency qualifiers and embedded
+            # scripts instead of maintaining an independent scriptlet fixture.
+            production = render_spec()
+            dependencies = re.findall(r"^Requires\([^)]+\):.*$", production, re.MULTILINE)
+            spec = spec.replace("%description\n", "\n".join(dependencies) + "\n%description\n", 1)
+            scripts = re.findall(r"(?ms)^%(pretrans|pre|post|preun|postun)\n(.*?)(?=^%[a-z]|\Z)", production)
+            assert len(scripts) == 4, "Expected all four production RPM lifecycle scripts"
+            for name, source in scripts:
+                spec += f"\n%{name}\n" + source
         spec += "\n%files\n/usr/bin/licasa\n/opt/licasa\n"
         spec_path = top / "SPECS/fixture.spec"
         spec_path.write_text(spec)
@@ -356,6 +363,31 @@ def main() -> None:
                     "-v", f"{ROOT}:/source:ro", "-v", f"{output}:/output", IMAGES[args.manager],
                     "python3", "/source/tools/verify_native_lifecycle.py", "--inside",
                     "--manager", args.manager, "--output", "/output"], check=True)
+    if args.manager == "rpm":
+        # The lifecycle builder already has Python; it cannot establish that
+        # DNF can bootstrap the interpreter in the package's own transaction.
+        package = next((output / "rpm-1/RPMS").rglob("*.rpm"))
+        script = (
+            "test ! -e /usr/bin/python3; "
+            "dnf install -y --setopt=install_weak_deps=False /input/fixture.rpm; "
+            "/usr/bin/python3 -I /opt/licasa/usr/libexec/licasa/native_lifecycle.py "
+            "--installation appimage-native status; "
+            "test \"$(cat /var/lib/licasa/lifecycle/appimage-native/state)\" = verified; "
+            "dnf remove -y --noautoremove licasa-appimage; "
+            "test ! -e /opt/licasa && test ! -e /usr/bin/licasa"
+        )
+        result = subprocess.run(["docker", "run", "--rm", "--user", "0",
+                                 "-v", f"{package}:/input/fixture.rpm:ro", "fedora:44",
+                                 "sh", "-ec", script], capture_output=True, text=True)
+        (output / "fresh-install.log").write_text(result.stdout + result.stderr)
+        if result.returncode:
+            raise RuntimeError(f"Clean Fedora RPM dependency bootstrap failed:\n{result.stdout}\n{result.stderr}")
+        # The inner verifier's report is root-owned. Keep host-written bootstrap
+        # evidence separate so an ordinary CI runner can retain it too.
+        report = {"result": "passed", "freshInstallWithPythonInSameTransaction": True,
+                  "packageSha256": native.digest(package), "removalChecked": True}
+        (output / "fresh-install.json").write_text(json.dumps(report, indent=2) + "\n")
+        print("RPM lifecycle and fresh-install dependency ordering passed.")
 
 
 if __name__ == "__main__":

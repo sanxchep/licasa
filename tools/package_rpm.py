@@ -16,6 +16,22 @@ ROOT = Path(__file__).resolve().parents[1]
 IMAGE = "licasa-rpm-builder:fedora44"
 
 
+def render_spec() -> str:
+    """Use the same incoming lifecycle scripts for production and manager fixtures."""
+    spec = (ROOT / "packaging/licasa-appimage.spec").read_text()
+    operations = {"@NATIVE_PREINSTALL@": ("prepare", "upgrade"),
+                  "@NATIVE_COMPLETE@": ("complete", "upgrade"),
+                  "@NATIVE_PREREMOVE@": ("prepare", "remove"),
+                  "@NATIVE_REMOVED@": ("removed", "remove")}
+    for marker, (operation, action) in operations.items():
+        content = embedded_script("appimage-native", operation, action)
+        if action == "remove":
+            content = content.replace("set -eu\n", 'set -eu\n[ "${1:-0}" -eq 0 ] || exit 0\n', 1)
+        # RPM expands percent macros while parsing scriptlets.
+        spec = spec.replace(marker, content.removeprefix("#!/bin/sh\n").replace("%", "%%"))
+    return spec
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("appimage", type=Path)
@@ -29,19 +45,8 @@ def main() -> None:
     version = match.group(1)
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    spec = (ROOT / "packaging/licasa-appimage.spec").read_text()
-    operations = {"@NATIVE_PRETRANS@": ("prepare", "upgrade"),
-                  "@NATIVE_COMPLETE@": ("complete", "upgrade"),
-                  "@NATIVE_PREREMOVE@": ("prepare", "remove"),
-                  "@NATIVE_REMOVED@": ("removed", "remove")}
-    for marker, (operation, action) in operations.items():
-        content = embedded_script("appimage-native", operation, action)
-        if action == "remove":
-            content = content.replace("set -eu\n", 'set -eu\n[ "${1:-0}" -eq 0 ] || exit 0\n', 1)
-        # RPM expands percent macros while parsing scriptlets.
-        spec = spec.replace(marker, content.removeprefix("#!/bin/sh\n").replace("%", "%%"))
     rendered_spec = output / "licasa-appimage.spec"
-    rendered_spec.write_text(spec)
+    rendered_spec.write_text(render_spec())
     subprocess.run(["docker", "build", "--file", str(ROOT / "packaging/build-rpm.Dockerfile"),
                     "--tag", IMAGE, str(ROOT / "packaging")], check=True)
     script = (

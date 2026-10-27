@@ -59,6 +59,18 @@ jobs:
           python3 tools/check_support_manifest.py
           bash -n packaging/install-licasa-appimage.sh
           bash -n tools/check_appimage_install.sh
+      - name: Check RPM dependency bootstrap and lifecycle before building
+        run: |
+          docker build -f packaging/build-rpm.Dockerfile -t licasa-rpm-builder:fedora44 packaging
+          python3 tools/verify_native_lifecycle.py --manager rpm --output build/rpm-contract
+      - name: Retain RPM preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rpm-preflight-contract
+          path: build/rpm-contract/
+          if-no-files-found: warn
+          retention-days: 90
 
   verify_sanitizers:
     needs: preflight

@@ -20,7 +20,7 @@ BuildArch:      x86_64
 BuildRequires:  python3
 Requires:       bash
 Requires:       python3, util-linux-core
-Requires(pretrans): /usr/bin/python3
+Requires(pre): /usr/bin/python3
 Requires(preun): /usr/bin/python3
 Requires(post): /usr/bin/python3
 Requires(postun): /usr/bin/python3
@@ -39,10 +39,10 @@ installation time. This package runs without FUSE.
 %install
 python3 %{SOURCE1} %{SOURCE0} %{buildroot}
 
-# tools/package_rpm.py embeds the trusted incoming adapter here. A pretrans
-# failure aborts replacement before the old runtime files are changed.
-%pretrans
-@NATIVE_PRETRANS@
+# The incoming adapter runs after its ordered dependencies, before this package's
+# payload is replaced. A failed preinstall skips this package's install/update.
+%pre
+@NATIVE_PREINSTALL@
 
 %post
 @NATIVE_COMPLETE@
