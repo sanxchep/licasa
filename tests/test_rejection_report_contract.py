@@ -3,15 +3,21 @@
 import copy
 import hashlib
 import json
+import os
+import re
+import shlex
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from check_package_report import check_report
 from qualification_evidence import validate_report
+import verify_unsupported_ubuntu as rejection_probe
 
 
 class RejectionReportTests(unittest.TestCase):
@@ -88,6 +94,64 @@ class RejectionReportTests(unittest.TestCase):
         target["qualifier"][0] = "tools/other_verifier.py"
         with self.assertRaises(ValueError):
             check_report(self.receipt("26"), target, self.manifest, self.package)
+
+
+class RejectionGuestTests(unittest.TestCase):
+    def run_probe(self, directory, *, version="22.04", install_result=None):
+        root=Path(directory);package=root/'candidate.deb';package.write_bytes(b'candidate deb')
+        appimage=root/'candidate.AppImage';appimage.write_bytes(b'candidate appimage')
+        output=root/'report.json';captured={}
+        argv=['verify_unsupported_ubuntu.py',str(package),'--ubuntu-version',version,'--output',str(output)]
+        if version=='22.04':argv+=['--appimage',str(appimage)]
+        def run(command,**kwargs):
+            if command[:2]==['docker','build']:
+                captured['recipe']=(Path(command[-1])/'Dockerfile').read_text()
+                return subprocess.CompletedProcess(command,0)
+            if 'apt-get' in command:
+                return subprocess.CompletedProcess(command,100,'qt6-base-abi (= 6.4.2) is not installable','')
+            captured['installer']=command
+            return subprocess.CompletedProcess(command,*(install_result or
+                (1,"GLIBC_2.38: version not found\nInstallation stopped before replacing any existing Licasa application.",'')))
+        with patch.object(sys,'argv',argv),patch.dict(os.environ,{'RUNNER_ENVIRONMENT':'github-hosted'}),patch.object(rejection_probe.subprocess,'run',side_effect=run):
+            rejection_probe.main()
+        return captured,json.loads(output.read_text()),package,appimage
+
+    def test_real_ubuntu22_recipe_provides_every_installer_tool_before_abi_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            captured,report,package,appimage=self.run_probe(directory)
+            providers=dict.fromkeys('uname cp chmod mkdir mktemp mv rm rmdir sha256sum dirname basename cat'.split(),'coreutils')
+            providers.update(bash='bash',find='findutils',sed='sed',flock='util-linux',getconf='libc-bin',ldd='libc-bin',python3='python3')
+            installer=(ROOT/'packaging/install-licasa-appimage.sh').read_text()
+            required={'bash'}
+            for declaration in re.findall(r'(?m)^\s*commands=\(([^\n]*)\)',installer):
+                required.update(token for token in shlex.split(declaration) if not token.startswith('${'))
+            self.assertFalse(required-providers.keys(),'Map any newly required installer tool to its Ubuntu package')
+            command=next(line for line in captured['recipe'].splitlines() if line.startswith('RUN apt-get install'))
+            installed=set(shlex.split(command)[2:])
+            self.assertFalse({providers[name] for name in required}-installed,
+                             'The clean rejection guest must reach the ABI check, not fail missing-tool preflight')
+            self.assertNotIn('qt6-base-dev',installed)
+            self.assertEqual(report['appimage'],'unsupported_glibc_rejection_confirmed')
+            self.assertEqual(report['package_sha256'],hashlib.sha256(package.read_bytes()).hexdigest())
+            self.assertEqual(report['appimage_sha256'],hashlib.sha256(appimage.read_bytes()).hexdigest())
+            self.assertIn('--read-only',captured['installer']);self.assertIn('none',captured['installer'])
+
+    def test_missing_tools_unrelated_errors_and_success_cannot_pass_rejection(self):
+        for result in ((1,"Cannot install Licasa: the required system tool 'python3' is missing.",''),
+                       (1,'GLIBC_2.38: version not found',''),
+                       (1,'Installation stopped before replacing any existing Licasa application.',''),
+                       (0,'GLIBC_2.38: version not found before replacing','')):
+            with self.subTest(result=result),tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(RuntimeError,'Expected an explicit glibc-baseline rejection'):
+                    self.run_probe(directory,install_result=result)
+                self.assertFalse((Path(directory)/'report.json').exists())
+
+    def test_ubuntu26_native_only_probe_does_not_install_appimage_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            captured,report,_,_=self.run_probe(directory,version='26.04')
+            self.assertNotIn('apt-get install',captured['recipe']);self.assertNotIn('installer',captured)
+            self.assertNotIn('appimage',report)
+            self.assertEqual(report['native_deb'],'unsupported_dependency_rejection_confirmed')
 
 
 if __name__ == "__main__":

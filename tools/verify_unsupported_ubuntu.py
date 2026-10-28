@@ -15,6 +15,9 @@ from verify_appimage_container import HOST_RUNTIME_PACKAGES
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# Reach the intended ABI rejection after satisfying the installer preflight.
+# These provide tools only; no Qt or application compatibility libraries.
+INSTALLER_PACKAGES = ("bash", "coreutils", "findutils", "sed", "util-linux", "libc-bin", "python3")
 
 
 def main():
@@ -43,7 +46,7 @@ def main():
             shutil.copy2(ROOT / "packaging/install-licasa-appimage.sh", work / "installer.sh")
             recipe += (
                 "RUN apt-get install -y --no-install-recommends "
-                + " ".join(HOST_RUNTIME_PACKAGES) + "\n"
+                + " ".join((*HOST_RUNTIME_PACKAGES, *INSTALLER_PACKAGES)) + "\n"
                 "COPY --chmod=755 Licasa.AppImage /opt/Licasa.AppImage\n"
                 "COPY installer.sh /opt/installer.sh\n"
             )
