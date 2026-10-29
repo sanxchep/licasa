@@ -17,6 +17,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from ci_plan import check_source_results, source_plan, source_presets
+from qt_runtime import runtime_packages
 
 
 class SourceWorkflowTests(unittest.TestCase):
@@ -97,6 +98,33 @@ class SourceWorkflowTests(unittest.TestCase):
         self.assertFalse(self.jobs["test"]["strategy"]["fail-fast"])
         self.assertEqual(self.jobs["test"]["strategy"]["matrix"]["preset"],
                          "${{ fromJSON(needs.plan.outputs.presets) }}")
+
+    def test_ci_installer_covers_the_declared_qml_runtime_closure(self):
+        # Capture the executed install command: comments and unused package
+        # lists must not satisfy the dependencies of production QML controls.
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            capture = work / "apt-arguments.jsonl"
+            apt = work / "apt-get"
+            apt.write_text(f"#!{sys.executable}\n" + '''import json
+import os
+from pathlib import Path
+import sys
+with Path(os.environ['CI_APT_CAPTURE']).open('a') as output:
+    output.write(json.dumps(sys.argv[1:]) + '\\n')
+''')
+            apt.chmod(0o755)
+            subprocess.run(["bash", str(ROOT / "tools/install_ci_dependencies.sh")],
+                           check=True, capture_output=True, text=True, timeout=10,
+                           env=dict(os.environ, PATH=str(work) + os.pathsep + os.environ["PATH"],
+                                    CI_APT_CAPTURE=str(capture)))
+            calls = [json.loads(line) for line in capture.read_text().splitlines()]
+            self.assertEqual(calls[0], ["update"])
+            installs = [call for call in calls if call[0] == "install"]
+            self.assertEqual(len(installs), 1)
+            missing = set(runtime_packages()) - set(installs[0])
+            self.assertEqual(missing, set(), f"CI is missing QML runtime packages: {sorted(missing)}")
+            self.assertIn("qml6-module-qttest", installs[0])
 
     def test_shared_runtime_transfer_preserves_executable_and_symlink(self):
         quick_steps = self.jobs["quick"]["steps"]
