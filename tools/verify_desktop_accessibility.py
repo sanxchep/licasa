@@ -16,6 +16,23 @@ import subprocess
 import time
 
 
+def open_editor_after_settings(*, key, wait, find, atspi):
+    """Exercise the keyboard transition using the actual desktop's state."""
+    key("Escape")
+    # The opposite drawer stays blocked until the closing animation finishes.
+    # A fixed key delay can send E while the production shortcut is disabled.
+    def editor_launcher_ready():
+        launcher = find("Open editor", atspi.ROLE_PUSH_BUTTON)
+        if launcher is None:
+            return None
+        state = launcher.getState()
+        return launcher if (state.contains(atspi.STATE_ENABLED)
+                            and state.contains(atspi.STATE_SENSITIVE)) else None
+    wait("editor launcher after Settings closes", editor_launcher_ready)
+    key("e")
+    return wait("Exposure slider", lambda: find("Exposure", atspi.ROLE_SLIDER))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", type=Path, required=True)
@@ -168,9 +185,9 @@ def main() -> int:
              find("Background opacity", pyatspi.ROLE_SLIDER).queryValue().currentValue == opacity_before)
         record("settings_readable_percent_values", f"{opacity_before} -> {opacity_after} -> {opacity_before}")
         snapshot("settings")
-        key("Escape")
-        key("e")
-        exposure = wait("Exposure slider", lambda: find("Exposure", pyatspi.ROLE_SLIDER))
+        exposure = open_editor_after_settings(key=key, wait=wait, find=find, atspi=pyatspi)
+        record("settings_close_then_keyboard_editor_open",
+               "Waited for the enabled editor launcher before pressing E.")
         values = exposure.queryValue()
         before = values.currentValue
         if values.minimumValue != -100 or values.maximumValue != 100 or values.minimumIncrement != 2:

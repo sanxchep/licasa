@@ -150,11 +150,20 @@ def main() -> int:
                                  "checked_adjustment_values": ["10", "-10", "0"]}
         report["scenarios"].append({"name": "orca_generated_adjustment_speech_is_readable", "status": "passed",
                                     "detail": "Orca spoke clean positive, negative and zero values, without long decimal tails."})
+        # Match Orca against the dialog actually observed by AT-SPI in this run.
+        # UI copy can change; an obsolete hard-coded title must not reject a
+        # correctly named dialog or let unrelated old speech qualify it.
+        save_dialog = next((row.get("detail") for row in report["scenarios"]
+                            if row.get("name") == "save_as_dialog_name_and_role"
+                            and row.get("status") == "passed"), None)
+        if not isinstance(save_dialog, str) or not save_dialog.strip():
+            raise RuntimeError("Desktop report lacks a named successful save dialog")
         observed = {name: name in orca_text for name in
-                    ("Open image", "Exposure", "Save edited image as", "Image could not be opened")}
-        if not all(observed.values()):
-            raise RuntimeError("Orca did not process all required production UI events")
+                    ("Open image", "Exposure", save_dialog, "Image could not be opened")}
         report["orca_observed_controls"] = observed
+        missing_controls = [name for name, present in observed.items() if not present]
+        if missing_controls:
+            raise RuntimeError("Orca did not process required production UI events: " + repr(missing_controls))
         report["scenarios"].append({"name": "orca_processes_production_events", "status": "passed",
                                     "detail": "Open, adjustment, save and error-alert events appear in Orca Qt toolkit log."})
         report["orca_log"] = str(orca)

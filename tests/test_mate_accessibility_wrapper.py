@@ -17,7 +17,8 @@ import verify_appimage_picker_container as picker
 
 
 class MateWrapperTests(unittest.TestCase):
-    def run_check(self, directory, *, orca=True, utterances=("10", "-10", "0"), cleanup_timeout=False):
+    def run_check(self, directory, *, orca=True, utterances=("10", "-10", "0"), cleanup_timeout=False,
+                  save_dialog="Save as a copy", spoken_dialog=None):
         artifact = directory / "Licasa.AppImage"
         artifact.write_bytes(b"fixture package")
         output = directory / "report.json"
@@ -30,10 +31,12 @@ class MateWrapperTests(unittest.TestCase):
                 mount = next(value for value in command if value.endswith(":/reports:rw"))
                 raw = Path(mount.removesuffix(":/reports:rw"))
                 (raw / "runtime-formats.json").write_text(json.dumps({"qt_version": "6.4.2", "before_decode": {}}))
-                (raw / "desktop.json").write_text(json.dumps({"status": "passed", "scenarios": []}))
+                (raw / "desktop.json").write_text(json.dumps({"status": "passed", "scenarios": [
+                    {"name": "save_as_dialog_name_and_role", "status": "passed", "detail": save_dialog}]}))
                 if orca:
+                    spoken_name = save_dialog if spoken_dialog is None else spoken_dialog
                     (raw / "orca-debug.log").write_text(
-                        "Open image Exposure Save edited image as Image could not be opened\n" +
+                        f"Open image Exposure {spoken_name} Image could not be opened\n" +
                         "\n".join(f"SPEECH OUTPUT: '{value}'" for value in utterances))
                 return subprocess.CompletedProcess(command, 0, "", "")
             if cleanup_timeout:
@@ -85,6 +88,26 @@ class MateWrapperTests(unittest.TestCase):
             result, report, _ = self.run_check(Path(temporary), utterances=("10", "0"))
             self.assertEqual(result, 1)
             self.assertIn("required adjustment values", report["error"])
+
+    def test_copy_dialog_event_uses_its_observed_accessible_name(self):
+        for name in ("Save as a copy", "Save a separate copy"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                result, report, _ = self.run_check(Path(temporary), save_dialog=name)
+                self.assertEqual(result, 0, report.get("error"))
+                self.assertTrue(report["orca_observed_controls"][name])
+
+    def test_obsolete_dialog_speech_cannot_qualify_the_current_dialog(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result, report, _ = self.run_check(Path(temporary), spoken_dialog="Save edited image as")
+            self.assertEqual(result, 1)
+            self.assertIn("Save as a copy", report["error"])
+            self.assertFalse(report["orca_observed_controls"]["Save as a copy"])
+
+    def test_copy_dialog_requires_a_nonempty_observed_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result, report, _ = self.run_check(Path(temporary), save_dialog=" ")
+            self.assertEqual(result, 1)
+            self.assertIn("named successful save dialog", report["error"])
 
     def test_downloaded_nonexecutable_candidate_is_copied_without_changing_original(self):
         with tempfile.TemporaryDirectory() as temporary:
