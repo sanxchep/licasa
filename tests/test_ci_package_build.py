@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -81,6 +82,58 @@ print("credentials verified")
         completed = subprocess.run([sys.executable, str(ROOT / "tests/run_unprivileged.py"),
                                     "-c", "raise SystemExit(23)"], timeout=10)
         self.assertEqual(completed.returncode, 23)
+
+    def test_native_desktop_runner_enforces_permissions_and_preserves_environment(self):
+        probe = '''import os, pathlib, sys, tempfile
+assert os.getuid() == os.geteuid() != 0
+assert 0 not in os.getgroups()
+assert sys.argv[1:4] == ["argument with spaces", "-platform", "offscreen"]
+assert os.environ["QT_QPA_PLATFORM"] == "offscreen"
+assert os.environ["LD_LIBRARY_PATH"] == "/test/private runtime/lib"
+if sys.argv[4] == "root-parent":
+    assert "DBUS_SESSION_BUS_ADDRESS" not in os.environ
+with tempfile.TemporaryDirectory() as temporary:
+    directory = pathlib.Path(temporary)
+    directory.chmod(0o500)
+    try:
+        try:
+            (directory / "must-not-exist").write_text("root would bypass this")
+        except PermissionError:
+            pass
+        else:
+            raise AssertionError("permission-denial injection was ineffective")
+    finally:
+        directory.chmod(0o700)
+print("native credentials and denial verified")
+'''
+        environment = dict(os.environ, QT_QPA_PLATFORM="offscreen",
+                           LD_LIBRARY_PATH="/test/private runtime/lib",
+                           DBUS_SESSION_BUS_ADDRESS="deliberate-test-session")
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "tests/run_unprivileged.py"), "--exec",
+             "/bin/sh", "-c", 'exec "$@"', "native test", sys.executable, "-c", probe,
+             "argument with spaces", "-platform", "offscreen",
+             "root-parent" if os.geteuid() == 0 else "user-parent"],
+            env=environment, capture_output=True, text=True, timeout=10)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("native credentials and denial verified", completed.stdout)
+
+    def test_native_desktop_runner_preserves_failures_and_signals(self):
+        for script, expected in [("exit 23", 23),
+                                 ("kill -TERM $$", 128 + signal.SIGTERM
+                                  if os.geteuid() == 0 else -signal.SIGTERM)]:
+            with self.subTest(script=script):
+                completed = subprocess.run(
+                    [sys.executable, str(ROOT / "tests/run_unprivileged.py"),
+                     "--exec", "/bin/sh", "-c", script], timeout=10)
+                self.assertEqual(completed.returncode, expected)
+
+    def test_native_desktop_runner_rejects_missing_command(self):
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "tests/run_unprivileged.py"), "--exec"],
+            capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("Expected", completed.stderr)
 
 
 if __name__ == "__main__":

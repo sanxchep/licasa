@@ -232,12 +232,16 @@ class EditorExportContracts final : public QObject {
                     changed.fill(Qt::green);
                     injected = changed.save(source);
                 } else {
-                    injected =
+                    const bool changed =
                         QFile::setPermissions(dir.path(), QFile::ReadOwner | QFile::ExeOwner);
+                    QFile probe(dir.filePath("permission-probe"));
+                    injected = changed && !probe.open(QIODevice::WriteOnly);
                 }
             });
-        QVERIFY(injected);
+        QVERIFY2(injected,
+                 "Failure injection requires denied writes; run with desktop credentials.");
         QVERIFY(!result.errorMessage.isEmpty());
+        QVERIFY(result.destinationUrl.isEmpty());
         QCOMPARE(read(destination), before);
         if (replaceSource) {
             QCOMPARE(QImage(source).size(), QSize(17, 19));

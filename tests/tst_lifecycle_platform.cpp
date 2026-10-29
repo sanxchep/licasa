@@ -536,9 +536,7 @@ class LifecyclePlatformTests final : public QObject {
 
     void sameExecutableWithoutWritePermissionRequiresIndependentDigest()
     {
-        if (::geteuid() == 0) {
-            QSKIP("The EACCES regression requires an unprivileged test user.");
-        }
+        QVERIFY2(::geteuid() != 0, "The EACCES regression requires desktop credentials.");
         // Running the same ELF is not sufficient to reuse a receipt when the
         // write probe fails on permissions instead of proving ETXTBSY.
         QTemporaryDir temporary;

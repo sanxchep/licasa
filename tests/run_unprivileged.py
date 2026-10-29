@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run desktop-user Python tests with real unprivileged kernel credentials."""
+"""Run Python or native desktop-user tests with real kernel credentials."""
 
 import os
 from pathlib import Path
@@ -10,11 +10,13 @@ import tempfile
 
 
 def main():
-    command = [sys.executable, *sys.argv[1:]]
-    if len(command) == 1:
-        raise SystemExit("Expected a Python test script or interpreter arguments")
+    arguments = sys.argv[1:]
+    native = arguments[:1] == ["--exec"]
+    command = arguments[1:] if native else [sys.executable, *arguments]
+    if not arguments or not command:
+        raise SystemExit("Expected Python test arguments or --exec followed by an executable")
     if os.geteuid() != 0:
-        os.execv(sys.executable, command)
+        os.execv(command[0], command)
 
     # Native builders compile/package as root. Only this test child changes
     # user; do not bypass the installer's root refusal or mock /proc identity.

@@ -51,7 +51,10 @@ target_link_libraries(licasa_lifecycle_platform_tests PRIVATE licasa_lifecycle_p
 licasa_enable_warnings(licasa_lifecycle_platform_tests)
 list(APPEND LICASA_TEST_TARGETS licasa_lifecycle_platform_tests)
 list(APPEND LICASA_CORE_TEST_TARGETS licasa_lifecycle_platform_tests)
-add_test(NAME licasa_lifecycle_platform_tests COMMAND licasa_lifecycle_platform_tests)
+# Permission-denial fixtures need desktop credentials even in root package builders.
+add_test(NAME licasa_lifecycle_platform_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_unprivileged.py"
+                --exec $<TARGET_FILE:licasa_lifecycle_platform_tests>)
 set_tests_properties(licasa_lifecycle_platform_tests PROPERTIES TIMEOUT 15 LABELS "core;lifecycle;security;fast")
 
 add_executable(licasa_application_lifecycle_tests tests/tst_application_lifecycle.cpp)
@@ -650,7 +653,9 @@ target_link_libraries(licasa_navigation_runtime_tests PRIVATE Qt6::Gui Qt6::Test
 licasa_enable_warnings(licasa_navigation_runtime_tests)
 list(APPEND LICASA_TEST_TARGETS licasa_navigation_runtime_tests)
 list(APPEND LICASA_CORE_TEST_TARGETS licasa_navigation_runtime_tests)
-add_test(NAME licasa_navigation_runtime_tests COMMAND licasa_navigation_runtime_tests)
+add_test(NAME licasa_navigation_runtime_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_unprivileged.py"
+                --exec $<TARGET_FILE:licasa_navigation_runtime_tests>)
 set_tests_properties(licasa_navigation_runtime_tests PROPERTIES
         TIMEOUT 30 LABELS "core;navigation;fast")
 
@@ -736,7 +741,9 @@ target_link_libraries(licasa_editor_export_tests PRIVATE licasa_image_services Q
 licasa_enable_warnings(licasa_editor_export_tests)
 list(APPEND LICASA_TEST_TARGETS licasa_editor_export_tests)
 list(APPEND LICASA_CORE_TEST_TARGETS licasa_editor_export_tests)
-add_test(NAME licasa_editor_export_tests COMMAND licasa_editor_export_tests -platform offscreen)
+add_test(NAME licasa_editor_export_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_unprivileged.py"
+                --exec $<TARGET_FILE:licasa_editor_export_tests> -platform offscreen)
 set_tests_properties(licasa_editor_export_tests PROPERTIES TIMEOUT 60 LABELS "core;editing;export;fast")
 
 # Compile the production observers into the test even when the standalone

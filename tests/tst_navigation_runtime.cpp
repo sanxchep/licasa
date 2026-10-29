@@ -73,6 +73,9 @@ class NavigationRuntimeTest final : public QObject {
         QVERIFY(QFile::link(directory.filePath(QStringLiteral("c.PNG")),
                             directory.filePath(QStringLiteral("linked.png"))));
         QVERIFY(QFile::setPermissions(directory.filePath(QStringLiteral("unreadable.png")), {}));
+        QFile unreadable(directory.filePath(QStringLiteral("unreadable.png")));
+        QVERIFY2(!unreadable.open(QIODevice::ReadOnly),
+                 "The unreadable fixture requires desktop credentials.");
 
         const auto expectedNames = [&directory] {
             QStringList names =
