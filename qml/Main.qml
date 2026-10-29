@@ -14,6 +14,7 @@
 
 import QtQuick
 import QtQuick.Window
+import "components"
 import "ViewerMath.js" as ViewerMath
 import "FileUrls.js" as FileUrls
 
@@ -273,6 +274,7 @@ Window {
     property int editorComputeWarmupRevision: 0
 
     onEditPanelOpenChanged: {
+        invalidateExportEstimate()
         if (editPanelOpen)
             stopMotionPhotoPlaybackForLifecycle()
         if (editPanelOpen && browseBurstActive) {
@@ -330,10 +332,54 @@ Window {
     property alias compareOriginal: editorSession.compareOriginal
     property string editorSaveStatus: ""
     property string pendingSaveKind: ""
+    property string pendingSavedEdits: ""
+    property var pendingCopyIntent: null
+    property string editorSourceVersion: ""
+    property bool editorSourceChanged: false
+
+    function editorSourceIsCurrent() {
+        if (editorSourceVersion.length > 0 && imageSaveService.sourceVersion(residentImageUrl) !== editorSourceVersion) {
+            editorSourceChanged = true
+            editorSaveStatus = "The original image changed. Reopen it before saving."
+            return false
+        }
+        return !editorSourceChanged
+    }
+    property int exportEstimateRevision: 0
+    property string exportEstimateText: ""
+    property string exportEstimateError: ""
+
+    function invalidateExportEstimate() {
+        if (exportEstimateError.length > 0 && editorSaveStatus === exportEstimateError)
+            editorSaveStatus = ""
+        exportEstimateError = ""
+        exportEstimateRevision += 1
+        exportSizeTimer.stop()
+        if (editorSourceChanged) { exportEstimateText = "Source changed"; return }
+        if (!editPanelOpen || editorSidePanel.activeTool !== "export" || editorCropMode) {
+            exportEstimateText = ""
+            return
+        }
+        exportEstimateText = "Estimating…"
+        exportSizeTimer.restart()
+    }
+
+    Timer {
+        id: exportSizeTimer
+        interval: 350
+        onTriggered: {
+            if (root.editPanelOpen && editorSidePanel.activeTool === "export")
+                root.imageSaveService.estimateSize(root.residentImageUrl,
+                    -root.exportEstimateRevision - 1, root.editorEditValues(),
+                    editorSession.exportValues(), root)
+        }
+    }
+
+
     property int cropEstimateRevision: 0
     property string cropEstimateText: ""
 
-    onResidentImageUrlChanged: invalidateCropEstimate()
+    onResidentImageUrlChanged: { invalidateCropEstimate(); invalidateExportEstimate() }
     onEditorCropModeChanged: invalidateCropEstimate()
     onDraftCropXChanged: invalidateCropEstimate()
     onDraftCropYChanged: invalidateCropEstimate()
@@ -833,7 +879,10 @@ Window {
     }
 
     function setEditPanelOpen(open) {
+        if (!open) finishPendingEditorInput(true)
         const shouldOpen = open && root.fullScreenMode && root.hasAssignedImage()
+        if (shouldOpen && fullscreenSideMenu.panelVisible)
+            return
         if (editPanelOpen === shouldOpen
                 && Math.abs(editorWorkspaceInset - targetEditorWorkspaceInset(shouldOpen)) < 0.5) {
             return
@@ -848,7 +897,6 @@ Window {
                 scheduleEditedPreviewRefresh()
             }
         } else {
-            fullscreenSideMenu.panelOpen = false
             notificationCenter.historyOpen = false
         }
         const openingEditor = shouldOpen && !editPanelOpen
@@ -907,6 +955,7 @@ Window {
     }
 
     function scheduleEditedPreviewRefresh() {
+        if (!editorSourceIsCurrent()) return
         if (!hasAssignedImage())
             return
 
@@ -1013,14 +1062,19 @@ Window {
     }
 
     function undoEditorChange() {
+        if (editorSourceChanged) return
+        finishPendingEditorInput(false)
         editorSession.undo()
     }
 
     function redoEditorChange() {
+        if (editorSourceChanged) return
+        finishPendingEditorInput(false)
         editorSession.redo()
     }
 
     function beginCropMode() {
+        finishPendingEditorInput(true)
         if (!hasImage() || editorCropMode)
             return
 
@@ -1055,15 +1109,13 @@ Window {
             return
         }
 
-        cropAspectPreset = name
-        cropAspectRatio = name === "original"
+        const ratio = name === "original"
             ? transformedWidth / Math.max(1.0, transformedHeight)
             : editorSession.cropPresetRatio(name)
-        editorSession.applyCropRatio(
-            cropAspectRatio,
-            transformedWidth,
-            transformedHeight
-        )
+        if (editorSession.applyCropRatio(ratio, transformedWidth, transformedHeight)) {
+            cropAspectPreset = name
+            cropAspectRatio = ratio
+        }
     }
 
     function applyCustomCropAspectRatio(requestedRatio) {
@@ -1076,13 +1128,12 @@ Window {
 
         const transformedWidth = transformedNaturalWidth(editorQuarterTurns)
         const transformedHeight = transformedNaturalHeight(editorQuarterTurns)
-        cropAspectPreset = "custom"
-        cropAspectRatio = clamp(requestedRatio, 0.001, 1000.0)
-        editorSession.applyCropRatio(
-            cropAspectRatio,
-            transformedWidth,
-            transformedHeight
-        )
+        if (editorSession.applyCropRatio(requestedRatio, transformedWidth, transformedHeight)) {
+            cropAspectPreset = "custom"
+            cropAspectRatio = requestedRatio
+        } else {
+            editorSaveStatus = "That crop ratio is too extreme for this image."
+        }
     }
 
     function applyDraftCrop() {
@@ -1138,7 +1189,7 @@ Window {
         cropSizeEstimateTimer.stop()
         if (!editorCropMode || !FileUrls.isLocal(residentImageUrl)) {
             cropEstimateText = ""
-            imageSaveService.cancelSizeEstimate()
+            imageSaveService.cancelSizeEstimate(root)
             return
         }
         cropEstimateText = "calculating…"
@@ -1165,14 +1216,21 @@ Window {
                 root.residentImageUrl,
                 root.cropEstimateRevision,
                 edits,
-                editorSession.exportValues()
+                editorSession.exportValues(), root
             )
         }
     }
 
     Connections {
         target: editorSession
-        function onEditsChanged() { root.invalidateCropEstimate() }
+        function onEditsChanged() {
+            root.invalidateCropEstimate()
+            root.invalidateExportEstimate()
+        }
+        function onExportChanged() {
+            root.invalidateCropEstimate()
+            root.invalidateExportEstimate()
+        }
     }
 
     function editedOutputWidth(scaleValue) {
@@ -1192,15 +1250,18 @@ Window {
     }
 
     function resetEditorAdjustments() {
+        finishPendingEditorInput(false)
         editorSaveStatus = ""
         editorSession.reset()
     }
 
     function applyEditorPreset(name) {
+        finishPendingEditorInput(true)
         editorSession.applyPreset(name)
     }
 
     function clearEditorSessionState(resetExportSettings, preserveDisplayedGeometry) {
+        finishPendingEditorInput(false)
         editorSession.clear(resetExportSettings)
         cropAspectPreset = "free"
         cropAspectRatio = 0.0
@@ -1211,6 +1272,11 @@ Window {
         displayedCropY = 0.0
         displayedCropWidth = 1.0
         displayedCropHeight = 1.0
+    }
+
+    function finishPendingEditorInput(apply) {
+        const input = activeFocusItem as EditorNumber
+        if (input) input.finishEditing(apply)
     }
 
     function stopMotionPhotoPlaybackForLifecycle() {
@@ -1240,8 +1306,10 @@ Window {
         cancelZoomAnimations()
         previewPhase = false
 
-        currentImageUrl = null
-        residentImageUrl = null
+        currentImageUrl = ""
+        residentImageUrl = ""
+        editorSourceVersion = ""
+        editorSourceChanged = false
         imageViewport.externalOpenFailed = false
         naturalImageSize = Qt.size(0, 0)
         displayedNaturalImageSize = Qt.size(0, 0)
@@ -1366,6 +1434,11 @@ Window {
     }
 
     function readImageMetadata(url, preserveRawStage) {
+        if (!preserveRawStage) {
+            editorSourceVersion = typeof imageSaveService.sourceVersion === "function"
+                ? imageSaveService.sourceVersion(url) : ""
+            editorSourceChanged = false
+        }
         const info = imageProbe.inspect(url)
         naturalImageSize = info.size || Qt.size(0, 0)
         reusablePngBase = info.reusablePngBase === true
@@ -1453,6 +1526,10 @@ Window {
             windowManager.openInNewWindow(u)
             return
         }
+
+        // A result for the previous image session must not reset this editor,
+        // even if navigation returns to the same source before saving finishes.
+        pendingSaveKind = ""
 
         // Scan the containing folder while the image decoder is working.
         // The nearby-preview request waits for this index instead of scanning
@@ -1843,7 +1920,8 @@ Window {
     }
 
     function suggestedSaveAsUrl() {
-        return FileUrls.suggestedEditedCopy(residentImageUrl, editorExportFormat)
+        return FileUrls.suggestedEditedCopy(residentImageUrl, "original",
+                                           formatSupport.saveNameFilters)
     }
 
     function suggestedFrameSaveAsUrl() {
@@ -1862,7 +1940,8 @@ Window {
         motionPhotoFrameSaveCoordinator.saveCurrentFrame(
             residentImageUrl,
             destinationUrl,
-            { "scale": 1.0, "quality": 95 }
+            { "scale": 1.0, "quality": 95 },
+            root
         )
     }
 
@@ -1899,40 +1978,80 @@ Window {
     }
 
     function startImageSave(destinationUrl, exportValues) {
-        if (!FileUrls.isLocal(residentImageUrl) || !FileUrls.isLocal(destinationUrl) || editorCropMode)
+        finishPendingEditorInput(true)
+        if (!editorSourceIsCurrent()) return
+        if (!FileUrls.isLocal(residentImageUrl) || !FileUrls.isLocal(destinationUrl)
+                || editorCropMode || imageSaveService.busy)
             return
 
         editorSaveStatus = ""
         stopMotionPhotoPlaybackForLifecycle()
         pendingSaveKind = "image"
+        pendingSavedEdits = JSON.stringify(editorEditValues())
         imageSaveService.save(
             residentImageUrl,
             destinationUrl,
             editorEditValues(),
-            exportValues
+            exportValues,
+            root, editorSourceVersion
         )
     }
 
     function saveEditedImage(destinationUrl) {
-        startImageSave(destinationUrl, editorSession.exportValues())
+        if (!pendingCopyIntent) {
+            startImageSave(destinationUrl, { "format": "original", "scale": 1.0, "quality": 95, "copyOnly": true })
+            return
+        }
+        const intent = pendingCopyIntent
+        pendingCopyIntent = null
+        if (intent.source !== String(residentImageUrl) || intent.revision !== imageRevision) {
+            editorSaveStatus = "The open image changed. Start the export again."
+            return
+        }
+        if (imageSaveService.busy || !editorSourceIsCurrent()) return
+        pendingSaveKind = intent.kind
+        pendingSavedEdits = JSON.stringify(intent.edits)
+        imageSaveService.save(residentImageUrl, destinationUrl, intent.edits, intent.options, root, intent.sourceVersion || "")
     }
 
     function saveCurrentImage() {
+        finishPendingEditorInput(true)
         if (editorHasAdjustments)
             startImageSave(residentImageUrl, {
                 "format": "original",
                 "scale": 1.0,
-                "quality": editorExportQuality
+                "quality": 95
             })
     }
 
-    function openSaveAsDialog() {
+    function requestImageOverwrite() {
+        finishPendingEditorInput(true)
+        if (!editorHasAdjustments || editorCropMode || imageSaveService.busy
+                || !hasAssignedImage() || fullscreenSideMenu.panelVisible)
+            return
+        if (!fullScreenMode)
+            setFullScreenState(true)
+        setEditPanelOpen(true)
+        editorSidePanel.requestSaveConfirmation()
+    }
+
+    function openSaveAsDialog(exporting = false) {
+        finishPendingEditorInput(true)
+        if (!editorSourceIsCurrent()) return
         if (fileDialogVisible || !hasAssignedImage() || imageSaveService.busy)
             return
 
         rememberDialogFocus()
-        const suggestion = suggestedSaveAsUrl()
+        const options = exporting ? editorSession.exportValues()
+            : { "format": "original", "scale": 1.0, "quality": 95, "copyOnly": true }
+        pendingCopyIntent = { "source": String(residentImageUrl), "revision": imageRevision,
+            "edits": editorEditValues(), "options": options, "kind": exporting ? "export" : "image",
+            "sourceVersion": editorSourceVersion }
+        const suggestion = FileUrls.suggestedEditedCopy(residentImageUrl, options.format,
+            formatSupport.saveNameFilters)
         if (saveDialogLoader.dialog) {
+            saveDialogLoader.dialog.title = exporting ? "Export image" : "Save as a copy"
+            saveDialogLoader.dialog.fileFormat = exporting && options.format !== "original" ? options.format : ""
             saveDialogLoader.dialog.suggestedFile = suggestion
             saveDialogLoader.dialog.openSafely()
             return
@@ -1943,7 +2062,9 @@ Window {
                 "qrc:/Licasa/qml/SaveDialog.qml",
                 {
                     "formatSupport": root.formatSupport,
-                    "suggestedFile": suggestion
+                    "suggestedFile": suggestion,
+                    "fileFormat": exporting && options.format !== "original" ? options.format : "",
+                    "title": exporting ? "Export image" : "Save as a copy"
                 }
             )
             saveDialogLoader.active = true
@@ -1990,6 +2111,7 @@ Window {
     }
 
     function quitApp() {
+        finishPendingEditorInput(true)
         windowManager.quitApplication()
     }
 
@@ -2275,7 +2397,19 @@ Window {
                                      frame ? "Writing a PNG copy…" : "Writing your changes…")
         }
 
-        function onSizeEstimateReady(sourceUrl, requestId, byteCount, errorMessage) {
+        function onSizeEstimateReady(sourceUrl, requestId, byteCount, errorMessage, requestOwner) {
+            if (requestOwner !== root) return
+            if (root.editorSourceChanged) return
+            if (requestId === -root.exportEstimateRevision - 1
+                    && String(sourceUrl) === String(root.residentImageUrl)
+                    && root.editPanelOpen && editorSidePanel.activeTool === "export") {
+                root.exportEstimateText = byteCount > 0 ? "~" + root.formatFileSize(byteCount) : "Size unavailable"
+                if (root.exportEstimateError.length > 0 && root.editorSaveStatus === root.exportEstimateError)
+                    root.editorSaveStatus = ""
+                root.exportEstimateError = byteCount < 0 ? errorMessage : ""
+                if (byteCount < 0) root.editorSaveStatus = root.exportEstimateError
+                return
+            }
             if (!root.editorCropMode
                     || requestId !== root.cropEstimateRevision
                     || sourceUrl.toString() !== root.residentImageUrl.toString())
@@ -2284,41 +2418,58 @@ Window {
                 ? root.formatFileSize(byteCount) : "size unavailable"
         }
 
-        function onSaveCompleted(sourceUrl, destinationUrl) {
+        function onSaveCompleted(sourceUrl, destinationUrl, requestOwner) {
+            if (requestOwner !== root && String(sourceUrl) === String(root.residentImageUrl)
+                    && String(destinationUrl) === String(sourceUrl)) {
+                root.editorSourceIsCurrent()
+                return
+            }
+            if (requestOwner !== root || (root.pendingSaveKind !== "image" && root.pendingSaveKind !== "export"))
+                return
+            const exported = root.pendingSaveKind === "export"
+            root.pendingSaveKind = ""
             if (!FileUrls.isLocal(root.residentImageUrl)
                     || sourceUrl.toString() !== root.residentImageUrl.toString())
                 return
-            root.finishSavedImage(sourceUrl, destinationUrl)
+            if (!exported && root.pendingSavedEdits === JSON.stringify(root.editorEditValues()))
+                root.finishSavedImage(sourceUrl, destinationUrl)
+            else if (String(destinationUrl) === String(sourceUrl))
+                root.editorSourceIsCurrent()
             notificationCenter.finish("save", "success", "Image saved",
                                       FileUrls.fileName(destinationUrl))
-            root.pendingSaveKind = ""
         }
 
-        function onSaveFailed(sourceUrl, message) {
+        function onSaveFailed(sourceUrl, message, requestOwner) {
+            if (requestOwner !== root || (root.pendingSaveKind !== "image" && root.pendingSaveKind !== "export"))
+                return
+            root.pendingSaveKind = ""
             if (FileUrls.isLocal(root.residentImageUrl)
                     && sourceUrl.toString() === root.residentImageUrl.toString()) {
                 root.editorSaveStatus = message
                 notificationCenter.finish("save", "error", "Image could not be saved", message)
-                root.pendingSaveKind = ""
             }
         }
 
-        function onFrameSaveCompleted(sourceUrl, destinationUrl) {
+        function onFrameSaveCompleted(sourceUrl, destinationUrl, requestOwner) {
+            if (requestOwner !== root || root.pendingSaveKind !== "frame")
+                return
+            root.pendingSaveKind = ""
             if (FileUrls.isLocal(root.residentImageUrl)
                     && sourceUrl.toString() === root.residentImageUrl.toString()) {
                 console.info("Saved Motion Photo frame:", destinationUrl.toString())
                 notificationCenter.finish("save", "success", "Frame saved",
                                           FileUrls.fileName(destinationUrl))
-                root.pendingSaveKind = ""
             }
         }
 
-        function onFrameSaveFailed(sourceUrl, message) {
+        function onFrameSaveFailed(sourceUrl, message, requestOwner) {
+            if (requestOwner !== root || root.pendingSaveKind !== "frame")
+                return
+            root.pendingSaveKind = ""
             if (FileUrls.isLocal(root.residentImageUrl)
                     && sourceUrl.toString() === root.residentImageUrl.toString()) {
                 console.warn("Motion Photo frame save failed:", message)
                 notificationCenter.finish("save", "error", "Frame could not be saved", message)
-                root.pendingSaveKind = ""
             }
         }
     }
@@ -2476,16 +2627,26 @@ Window {
 
     Shortcut { enabled: !root.fileDialogVisible; sequence: "Ctrl+O"; onActivated: root.openFileDialog() }
     Shortcut {
-        enabled: !root.fileDialogVisible
+        enabled: !root.fileDialogVisible && !editorSidePanel.panelVisible
+        objectName: "settingsPreferencesShortcut"
         sequence: "Ctrl+,"
         onActivated: fullscreenSideMenu.panelOpen = !fullscreenSideMenu.panelOpen
     }
-    Shortcut { enabled: !root.fileDialogVisible; sequence: "Ctrl+S"; onActivated: root.saveCurrentImage() }
+    Shortcut {
+        objectName: "overwriteSaveShortcut"
+        enabled: !root.fileDialogVisible
+        sequence: "Ctrl+S"
+        onActivated: root.requestImageOverwrite()
+    }
     Shortcut { enabled: !root.fileDialogVisible; sequence: "Ctrl+Shift+S"; onActivated: root.openSaveAsDialog() }
 
     Shortcut { enabled: !root.fileDialogVisible;
         sequence: "Esc"
         onActivated: {
+            if (editorSidePanel.overwriteConfirmationOpen) {
+                editorSidePanel.cancelSaveConfirmation()
+                return
+            }
             if (notificationCenter.historyOpen) {
                 notificationCenter.historyOpen = false
                 return
@@ -2552,20 +2713,20 @@ Window {
     Shortcut { sequence: "-"; enabled: !root.fileDialogVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.zoomFromKeyboard(1.0 / 1.15) }
 
     Shortcut {
+        objectName: "editorShortcut"
         sequence: "E"
-        enabled: !root.fileDialogVisible && (!root.editorCropMode)
+        enabled: !root.fileDialogVisible && !root.editorCropMode && !fullscreenSideMenu.panelVisible
         onActivated: {
             if (root.fullScreenMode && root.hasAssignedImage())
                 root.setEditPanelOpen(!root.editPanelOpen)
         }
     }
     Shortcut {
+        objectName: "settingsShortcut"
         sequence: "M"
-        enabled: !root.fileDialogVisible && (!root.editorCropMode)
+        enabled: !root.fileDialogVisible && !root.editorCropMode && !editorSidePanel.panelVisible
         onActivated: {
             if (root.fullScreenMode) {
-                if (root.editPanelOpen)
-                    root.setEditPanelOpen(false)
                 notificationCenter.historyOpen = false
                 fullscreenSideMenu.panelOpen = !fullscreenSideMenu.panelOpen
             }
@@ -3007,11 +3168,14 @@ Window {
     }
 
     InfoOverlays {
+        objectName: "infoOverlays"
         anchors.fill: parent
         z: 150
 
         fullScreenMode: root.fullScreenMode
         infoOverlayEnabled: root.infoOverlayEnabled
+        editorPanelVisible: root.fullScreenMode && editorSidePanel.panelVisible
+        smoothMotionEnabled: root.smoothMenuMotionEnabled
         compareOriginal: root.compareOriginal
         imageReady: root.hasImage()
         limitedToPreview: root.imageLimitedToPreview
@@ -3178,7 +3342,7 @@ Window {
         id: notificationCenter
         objectName: "notificationCenter"
         anchors.fill: parent
-        z: fullscreenSideMenu.panelOpen ? 900 : 1600
+        z: fullscreenSideMenu.panelVisible || editorSidePanel.panelVisible ? 900 : 1600
         appVisible: root.visible
         fullScreenMode: root.fullScreenMode
         cornerControlMargin: root.cornerControlMargin
@@ -3187,6 +3351,7 @@ Window {
 
     FullscreenSideMenu {
         id: fullscreenSideMenu
+        launcherBlocked: editorSidePanel.panelVisible
         anchors.fill: parent
         z: 1000
         fullscreen: root.fullScreenMode
@@ -3195,6 +3360,9 @@ Window {
         releaseDate: root.appInfo.releaseDate
         installedAsSnap: root.appInfo.installedAsSnap === true
         onQuitRequested: root.quitApp()
+        onExternalUrlRequested: function(targetUrl) {
+            Qt.openUrlExternally(targetUrl)
+        }
         onPanelOpenChanged: {
             if (panelOpen)
                 notificationCenter.historyOpen = false
@@ -3309,11 +3477,13 @@ Window {
 
     EditorSidePanel {
         id: editorSidePanel
+        launcherBlocked: fullscreenSideMenu.panelVisible
         anchors.fill: parent
         z: 1100
 
         hasImage: root.fullScreenMode && root.hasAssignedImage()
         panelOpen: root.editPanelOpen
+        imageSource: root.residentImageUrl || ""
         smoothMotionEnabled: root.smoothMenuMotionEnabled
         cornerControlSize: root.cornerControlSize
         cornerControlMargin: root.cornerControlMargin
@@ -3337,14 +3507,31 @@ Window {
         cropAspectPreset: root.cropAspectPreset
         cropOutputWidth: root.draftCropOutputWidth()
         cropOutputHeight: root.draftCropOutputHeight()
+        cropImageWidth: root.transformedNaturalWidth(root.editorQuarterTurns)
+        cropImageHeight: root.transformedNaturalHeight(root.editorQuarterTurns)
         cropEstimatedFileSize: root.draftCropEstimatedFileSize()
         compareOriginal: root.compareOriginal
         hasAdjustments: root.editorHasAdjustments
         saveBusy: root.imageSaveService.busy
+        sourceChanged: root.editorSourceChanged
+        onHistoryRequested: function(redo) { if (redo) root.redoEditorChange(); else root.undoEditorChange() }
         saveStatus: root.editorSaveStatus
         exportFormat: root.editorExportFormat
         exportScale: root.editorExportScale
         exportQuality: root.editorExportQuality
+        exportSettings: editorSession.exportSettings
+        exportFormats: root.formatSupport.exportFormats || []
+        exportSourceFormat: {
+            const suffix = FileUrls.parts(root.residentImageUrl).suffix
+            const key = suffix === "jpg" || suffix === "jfif" ? "jpeg" : suffix === "tif" ? "tiff" : suffix
+            for (const item of (root.formatSupport.exportFormats || [])) if (item.key === key) return key
+            return "png"
+        }
+        estimatedSize: root.exportEstimateText
+        onExportSettingRequested: function(name, value) { editorSession.setExportSetting(name, value) }
+        onExportRequested: root.openSaveAsDialog(true)
+        unscaledOutputWidth: root.editedOutputWidth(1)
+        unscaledOutputHeight: root.editedOutputHeight(1)
         outputWidth: root.editedOutputWidth(root.editorExportScale)
         outputHeight: root.editedOutputHeight(root.editorExportScale)
 
@@ -3352,7 +3539,10 @@ Window {
             root.setEditPanelOpen(open)
         }
 
-        onToolActivated: root.refitEditorWorkspace()
+        onToolActivated: {
+            root.refitEditorWorkspace()
+            root.invalidateExportEstimate()
+        }
 
         onExposureRequested: function(value) {
             editorSession.setAdjustment("exposure", value)
@@ -3434,15 +3624,17 @@ Window {
         }
 
         onExportFormatRequested: function(format) {
+            root.finishPendingEditorInput(true)
             root.editorExportFormat = format
         }
 
         onExportScaleRequested: function(value) {
-            root.editorExportScale = root.clamp(value, 0.1, 2.0)
+            root.editorExportScale = root.clamp(value, 0.01, 2.0)
         }
 
         onExportQualityRequested: function(value) {
-            root.editorExportQuality = Math.round(root.clamp(value, 10, 100))
+            root.editorExportQuality = Math.round(root.clamp(value, 1, 100))
+            editorSession.setExportSetting("quality", root.editorExportQuality)
         }
 
         onSaveRequested: root.saveCurrentImage()

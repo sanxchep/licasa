@@ -39,6 +39,30 @@ QtObject {
     property string exportFormat: "original"
     property real exportScale: 1.0
     property int exportQuality: 95
+    property var exportSettings: ({})
+    property var formatSettings: ({})
+    signal exportChanged()
+    onExportFormatChanged: {
+        exportSettings = formatSettings[exportFormat] || ({})
+        exportQuality = exportSettings.quality !== undefined ? exportSettings.quality : 95
+        exportChanged()
+    }
+    onExportScaleChanged: exportChanged()
+    onExportQualityChanged: exportChanged()
+    onExportSettingsChanged: exportChanged()
+
+    function setExportSetting(name, value) {
+        const next = Object.assign({}, exportSettings)
+        next[name] = value
+        if (name === "iconSize") {
+            next.hotspotX = Math.max(0, Math.min(value - 1, next.hotspotX || 0))
+            next.hotspotY = Math.max(0, Math.min(value - 1, next.hotspotY || 0))
+        }
+        exportSettings = next
+        const all = Object.assign({}, formatSettings)
+        all[exportFormat] = next
+        formatSettings = all
+    }
 
     property var undoStack: []
     property var redoStack: []
@@ -280,6 +304,8 @@ QtObject {
             exportFormat = "original"
             exportScale = 1.0
             exportQuality = 95
+            formatSettings = ({})
+            exportSettings = ({})
         }
     }
 
@@ -441,19 +467,23 @@ QtObject {
         }
     }
 
-    function applyCropRatio(targetRatio, transformedWidth, transformedHeight) {
-        if (!cropMode)
-            beginCrop()
-
+    function canApplyCropRatio(targetRatio, transformedWidth, transformedHeight) {
         if (!Number.isFinite(targetRatio)
                 || !Number.isFinite(transformedWidth)
                 || !Number.isFinite(transformedHeight)
                 || targetRatio <= 0.0
                 || transformedWidth <= 0
                 || transformedHeight <= 0) {
-            return
+            return false
         }
+        const imageRatio = transformedWidth / transformedHeight
+        return targetRatio >= imageRatio * 0.02 - 1e-10
+            && targetRatio <= imageRatio / 0.02 + 1e-10
+    }
 
+    function applyCropRatio(targetRatio, transformedWidth, transformedHeight) {
+        if (!canApplyCropRatio(targetRatio, transformedWidth, transformedHeight)) return false
+        if (!cropMode) beginCrop()
         const imageRatio = transformedWidth / transformedHeight
         let width = 1.0
         let height = 1.0
@@ -462,6 +492,7 @@ QtObject {
         else
             height = imageRatio / targetRatio
         updateDraftCrop((1.0 - width) / 2.0, (1.0 - height) / 2.0, width, height)
+        return true
     }
 
     function applyCropPreset(name, transformedWidth, transformedHeight) {
@@ -507,10 +538,12 @@ QtObject {
     }
 
     function exportValues() {
-        return {
+        return Object.assign({}, exportSettings, {
             "format": exportFormat,
             "scale": exportScale,
-            "quality": exportQuality
-        }
+            "quality": exportQuality,
+            "iconSize": exportSettings.iconSize !== undefined ? exportSettings.iconSize : 64,
+            "copyOnly": true
+        })
     }
 }

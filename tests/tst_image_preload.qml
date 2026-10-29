@@ -66,6 +66,8 @@ Item {
             motionPhotoSession: null
             motionPhotoFrameSaveCoordinator: null
             formatSupport: QtObject {
+                property var saveNameFilters: ["PNG image (*.png)", "JPEG image (*.jpg *.jpeg)",
+                                               "All writable images (*.png *.jpg *.jpeg *.tiff)"]
                 signal directoryIndexReady()
                 function canOpen(source) { return true }
                 function prepareDirectoryIndex(source) {}
@@ -76,12 +78,37 @@ Item {
             }
             imageSaveService: QtObject {
                 property bool busy: false
-                signal sizeEstimateReady(url sourceUrl, int requestId, int byteCount, string errorMessage)
-                signal saveCompleted(url sourceUrl, url destinationUrl)
-                signal saveFailed(url sourceUrl, string message)
-                signal frameSaveCompleted(url sourceUrl, url destinationUrl)
-                signal frameSaveFailed(url sourceUrl, string message)
-                function cancelSizeEstimate() {}
+                signal sizeEstimateReady(url sourceUrl, int requestId, int byteCount, string errorMessage, QtObject requestOwner)
+                signal saveCompleted(url sourceUrl, url destinationUrl, QtObject requestOwner)
+                signal saveFailed(url sourceUrl, string message, QtObject requestOwner)
+                signal frameSaveCompleted(url sourceUrl, url destinationUrl, QtObject requestOwner)
+                signal frameSaveFailed(url sourceUrl, string message, QtObject requestOwner)
+                property var pending: null
+                property bool rejectImmediately: false
+                function save(source, destination, edits, options, requestOwner) {
+                    if (busy || rejectImmediately) {
+                        saveFailed(source, "Save refused", requestOwner || null)
+                        return false
+                    }
+                    pending = { source: source, destination: destination,
+                                edits: edits, options: options, owner: requestOwner || null }
+                    busy = true
+                    return true
+                }
+                function complete(error) {
+                    const request = pending
+                    pending = null
+                    busy = false
+                    if (error)
+                        saveFailed(request.source, error, request.owner)
+                    else
+                        saveCompleted(request.source, request.destination, request.owner)
+                }
+                property var estimates: []
+                function estimateSize(source, revision, edits, options, owner) {
+                    estimates = estimates.concat([{ source: source, revision: revision, options: options, owner: owner }])
+                }
+                function cancelSizeEstimate(owner) {}
             }
             nativeWindowOps: QtObject {
                 signal screensChanged()
@@ -94,6 +121,7 @@ Item {
                 function traceZoom(phase, scale) {}
                 function releaseWindowResources(window) {}
                 function trimProcessMemory() {}
+                function showWindow(window, fullScreen) { return true }
             }
             backgroundModeManager: QtObject {
                 property bool enabled: false
@@ -143,9 +171,15 @@ Item {
         when: windowShown
         property var viewport: null
         property var mainWindow: null
+        property var otherMainWindow: null
 
         function init() { testPreviewRequests.reset() }
         function cleanup() {
+            if (otherMainWindow) {
+                otherMainWindow.clearImageState()
+                otherMainWindow.destroy()
+                otherMainWindow = null
+            }
             if (mainWindow) {
                 mainWindow.clearImageState()
                 mainWindow.destroy()
@@ -181,6 +215,423 @@ Item {
                 }
             }
             return mainWindow
+        }
+
+        function test_sourceResetDiscardsPendingNumericEntry_data() {
+            return [{ tag: "neutral", exposure: 0 }, { tag: "edited", exposure: .4 }]
+        }
+
+        function test_sourceResetDiscardsPendingNumericEntry(data) {
+            const main = makeMain()
+            main.fullScreenMode = true
+            main.show()
+            main.requestActivate()
+            tryCompare(main, "active", true)
+            main.editPanelOpen = true
+            main.editorExposure = data.exposure
+            const row = findChild(main, "editorExposureControl")
+            const input = findChild(row, "adjustmentValueInput")
+            verify(input)
+            input.forceActiveFocus()
+            compare(main.activeFocusItem, input)
+            input.text = "25"
+            input.dirty = true
+            main.clearEditorSessionState(true)
+            compare(main.editorExposure, 0)
+            compare(input.text, "0")
+            compare(input.dirty, false)
+            input.finishEditing(true)
+            compare(main.editorExposure, 0)
+            main.undoEditorChange()
+            compare(main.editorExposure, 0)
+        }
+
+        // Exercise the production Main and shared-service signals without writing photos.
+        function makeSaveWindows() {
+            const first = makeMain()
+            const second = makeMain()
+            mainWindow = first
+            otherMainWindow = second
+            second.imageSaveService = first.imageSaveService
+            const windows = [first, second]
+            for (let index = 0; index < windows.length; ++index) {
+                const main = windows[index]
+                main.viewerPreferences.fullResolutionRenderingEnabled = false
+                const image = findChild(main, "imageViewport")
+                image.sourceOverride = "image://previewtest/save-window-" + index + "?licasa_stage=full"
+                main.loadImageUrl("file:///shared.png", true)
+            }
+            tryVerify(function() { return testPreviewRequests.requests().length === 2 }, 5000)
+            for (const request of testPreviewRequests.requests())
+                verify(testPreviewRequests.release(request.id, false))
+            for (const main of windows)
+                tryCompare(findChild(main, "imageViewport"), "imageStatus", Image.Ready, 5000)
+            first.beginEditorInteraction()
+            first.editorExposure = 0.1
+            first.finishEditorInteraction()
+            second.beginEditorInteraction()
+            second.editorExposure = 0.7
+            second.finishEditorInteraction()
+            second.beginEditorInteraction()
+            second.editorContrast = 0.3
+            second.finishEditorInteraction()
+            second.undoEditorChange()
+            return windows
+        }
+
+        function verifyPeerEdits(peer, previewKey, revision) {
+            compare(String(peer.residentImageUrl), "file:///shared.png")
+            compare(String(peer.currentImageUrl), "file:///shared.png")
+            compare(peer.editorExposure, 0.7)
+            compare(peer.editorContrast, 0)
+            compare(peer.editorHasAdjustments, true)
+            compare(peer.imageRevision, revision)
+            compare(findChild(peer, "imageViewport").activeRequestKey, previewKey)
+            compare(peer.editorSaveStatus, "")
+            compare(peer.pendingSaveKind, "")
+            const notices = findChild(peer, "notificationHistoryButton").parent
+            compare(notices.notifications.filter(function(entry) {
+                return entry.operationKey === "save"
+            }).length, 0)
+            peer.redoEditorChange()
+            compare(peer.editorContrast, 0.3)
+            peer.undoEditorChange()
+            peer.undoEditorChange()
+            compare(peer.editorExposure, 0)
+            peer.redoEditorChange()
+            compare(peer.editorExposure, 0.7)
+        }
+
+        function test_multiwindowSavePreservesPeerEdits_data() {
+            return [ { tag: "overwrite", destination: "file:///shared.png" },
+                     { tag: "save-as", destination: "file:///saved-copy.png" } ]
+        }
+
+        function test_overwriteShortcutWaitsForConsent() {
+            const windows = makeSaveWindows()
+            const main = windows[0]
+            const service = main.imageSaveService
+            const editor = findChild(main, "editorMenuButton").parent
+            const shortcut = findChild(main, "overwriteSaveShortcut")
+            shortcut.activated()
+            compare(main.editPanelOpen, true)
+            compare(editor.overwriteConfirmationOpen, true)
+            compare(service.pending, null)
+            findChild(main, "editorOverwriteNoButton").clicked()
+            compare(service.pending, null)
+            shortcut.activated()
+            findChild(main, "editorOverwriteYesButton").clicked()
+            verify(service.pending)
+            compare(String(service.pending.destination), String(main.residentImageUrl))
+            compare(service.pending.owner, main)
+            service.complete("")
+        }
+
+        function test_exportAndLateSaveResultsPreserveNewerEdits() {
+            const windows = makeSaveWindows()
+            const main = windows[0]
+            const peer = windows[1]
+            const peerExposure = peer.editorExposure
+            main.editorExposure = .2
+            main.saveEditedImage("file:///copy.png")
+            main.editorExposure = .8
+            main.imageSaveService.complete("")
+            compare(main.editorExposure, .8)
+            compare(String(main.residentImageUrl), "file:///shared.png")
+            main.pendingCopyIntent = { source: String(main.residentImageUrl), revision: main.imageRevision,
+                edits: main.editorEditValues(), options: { format: "webp", scale: .5, copyOnly: true }, kind: "export" }
+            main.saveEditedImage("file:///export.webp")
+            compare(main.imageSaveService.pending.options.format, "webp")
+            main.imageSaveService.complete("")
+            compare(String(main.residentImageUrl), "file:///shared.png")
+            compare(main.editorExposure, .8)
+            compare(peer.editorExposure, peerExposure)
+        }
+
+        function test_copyIgnoresCustomExportOptions() {
+            const windows = makeSaveWindows()
+            const main = windows[0]
+            main.editorExportFormat = "webp"
+            main.editorExportScale = .5
+            main.saveEditedImage("file:///copy.png")
+            compare(main.imageSaveService.pending.options.format, "original")
+            compare(main.imageSaveService.pending.options.scale, 1)
+            main.imageSaveService.complete("")
+        }
+
+        function test_saveCopyDefaultsKeepFormatAndFullResolution() {
+            const windows = makeSaveWindows()
+            const main = windows[0]
+            compare(main.editorExportFormat, "original")
+            compare(main.editorExportScale, 1)
+            compare(String(main.suggestedSaveAsUrl()), "file:///shared-edited.png")
+            main.saveEditedImage("file:///shared-edited.png")
+            const request = main.imageSaveService.pending
+            compare(String(request.source), "file:///shared.png")
+            compare(String(request.destination), "file:///shared-edited.png")
+            compare(request.options.format, "original")
+            compare(request.options.scale, 1)
+            main.imageSaveService.complete("")
+        }
+
+        function test_multiwindowSavePreservesPeerEdits(data) {
+            const windows = makeSaveWindows()
+            const owner = windows[0]
+            const peer = windows[1]
+            const key = findChild(peer, "imageViewport").activeRequestKey
+            const revision = peer.imageRevision
+            if (data.tag === "overwrite")
+                owner.saveCurrentImage()
+            else
+                owner.saveEditedImage(data.destination)
+            compare(owner.pendingSaveKind, "image")
+            compare(owner.imageSaveService.pending.edits.exposure, 0.1)
+            owner.imageSaveService.complete("")
+            compare(owner.editorHasAdjustments, false)
+            compare(String(owner.residentImageUrl), data.destination)
+            compare(owner.pendingSaveKind, "")
+            verify(owner.editorSaveStatus.indexOf("Saved ") === 0)
+            verifyPeerEdits(peer, key, revision)
+        }
+
+        function test_multiwindowSaveFailurePreservesBothEditors_data() {
+            return [ { tag: "synchronous", synchronous: true },
+                     { tag: "asynchronous", synchronous: false } ]
+        }
+
+        function test_multiwindowSaveFailurePreservesBothEditors(data) {
+            const windows = makeSaveWindows()
+            const owner = windows[0]
+            const peer = windows[1]
+            const key = findChild(peer, "imageViewport").activeRequestKey
+            const revision = peer.imageRevision
+            owner.imageSaveService.rejectImmediately = data.synchronous
+            owner.saveCurrentImage()
+            if (!data.synchronous)
+                owner.imageSaveService.complete("Save refused")
+            compare(owner.editorSaveStatus, "Save refused")
+            compare(owner.pendingSaveKind, "")
+            compare(owner.editorExposure, 0.1)
+            compare(owner.editorHasAdjustments, true)
+            owner.undoEditorChange()
+            compare(owner.editorExposure, 0)
+            verifyPeerEdits(peer, key, revision)
+        }
+
+        function test_multiwindowBusyRejectionDoesNotStealSave() {
+            const windows = makeSaveWindows()
+            const owner = windows[0]
+            const peer = windows[1]
+            owner.saveCurrentImage()
+            peer.saveCurrentImage()
+            compare(peer.pendingSaveKind, "")
+            // A direct competing caller is rejected synchronously by the shared service.
+            compare(owner.imageSaveService.save("file:///shared.png", "file:///other.png",
+                                                {}, {}, peer), false)
+            compare(owner.pendingSaveKind, "image")
+            compare(owner.editorSaveStatus, "")
+            compare(owner.imageSaveService.pending.owner, owner)
+            owner.imageSaveService.complete("")
+            compare(owner.editorHasAdjustments, false)
+            compare(peer.editorExposure, 0.7)
+            compare(peer.editorHasAdjustments, true)
+        }
+
+        function test_saveCompletionAfterNavigationDoesNotResetNewSession() {
+            const windows = makeSaveWindows()
+            const owner = windows[0]
+            owner.saveCurrentImage()
+            owner.loadImageUrl("file:///another.png", true)
+            owner.loadImageUrl("file:///shared.png", true)
+            owner.editorExposure = 0.9
+            owner.imageSaveService.complete("")
+            compare(owner.editorExposure, 0.9)
+            compare(owner.editorHasAdjustments, true)
+            compare(owner.editorSaveStatus, "")
+            compare(String(owner.residentImageUrl), "file:///shared.png")
+            compare(owner.pendingSaveKind, "")
+        }
+
+        function test_unownedOrStaleResultCannotResetEditor() {
+            const windows = makeSaveWindows()
+            const owner = windows[0]
+            const peer = windows[1]
+            const service = owner.imageSaveService
+            // A matching window alone is insufficient without a pending image save.
+            service.saveCompleted("file:///shared.png", "file:///stale.png", peer)
+            compare(peer.editorExposure, 0.7)
+            compare(String(peer.residentImageUrl), "file:///shared.png")
+            owner.saveCurrentImage()
+            service.saveCompleted("file:///shared.png", "file:///foreign.png", null)
+            service.frameSaveCompleted("file:///shared.png", "file:///frame.png", owner)
+            service.frameSaveFailed("file:///shared.png", "Foreign frame failure", peer)
+            compare(owner.pendingSaveKind, "image")
+            compare(owner.editorHasAdjustments, true)
+            service.complete("")
+            compare(owner.editorHasAdjustments, false)
+            compare(peer.editorHasAdjustments, true)
+        }
+
+        function test_frameSaveNotificationsBelongToInitiator_data() {
+            return [ { tag: "success", error: "" }, { tag: "failure", error: "Frame refused" } ]
+        }
+
+        function test_frameSaveNotificationsBelongToInitiator(data) {
+            const windows = makeSaveWindows()
+            const owner = windows[0]
+            const peer = windows[1]
+            owner.pendingSaveKind = "frame"
+            const service = owner.imageSaveService
+            if (data.error)
+                service.frameSaveFailed("file:///shared.png", data.error, owner)
+            else
+                service.frameSaveCompleted("file:///shared.png", "file:///frame.png", owner)
+            compare(owner.pendingSaveKind, "")
+            compare(owner.editorExposure, 0.1)
+            compare(peer.editorExposure, 0.7)
+            const notices = findChild(peer, "notificationHistoryButton").parent
+            compare(notices.notifications.filter(function(entry) {
+                return entry.operationKey === "save"
+            }).length, 0)
+            const ownNotices = findChild(owner, "notificationHistoryButton").parent
+            const results = ownNotices.notifications.filter(function(entry) {
+                return entry.operationKey === "save"
+            })
+            compare(results.length, 1)
+            compare(results[0].title, data.error ? "Frame could not be saved" : "Frame saved")
+        }
+
+        function makePanelWindow() {
+            const main = makeMain()
+            main.smoothMenuMotionEnabled = false
+            main.currentImageUrl = "file:///panel.png"
+            main.residentImageUrl = "file:///panel.png"
+            return main
+        }
+
+        function test_settingsRejectEditorOpen() {
+            const main = makePanelWindow()
+            const settings = findChild(main, "settingsMenuButton").parent
+            settings.panelOpen = true
+            main.setEditPanelOpen(true)
+            compare(main.editPanelOpen, false)
+            compare(settings.panelOpen, true)
+        }
+
+        function test_settingsLayeringThroughDismissal_data() {
+            return [{ tag: "animated", animated: true, reopen: false },
+                    { tag: "interrupted-close", animated: true, reopen: true },
+                    { tag: "reduced-motion", animated: false, reopen: false }]
+        }
+
+        function test_settingsLayeringThroughDismissal(data) {
+            const main = makePanelWindow()
+            const settings = findChild(main, "settingsMenuButton").parent
+            const notices = findChild(main, "notificationCenter")
+            verify(notices.z > settings.z)
+            settings.panelOpen = true
+            verify(settings.panelVisible)
+            verify(notices.z < settings.z)
+            main.smoothMenuMotionEnabled = data.animated
+            settings.panelOpen = false
+            if (data.animated) {
+                verify(settings.panelVisible)
+                verify(notices.z < settings.z,
+                       "Notifications must stay behind the closing Settings panel")
+                if (data.reopen) {
+                    settings.panelOpen = true
+                    verify(notices.z < settings.z)
+                    settings.panelOpen = false
+                }
+            }
+            tryCompare(settings, "panelVisible", false, 1000)
+            verify(notices.z > settings.z,
+                   "Notifications return to the foreground only after Settings is hidden")
+        }
+
+        function test_editorRejectsSettingsOpen() {
+            const main = makePanelWindow()
+            const settingsButton = findChild(main, "settingsMenuButton")
+            main.setEditPanelOpen(true)
+            settingsButton.clicked()
+            compare(main.editPanelOpen, true)
+            compare(settingsButton.parent.panelOpen, false)
+        }
+
+        function test_editorSuppressesInfoWithoutChangingPreference_data() {
+            return [{ tag: "enabled", enabled: true }, { tag: "disabled", enabled: false }]
+        }
+
+        function test_editorSuppressesInfoWithoutChangingPreference(data) {
+            const main = makePanelWindow()
+            main.infoOverlayEnabled = data.enabled
+            const info = findChild(main, "infoOverlays")
+            const details = findChild(info, "imageInfoDetails")
+            main.setEditPanelOpen(true)
+            compare(info.editorPanelVisible, true)
+            compare(details.hideProgress, 1)
+            compare(details.visible, false)
+            compare(main.infoOverlayEnabled, data.enabled)
+            main.smoothMenuMotionEnabled = true
+            main.setEditPanelOpen(false)
+            // Remain tucked away until the closing editor has left the screen.
+            compare(info.editorPanelVisible, true)
+            compare(details.hideProgress, 1)
+            tryCompare(info, "editorPanelVisible", false, 1000)
+            tryCompare(details, "hideProgress", 0, 1000)
+            compare(main.infoOverlayEnabled, data.enabled)
+            compare(info.infoOverlayEnabled, data.enabled)
+        }
+
+        function test_oppositePanelShortcutsAreBlocked_data() {
+            return [{ tag: "edit", shortcut: "editorShortcut", settings: true },
+                    { tag: "settings", shortcut: "settingsShortcut", settings: false },
+                    { tag: "preferences", shortcut: "settingsPreferencesShortcut", settings: false }]
+        }
+
+        function test_oppositePanelShortcutsAreBlocked(data) {
+            const main = makePanelWindow()
+            const settings = findChild(main, "settingsMenuButton").parent
+            if (data.settings)
+                settings.panelOpen = true
+            else
+                main.setEditPanelOpen(true)
+            const shortcut = findChild(main, data.shortcut)
+            verify(shortcut)
+            compare(shortcut.enabled, false)
+            // Even a stale/queued activation cannot replace the active drawer.
+            shortcut.activated()
+            compare(settings.panelOpen, data.settings)
+            compare(main.editPanelOpen, !data.settings)
+        }
+
+        function test_closingPanelStillBlocksOppositeOpen_data() {
+            return [{ tag: "settings-closing", settings: true },
+                    { tag: "editor-closing", settings: false }]
+        }
+
+        function test_closingPanelStillBlocksOppositeOpen(data) {
+            const main = makePanelWindow()
+            const settings = findChild(main, "settingsMenuButton").parent
+            const editor = findChild(main, "editorMenuButton").parent
+            if (data.settings)
+                settings.panelOpen = true
+            else
+                main.setEditPanelOpen(true)
+            main.smoothMenuMotionEnabled = true
+            if (data.settings)
+                settings.panelOpen = false
+            else
+                main.setEditPanelOpen(false)
+            compare(data.settings ? settings.panelVisible : editor.panelVisible, true)
+            if (data.settings)
+                main.setEditPanelOpen(true)
+            else
+                settings.panelOpen = true
+            compare(settings.panelOpen, false)
+            compare(main.editPanelOpen, false)
+            const shortcut = findChild(main, data.settings ? "editorShortcut" : "settingsShortcut")
+            compare(shortcut.enabled, false)
         }
 
         function test_mainDefersNeighborsUntilSelectedFrame() {

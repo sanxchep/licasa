@@ -50,6 +50,7 @@ Column {
         }
 
         AdjustRow {
+            objectName: "editorContrastControl"
             width: parent.width
             label: "Contrast"
             value: root.contrast
@@ -59,6 +60,7 @@ Column {
         }
 
         AdjustRow {
+            objectName: "editorHighlightsControl"
             width: parent.width
             label: "Highlights"
             value: root.highlights
@@ -68,6 +70,7 @@ Column {
         }
 
         AdjustRow {
+            objectName: "editorShadowsControl"
             width: parent.width
             label: "Shadows"
             value: root.shadows
@@ -83,6 +86,7 @@ Column {
         subtitle: "Control intensity and color balance"
 
         AdjustRow {
+            objectName: "editorSaturationControl"
             width: parent.width
             label: "Saturation"
             value: root.saturation
@@ -92,6 +96,7 @@ Column {
         }
 
         AdjustRow {
+            objectName: "editorVibranceControl"
             width: parent.width
             label: "Vibrance"
             value: root.vibrance
@@ -101,6 +106,7 @@ Column {
         }
 
         AdjustRow {
+            objectName: "editorWarmthControl"
             width: parent.width
             label: "Warmth"
             value: root.warmth
@@ -110,6 +116,7 @@ Column {
         }
 
         AdjustRow {
+            objectName: "editorTintControl"
             width: parent.width
             label: "Tint"
             value: root.tint
@@ -125,6 +132,7 @@ Column {
         subtitle: "Refine texture and edge focus"
 
         AdjustRow {
+            objectName: "editorSharpenControl"
             width: parent.width
             label: "Sharpen"
             value: root.sharpen
@@ -137,6 +145,7 @@ Column {
         }
 
         AdjustRow {
+            objectName: "editorSoftenControl"
             width: parent.width
             label: "Soften"
             value: root.blur
@@ -149,6 +158,7 @@ Column {
         }
 
         AdjustRow {
+            objectName: "editorVignetteControl"
             width: parent.width
             label: "Vignette"
             value: root.vignette

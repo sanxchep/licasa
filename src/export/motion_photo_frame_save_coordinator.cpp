@@ -26,20 +26,21 @@ bool MotionPhotoFrameSaveCoordinator::canSaveFrame() const noexcept
 
 bool MotionPhotoFrameSaveCoordinator::saveCurrentFrame(const QUrl& sourceUrl,
                                                        const QUrl& destinationUrl,
-                                                       const QVariantMap& exportValues)
+                                                       const QVariantMap& exportValues,
+                                                       QObject* requestOwner)
 {
     // Avoid copying a video frame when another save already owns the shared
     // service. Calling the service with an empty frame preserves its existing
     // user-visible busy/error signal path.
     if (saveService_.busy()) {
         return saveService_.saveFrameCopy(sourceUrl, destinationUrl, MotionPhotoFrameRaster{},
-                                          exportValues);
+                                          exportValues, requestOwner);
     }
 
     std::optional<MotionPhotoFrameRaster> frame = session_.captureCurrentFrame();
     const bool accepted = saveService_.saveFrameCopy(
         sourceUrl, destinationUrl, frame ? std::move(*frame) : MotionPhotoFrameRaster{},
-        exportValues);
+        exportValues, requestOwner);
 
     if (accepted) {
         // saveFrameCopy owns the raster before returning. Tear down playback

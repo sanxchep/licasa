@@ -11,6 +11,9 @@ FocusScope {
     property real defaultValue: 0.0
     property real keyboardStep: (to - from) / 100.0
     property bool signedDisplay: true
+    property real displayMultiplier: 100
+    property string suffix: "%"
+    property int decimals: 1
     readonly property bool changed: Math.abs(value - defaultValue) > 0.0005
 
     signal valueRequested(real value)
@@ -30,20 +33,14 @@ FocusScope {
         return root.from + (root.to - root.from) * ratio
     }
 
-    function displayText(v) {
-        const pct = Math.round(v * 100)
-        if (!root.signedDisplay)
-            return pct + "%"
-        return (pct > 0 ? "+" : "") + pct + "%"
-    }
-
     function commitValue(nextValue) {
+        if (!isFinite(nextValue)) return
         interactionStarted()
         valueRequested(clamp(nextValue, from, to))
         interactionFinished()
     }
 
-    height: 48
+    height: 56
 
     // Qt 6.4/6.8 read the item's conventional "value" property directly.
     // Keep the precise edit value on root, and expose whole displayed percent
@@ -56,26 +53,26 @@ FocusScope {
         focus: true
         activeFocusOnTab: enabled && visible
         property int value: 0
-        readonly property int minimumValue: Math.round(root.from * 100)
-        readonly property int maximumValue: Math.round(root.to * 100)
-        readonly property real stepSize: root.keyboardStep * 100
+        readonly property int minimumValue: Math.round(root.from * root.displayMultiplier)
+        readonly property int maximumValue: Math.round(root.to * root.displayMultiplier)
+        readonly property real stepSize: root.keyboardStep * root.displayMultiplier
         Accessible.role: Accessible.Slider
         Accessible.name: root.label
-        Accessible.description: "Value in percent"
+        Accessible.description: root.suffix === "%" ? "Value in percent" : "Value"
         Accessible.focusable: activeFocusOnTab
         Accessible.focused: activeFocus
         Accessible.onIncreaseAction: root.commitValue(root.value + root.keyboardStep)
         Accessible.onDecreaseAction: root.commitValue(root.value - root.keyboardStep)
         onValueChanged: {
-            const displayed = Math.round(root.value * 100)
+            const displayed = Math.round(root.value * root.displayMultiplier)
             if (value === displayed) return
-            root.commitValue(value / 100)
-            value = Math.round(root.value * 100)
+            root.commitValue(value / root.displayMultiplier)
+            value = Math.round(root.value * root.displayMultiplier)
         }
         Binding {
             target: accessibleSlider
             property: "value"
-            value: Math.round(root.value * 100)
+            value: Math.round(root.value * root.displayMultiplier)
         }
     }
 
@@ -94,7 +91,9 @@ FocusScope {
     Text {
         id: labelText
         anchors.left: parent.left
-        anchors.top: parent.top
+        anchors.verticalCenter: valueRow.verticalCenter
+        width: Math.max(0, valueRow.x - 8)
+        elide: Text.ElideRight
         text: root.label
         Accessible.ignored: true
         color: "white"
@@ -104,18 +103,25 @@ FocusScope {
     }
 
     Row {
+        id: valueRow
         anchors.right: parent.right
         anchors.top: parent.top
         spacing: 5
+        height: 26
 
-        Text {
+        EditorNumber {
+            objectName: "adjustmentValueInput"
             anchors.verticalCenter: parent.verticalCenter
-            text: root.displayText(root.value)
-            Accessible.ignored: true
-            color: root.changed ? "#E8FFFFFF" : "#A8FFFFFF"
-            font.pixelSize: 12
-            font.weight: root.changed ? Font.Medium : Font.Normal
-            renderType: Text.NativeRendering
+            width: root.suffix.length > 0 ? 84 : 68
+            compact: true
+            label: root.label
+            value: root.value * root.displayMultiplier
+            minimum: root.from * root.displayMultiplier
+            maximum: root.to * root.displayMultiplier
+            decimals: root.decimals
+            signedDisplay: root.signedDisplay
+            suffix: root.suffix
+            onValueRequested: function(v) { root.commitValue(v / root.displayMultiplier) }
         }
 
         Rectangle {
@@ -124,6 +130,7 @@ FocusScope {
             visible: root.changed
             width: 22
             height: 22
+            anchors.verticalCenter: parent.verticalCenter
             radius: 11
             color: resetMouse.containsMouse ? "#24FFFFFF" : "#12FFFFFF"
             border.width: activeFocus ? 2 : 1
@@ -173,8 +180,8 @@ FocusScope {
         id: sliderTrack
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: labelText.bottom
-        anchors.topMargin: 12
+        anchors.top: valueRow.bottom
+        anchors.topMargin: 10
         height: 8
         radius: height / 2
         color: "#18FFFFFF"
@@ -213,7 +220,7 @@ FocusScope {
         anchors.left: sliderTrack.left
         anchors.right: sliderTrack.right
         anchors.verticalCenter: sliderTrack.verticalCenter
-        height: 32
+        height: 26
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
 

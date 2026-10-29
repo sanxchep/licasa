@@ -5,10 +5,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Licasa
-        VERSION 0.9.0
+        VERSION 0.9.5
         LANGUAGES CXX
 )
-set(LICASA_RELEASE_DATE "2026-10-27")
+set(LICASA_RELEASE_DATE "2026-10-29")
 
 # Qt 6 requires C++17 or newer.
 set(CMAKE_CXX_STANDARD 17)
@@ -393,6 +393,9 @@ add_library(licasa_image_services STATIC
         src/imaging/image_probe.h
         src/imaging/format_support.cpp
         src/imaging/format_support.h
+        src/export/image_export_encoder.cpp
+        src/export/image_export_encoder.h
+        src/export/image_export_contract.h
         src/export/image_save_operations.cpp
         src/export/image_save_operations.h
         src/export/image_save_service.cpp
@@ -651,6 +654,9 @@ function(licasa_add_qml target_name)
             qml/WindowedMoveController.qml
             qml/WindowedZoomController.qml
             qml/components/HeaderButton.qml
+            qml/components/ExportChoice.qml
+            qml/components/ExportNumber.qml
+            qml/components/EditorNumber.qml
             qml/components/ActionChip.qml
             qml/components/SectionCard.qml
             qml/components/AdjustRow.qml

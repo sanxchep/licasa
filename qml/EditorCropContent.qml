@@ -18,6 +18,8 @@ Column {
     required property bool flipVertical
     required property int rotationQuarterTurns
     required property int buttonMotionDuration
+    property real imageWidth: 0
+    property real imageHeight: 0
 
     signal cropStarted()
     signal cropPresetRequested(string presetName)
@@ -36,8 +38,12 @@ Column {
     function customAspectRatioIsValid() {
         const widthValue = Number(customAspectWidthText)
         const heightValue = Number(customAspectHeightText)
-        return Number.isFinite(widthValue) && Number.isFinite(heightValue)
-            && widthValue > 0 && heightValue > 0
+        if (!Number.isFinite(widthValue) || !Number.isFinite(heightValue)
+                || widthValue < 0.01 || widthValue > 9999
+                || heightValue < 0.01 || heightValue > 9999) return false
+        if (imageWidth <= 0 || imageHeight <= 0) return true
+        const normalized = (widthValue / heightValue) / (imageWidth / imageHeight)
+        return normalized >= .02 - 1e-10 && normalized <= 50 + 1e-10
     }
 
     function openCustomAspectEditor() {

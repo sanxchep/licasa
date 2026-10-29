@@ -1,9 +1,42 @@
 import QtQuick
 import QtTest
 import "../qml/FileUrls.js" as FileUrls
+import "../qml"
 
 TestCase {
+    id: testCase
     name: "FileUrls"
+
+    Component {
+        id: saveDialogComponent
+        SaveDialog {
+            suggestedFile: "file:///tmp/photo-edited.jpg"
+            formatSupport: QtObject {
+                property var saveNameFilters: ["PNG image (*.png)", "JPEG image (*.jpg *.jpeg)",
+                                               "All writable images (*.png *.jpg *.jpeg *.tiff)"]
+            }
+        }
+    }
+
+    function test_copyDialogMatchesSuggestedFormat() {
+        const dialog = createTemporaryObject(saveDialogComponent, testCase)
+        verify(dialog)
+        compare(dialog.title, "Save as a copy")
+        compare(dialog.defaultSuffix, "jpg")
+        compare(dialog.selectedNameFilter.index, 1)
+        dialog.suggestedFile = "file:///tmp/photo-edited.tiff"
+        compare(dialog.defaultSuffix, "tiff")
+        compare(dialog.selectedNameFilter.index, 2)
+        compare(String(dialog.selectedFile), "file:///tmp/photo-edited.tiff")
+    }
+
+    function test_copyKeepsOtherWritableFormats() {
+        const filters = ["All writable images (*.png *.tif *.tiff *.bmp)"]
+        compare(FileUrls.suggestedEditedCopy("file:///tmp/photo.tiff", "original", filters),
+                "file:///tmp/photo-edited.tiff")
+        compare(FileUrls.suggestedEditedCopy("file:///tmp/photo.dng", "original", filters),
+                "file:///tmp/photo-edited.png")
+    }
 
     function test_roundTripReservedCharacters() {
         const path = "/tmp/folder with spaces/日本語 #100%?.jpg"

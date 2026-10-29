@@ -729,8 +729,28 @@ ImageEditParameters editParametersFromMap(const QVariantMap& values)
 ImageExportOptions exportOptionsFromMap(const QVariantMap& values)
 {
     ImageExportOptions options;
+    const QStringList allowed = {QStringLiteral("format"),        QStringLiteral("scale"),
+                                 QStringLiteral("quality"),       QStringLiteral("width"),
+                                 QStringLiteral("height"),        QStringLiteral("compression"),
+                                 QStringLiteral("progressive"),   QStringLiteral("optimized"),
+                                 QStringLiteral("lossless"),      QStringLiteral("nearest"),
+                                 QStringLiteral("keepAlpha"),     QStringLiteral("matte"),
+                                 QStringLiteral("colorMode"),     QStringLiteral("paletteColors"),
+                                 QStringLiteral("dither"),        QStringLiteral("threshold"),
+                                 QStringLiteral("invert"),        QStringLiteral("ascii"),
+                                 QStringLiteral("iconSize"),      QStringLiteral("iconCrop"),
+                                 QStringLiteral("hotspotX"),      QStringLiteral("hotspotY"),
+                                 QStringLiteral("dpi"),           QStringLiteral("srgb"),
+                                 QStringLiteral("stripMetadata"), QStringLiteral("copyOnly"),
+                                 QStringLiteral("symbol")};
+    for (auto it = values.cbegin(); it != values.cend(); ++it) {
+        if (!allowed.contains(it.key())) {
+            options.validationError = QStringLiteral("Unknown export option: %1").arg(it.key());
+            break;
+        }
+    }
     options.scale =
-        boundedFinite(values.value(QStringLiteral("scale"), 1.0).toDouble(), 0.1, 2.0, 1.0);
+        boundedFinite(values.value(QStringLiteral("scale"), 1.0).toDouble(), 0.01, 2.0, 1.0);
     options.quality = std::clamp(values.value(QStringLiteral("quality"), 95).toInt(), 1, 100);
     options.format = values.value(QStringLiteral("format")).toByteArray().trimmed().toLower();
     if (options.format == QByteArrayLiteral("jpg")) {
@@ -739,10 +759,39 @@ ImageExportOptions exportOptionsFromMap(const QVariantMap& values)
     if (options.format == QByteArrayLiteral("original")) {
         options.format.clear();
     }
-    if (options.format != QByteArrayLiteral("png") && options.format != QByteArrayLiteral("jpeg") &&
-        options.format != QByteArrayLiteral("webp")) {
-        options.format.clear();
+    if (options.format == "tif") {
+        options.format = "tiff";
     }
+    if (options.format == "jfif") {
+        options.format = "jpeg";
+    }
+    options.width = values.value(QStringLiteral("width"), 0).toInt();
+    options.height = values.value(QStringLiteral("height"), 0).toInt();
+    options.compression =
+        std::clamp(values.value(QStringLiteral("compression"), 50).toInt(), 0, 100);
+    options.progressive = values.value(QStringLiteral("progressive"), false).toBool();
+    options.optimized = values.value(QStringLiteral("optimized"), true).toBool();
+    options.lossless = values.value(QStringLiteral("lossless"), false).toBool();
+    options.nearest = values.value(QStringLiteral("nearest"), false).toBool();
+    options.keepAlpha = values.value(QStringLiteral("keepAlpha"), true).toBool();
+    options.matte = values.value(QStringLiteral("matte"), QStringLiteral("#ffffff")).toString();
+    options.colorMode = std::clamp(values.value(QStringLiteral("colorMode"), 0).toInt(), 0, 2);
+    options.paletteColors =
+        std::clamp(values.value(QStringLiteral("paletteColors"), 216).toInt(), 8, 216);
+    options.dither = values.value(QStringLiteral("dither"), true).toBool();
+    options.threshold = std::clamp(values.value(QStringLiteral("threshold"), 128).toInt(), 0, 255);
+    options.invert = values.value(QStringLiteral("invert"), false).toBool();
+    options.ascii = values.value(QStringLiteral("ascii"), false).toBool();
+    options.iconSize = values.value(QStringLiteral("iconSize"), 0).toInt();
+    options.iconCrop = values.value(QStringLiteral("iconCrop"), false).toBool();
+    options.hotspotX = values.value(QStringLiteral("hotspotX"), 0).toInt();
+    options.hotspotY = values.value(QStringLiteral("hotspotY"), 0).toInt();
+    options.dpi = values.value(QStringLiteral("dpi"), 0).toInt();
+    options.srgb = values.value(QStringLiteral("srgb"), false).toBool();
+    options.stripMetadata = values.value(QStringLiteral("stripMetadata"), true).toBool();
+    options.copyOnly = values.value(QStringLiteral("copyOnly"), false).toBool();
+    options.symbol =
+        values.value(QStringLiteral("symbol"), QStringLiteral("licasa_image")).toString();
     return options;
 }
 

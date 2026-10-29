@@ -1,6 +1,12 @@
 #include "app/app_constants.h"
 #include "app/application_settings.h"
+#include "export/image_export_contract.h"
+#include "export/image_save_operations.h"
 #include "export/image_save_service.h"
+#include <QtEndian>
+#if defined(Q_OS_UNIX)
+#include <unistd.h>
+#endif
 #include "imaging/async_image_provider.h"
 #include "imaging/codec_plugins.h"
 #include "imaging/format_support.h"
@@ -18,6 +24,8 @@
 #include <QImage>
 #include <QImageReader>
 #include <QImageWriter>
+#include <QMutexLocker>
+#include <QPointer>
 #include <QQuickTextureFactory>
 #include <QRandomGenerator>
 #include <QSemaphore>
@@ -37,7 +45,626 @@
 class ImageSaveServiceTest final : public QObject {
     Q_OBJECT
 
+    static Licasa::MotionPhotoFrameRaster frameFromImage(const QImage& image)
+    {
+        Licasa::MotionPhotoFrameRaster frame;
+        frame.size = image.size();
+        frame.bytesPerLine = image.bytesPerLine();
+        frame.rgba8888 =
+            QByteArray(reinterpret_cast<const char*>(image.constBits()), image.sizeInBytes());
+        frame.iccProfile = image.colorSpace().iccProfile();
+        return frame;
+    }
+
   private slots:
+    void exportsEveryWriterFamilyAndAlias_data()
+    {
+        QTest::addColumn<QByteArray>("format");
+        for (const auto& entry : Licasa::ImageExport::formats()) {
+            const QByteArray key = entry.toMap().value("key").toByteArray();
+            QTest::newRow(key.constData()) << key;
+        }
+        for (const QByteArray& alias : {QByteArray("jpg"), QByteArray("tif"), QByteArray("jfif")}) {
+            if (QImageWriter::supportedImageFormats().contains(alias)) {
+                QTest::newRow(alias.constData()) << alias;
+            }
+        }
+    }
+
+    void exportsEveryWriterFamilyAndAlias()
+    {
+        QFETCH(QByteArray, format);
+        QTemporaryDir directory;
+        QImage source(67, 49, QImage::Format_ARGB32);
+        source.fill(QColor(28, 133, 212, 137));
+        source.setPixelColor(0, 0, Qt::transparent);
+        source.setDotsPerMeterX(11811);
+        source.setDotsPerMeterY(11811);
+        source.setColorSpace(QColorSpace::SRgb);
+        const QString path = directory.filePath("source.png");
+        QVERIFY(source.save(path));
+        QFile original(path);
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        const QByteArray originalBytes = original.readAll();
+        original.close();
+        auto& policy = *resourcePolicy_;
+        Licasa::ImageSaveService service(policy);
+        QObject owner;
+        QSignalSpy saved(&service, &Licasa::ImageSaveService::saveCompleted);
+        QSignalSpy failed(&service, &Licasa::ImageSaveService::saveFailed);
+        const QVariantMap values{{"format", format},
+                                 {"copyOnly", true},
+                                 {"iconSize", 64},
+                                 {"hotspotX", 7},
+                                 {"hotspotY", 9}};
+        QVERIFY(service.save(
+            QUrl::fromLocalFile(path),
+            QUrl::fromLocalFile(directory.filePath("export." + QString::fromLatin1(format))), {},
+            values, &owner));
+        QTRY_VERIFY_WITH_TIMEOUT(saved.count() + failed.count() > 0, 10000);
+        QVERIFY2(failed.isEmpty(),
+                 failed.isEmpty() ? "" : qPrintable(failed.first()[1].toString()));
+        QCOMPARE(saved.first()[2].value<QObject*>(), &owner);
+        const QString outputPath = saved.first()[1].toUrl().toLocalFile();
+        QFile output(outputPath);
+        QVERIFY(output.open(QIODevice::ReadOnly));
+        const QByteArray bytes = output.readAll();
+        QVERIFY(!bytes.isEmpty());
+        const QByteArray canonical = Licasa::ImageExport::canonicalFormat(format);
+        QImage decoded(outputPath);
+        QVERIFY2(!decoded.isNull(), format.constData());
+        QCOMPARE(decoded.size(),
+                 Licasa::ImageExport::isIcon(canonical) ? QSize(64, 64) : source.size());
+        if (canonical == "cur") {
+            QCOMPARE(bytes.left(4).toHex(), QByteArray("00000200"));
+            QCOMPARE(qFromLittleEndian<quint16>(bytes.constData() + 10), quint16(7));
+            QCOMPARE(qFromLittleEndian<quint16>(bytes.constData() + 12), quint16(9));
+        } else if (canonical == "ico") {
+            QCOMPARE(bytes.left(4).toHex(), QByteArray("00000100"));
+        } else if (canonical == "png") {
+            QCOMPARE(bytes.left(8).toHex(), QByteArray("89504e470d0a1a0a"));
+        } else if (canonical == "jpeg") {
+            QCOMPARE(bytes.left(2).toHex(), QByteArray("ffd8"));
+        } else if (canonical == "webp") {
+            QCOMPARE(bytes.left(4), QByteArray("RIFF"));
+            QCOMPARE(bytes.mid(8, 4), QByteArray("WEBP"));
+        } else if (canonical == "bmp") {
+            QCOMPARE(bytes.left(2), QByteArray("BM"));
+        } else if (canonical == "icns") {
+            QCOMPARE(bytes.left(4), QByteArray("icns"));
+        } else if (canonical == "pbm") {
+            QCOMPARE(bytes.left(2), QByteArray("P4"));
+        } else if (canonical == "pgm") {
+            QCOMPARE(bytes.left(2), QByteArray("P5"));
+        } else if (canonical == "ppm") {
+            QCOMPARE(bytes.left(2), QByteArray("P6"));
+        } else if (canonical == "tiff") {
+            QVERIFY(bytes.left(4).toHex() == "49492a00" || bytes.left(4).toHex() == "4d4d002a");
+        } else if (canonical == "wbmp") {
+            QCOMPARE(bytes.left(4).toHex(), QByteArray("00004331"));
+        } else if (canonical == "xbm") {
+            QVERIFY(bytes.startsWith("#define licasa_image_width 67"));
+        } else if (canonical == "xpm") {
+            QVERIFY(bytes.startsWith("/* XPM */"));
+        }
+        if (canonical == "png") {
+            QCOMPARE(decoded.pixelColor(8, 8), source.pixelColor(8, 8));
+        }
+        const auto estimate = Licasa::ImageSaveOperations::measureEditedImageSize(
+            path, {}, Licasa::exportOptionsFromMap(values), 100);
+        QVERIFY2(estimate.errorMessage.isEmpty(), qPrintable(estimate.errorMessage));
+        QCOMPARE(estimate.byteCount, qint64(bytes.size()));
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        QCOMPARE(original.readAll(), originalBytes);
+    }
+
+    void minimumScaleExportsEveryFormat_data()
+    {
+        QTest::addColumn<QByteArray>("format");
+        QTest::addColumn<QSize>("sourceSize");
+        for (const auto& entry : Licasa::ImageExport::formats()) {
+            const QByteArray key = entry.toMap().value("key").toByteArray();
+            QTest::newRow((key + "-photo").constData()) << key << QSize(997, 613);
+            QTest::newRow((key + "-one-pixel").constData()) << key << QSize(1, 1);
+        }
+    }
+
+    void minimumScaleExportsEveryFormat()
+    {
+        QFETCH(QByteArray, format);
+        QFETCH(QSize, sourceSize);
+        QTemporaryDir directory;
+        QImage source(sourceSize, QImage::Format_ARGB32);
+        source.fill(QColor(28, 133, 212, 137));
+        const QString sourcePath = directory.filePath("source.png");
+        QVERIFY(source.save(sourcePath));
+        const auto options = Licasa::exportOptionsFromMap(
+            {{"format", format}, {"scale", .01}, {"iconSize", 64}, {"copyOnly", true}});
+        QCOMPARE(options.scale, .01);
+        const auto result = Licasa::ImageSaveOperations::writeEditedImage(
+            sourcePath, directory.filePath("copy." + QString::fromLatin1(format)), {}, options,
+            100);
+        QVERIFY2(result.errorMessage.isEmpty(), qPrintable(result.errorMessage));
+        const QImage decoded(result.destinationUrl.toLocalFile());
+        QVERIFY(!decoded.isNull());
+        const QSize expected = Licasa::ImageExport::isIcon(format)
+                                   ? QSize(64, 64)
+                                   : QSize(std::max(1, qRound(sourceSize.width() * .01)),
+                                           std::max(1, qRound(sourceSize.height() * .01)));
+        QCOMPARE(decoded.size(), expected);
+        const auto estimate =
+            Licasa::ImageSaveOperations::measureEditedImageSize(sourcePath, {}, options, 100);
+        QVERIFY2(estimate.errorMessage.isEmpty(), qPrintable(estimate.errorMessage));
+        QCOMPARE(estimate.byteCount, QFileInfo(result.destinationUrl.toLocalFile()).size());
+        QCOMPARE(QImage(sourcePath).size(), sourceSize);
+    }
+
+    void explicitDimensionsRespectEditorScaleLimits_data()
+    {
+        QTest::addColumn<QSize>("size");
+        QTest::addColumn<bool>("valid");
+        QTest::newRow("minimum") << QSize(10, 7) << true;
+        QTest::newRow("below-minimum") << QSize(1, 1) << false;
+        QTest::newRow("maximum") << QSize(2000, 1400) << true;
+        QTest::newRow("above-maximum") << QSize(2002, 1402) << false;
+    }
+
+    void explicitDimensionsRespectEditorScaleLimits()
+    {
+        QFETCH(QSize, size);
+        QFETCH(bool, valid);
+        QTemporaryDir directory;
+        QImage source(1000, 700, QImage::Format_RGB32);
+        source.fill(Qt::darkCyan);
+        const QString sourcePath = directory.filePath("source.png");
+        const QString destination = directory.filePath("copy.png");
+        QVERIFY(source.save(sourcePath));
+        const auto options = Licasa::exportOptionsFromMap(
+            {{"format", "png"}, {"width", size.width()}, {"height", size.height()}});
+        const auto result = Licasa::ImageSaveOperations::writeEditedImage(sourcePath, destination,
+                                                                          {}, options, 100);
+        QCOMPARE(result.errorMessage.isEmpty(), valid);
+        if (valid) {
+            QCOMPARE(QImage(result.destinationUrl.toLocalFile()).size(), size);
+        } else {
+            QVERIFY(result.errorMessage.contains("between 1% and 200%"));
+            QVERIFY(!QFileInfo::exists(destination));
+        }
+        QCOMPARE(Licasa::exportOptionsFromMap({{"scale", 0.0}}).scale, .01);
+    }
+
+    void wbmpDimensionBoundariesAndIconCanvases()
+    {
+        QCOMPARE(Licasa::ImageExport::formats().size(), 14);
+        QTemporaryDir directory;
+        QImage source(513, 513, QImage::Format_RGB32);
+        source.fill(Qt::black);
+        const QString path = directory.filePath("source.png");
+        QVERIFY(source.save(path));
+        for (int size : {127, 128, 255, 256, 511, 512}) {
+            const auto options = Licasa::exportOptionsFromMap(
+                {{"format", "wbmp"}, {"width", size}, {"height", size}, {"dither", false}});
+            const auto result = Licasa::ImageSaveOperations::writeEditedImage(
+                path, directory.filePath("boundary.wbmp"), {}, options, 100);
+            QVERIFY2(result.errorMessage.isEmpty(), qPrintable(result.errorMessage));
+            QImage decoded(result.destinationUrl.toLocalFile());
+            QCOMPARE(decoded.size(), QSize(size, size));
+            QCOMPARE(decoded.pixelColor(size - 1, size - 1), QColor(Qt::black));
+            QFile file(result.destinationUrl.toLocalFile());
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            const QByteArray bytes = file.readAll();
+            int pos = 2;
+            for (int dimension = 0; dimension < 2; ++dimension) {
+                int value = 0;
+                uchar byte;
+                do {
+                    byte = uchar(bytes[pos++]);
+                    value = (value << 7) | (byte & 127);
+                } while (byte & 128);
+                QCOMPARE(value, size);
+            }
+            if (size == 512) {
+                QCOMPARE(bytes.left(6).toHex(), QByteArray("000084008400"));
+            }
+        }
+        for (const QByteArray& format :
+             {QByteArray("ico"), QByteArray("cur"), QByteArray("icns")}) {
+            const QList<int> sizes = format == "icns" ? QList<int>{32, 64, 128, 256, 512, 1024}
+                                                      : QList<int>{16, 24, 32, 48, 64, 128, 256};
+            for (int size : sizes) {
+                auto options =
+                    Licasa::exportOptionsFromMap({{"format", format}, {"iconSize", size}});
+                const auto result = Licasa::ImageSaveOperations::writeEditedImage(
+                    path, directory.filePath("icon." + QString::fromLatin1(format)), {}, options,
+                    100);
+                QVERIFY2(result.errorMessage.isEmpty(), qPrintable(result.errorMessage));
+                QCOMPARE(QImage(result.destinationUrl.toLocalFile()).size(), QSize(size, size));
+            }
+        }
+    }
+
+    void formatSettingsChangeRealOutput()
+    {
+        QTemporaryDir directory;
+        QImage source(64, 64, QImage::Format_ARGB32);
+        source.fill(QColor(60, 130, 220, 140));
+        source.setPixelColor(0, 0, Qt::transparent);
+        const QString path = directory.filePath("source.png");
+        QVERIFY(source.save(path));
+        auto encode = [&](QVariantMap values) {
+            const auto result = Licasa::ImageSaveOperations::writeEditedImage(
+                path, directory.filePath("settings.out"), {}, Licasa::exportOptionsFromMap(values),
+                100);
+            if (!result.errorMessage.isEmpty()) {
+                return QByteArray();
+            }
+            QFile file(result.destinationUrl.toLocalFile());
+            if (!file.open(QIODevice::ReadOnly)) {
+                return QByteArray();
+            }
+            return file.readAll();
+        };
+        const auto pngFast = encode({{"format", "png"}, {"compression", 0}});
+        const auto pngSmall = encode({{"format", "png"}, {"compression", 100}});
+        QVERIFY(!pngFast.isEmpty());
+        QVERIFY(pngFast != pngSmall);
+        QCOMPARE(QImage::fromData(pngFast).pixelColor(4, 4),
+                 QImage::fromData(pngSmall).pixelColor(4, 4));
+        const auto jpeg = encode({{"format", "jpeg"}, {"progressive", true}, {"quality", 85}});
+        QVERIFY(jpeg.contains(QByteArray::fromHex("ffc2")));
+        const auto baseline = encode({{"format", "jpeg"}, {"progressive", false}, {"quality", 85}});
+        QVERIFY(baseline.contains(QByteArray::fromHex("ffc0")));
+        const auto webp = encode({{"format", "webp"}, {"lossless", true}});
+        QVERIFY(webp.contains("VP8L"));
+        QCOMPARE(QImage::fromData(webp).pixelColor(4, 4), source.pixelColor(4, 4));
+        const auto lossy = encode({{"format", "webp"}, {"lossless", false}, {"quality", 100}});
+        QVERIFY(lossy.contains("VP8 "));
+        const auto gray = QImage::fromData(encode({{"format", "png"}, {"colorMode", 1}}));
+        QCOMPARE(gray.pixelColor(4, 4).red(), gray.pixelColor(4, 4).green());
+        QCOMPARE(gray.pixelColor(4, 4).alpha(), 140);
+        const auto indexed =
+            encode({{"format", "png"}, {"colorMode", 2}, {"paletteColors", 8}, {"dither", false}});
+        QVERIFY(!indexed.isEmpty());
+        QCOMPARE(uchar(indexed[25]), uchar(3));
+        const auto matte = QImage::fromData(
+            encode({{"format", "png"}, {"keepAlpha", false}, {"matte", "#ffffff"}}));
+        QCOMPARE(matte.pixelColor(0, 0), QColor(Qt::white));
+        for (const QByteArray& format : {QByteArray("pbm"), QByteArray("pgm"), QByteArray("ppm")}) {
+            const auto ascii = encode({{"format", format}, {"ascii", true}});
+            QCOMPARE(ascii.left(2), format == "pbm"   ? QByteArray("P1")
+                                    : format == "pgm" ? QByteArray("P2")
+                                                      : QByteArray("P3"));
+            QCOMPARE(QImage::fromData(ascii).size(), QSize(64, 64));
+        }
+        const auto density = QImage::fromData(encode({{"format", "png"}, {"dpi", 300}}));
+        QCOMPARE(density.dotsPerMeterX(), 11811);
+    }
+
+    void invalidExportAndSourceAliasesPreserveFiles()
+    {
+        QTemporaryDir directory;
+        const QString sourcePath = directory.filePath("source.png");
+        QImage image(64, 64, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(sourcePath));
+        QFile original(sourcePath);
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        const auto before = original.readAll();
+        original.close();
+        const QString destination = directory.filePath("existing.png");
+        QFile sentinel(destination);
+        QVERIFY(sentinel.open(QIODevice::WriteOnly));
+        sentinel.write("preserve me");
+        sentinel.close();
+        for (const QVariantMap& values : {QVariantMap{{"format", "gif"}},
+                                          QVariantMap{{"format", "png"}, {"unknownOption", true}},
+                                          QVariantMap{{"format", "png"}, {"width", -1}},
+                                          QVariantMap{{"format", "cur"}, {"hotspotX", 64}},
+                                          QVariantMap{{"format", "ico"}, {"iconSize", 512}},
+                                          QVariantMap{{"format", "png"}, {"dpi", 3000}}}) {
+            const auto result = Licasa::ImageSaveOperations::writeEditedImage(
+                sourcePath, destination, {}, Licasa::exportOptionsFromMap(values), 100);
+            QVERIFY(!result.errorMessage.isEmpty());
+            QVERIFY(sentinel.open(QIODevice::ReadOnly));
+            QCOMPARE(sentinel.readAll(), QByteArray("preserve me"));
+            sentinel.close();
+        }
+        QStringList aliases{sourcePath};
+#if defined(Q_OS_UNIX)
+        const QString hard = directory.filePath("hard.png"), soft = directory.filePath("soft.png");
+        QVERIFY(::link(QFile::encodeName(sourcePath).constData(),
+                       QFile::encodeName(hard).constData()) == 0);
+        QVERIFY(QFile::link(sourcePath, soft));
+        aliases << hard << soft;
+#endif
+        for (const auto& alias : aliases) {
+            const auto result = Licasa::ImageSaveOperations::writeEditedImage(
+                sourcePath, alias, {},
+                Licasa::exportOptionsFromMap({{"format", "png"}, {"copyOnly", true}}), 100);
+            QVERIFY(!result.errorMessage.isEmpty());
+        }
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        QCOMPARE(original.readAll(), before);
+    }
+
+    void queuedSaveRejectsChangedSourceAndCopyExtension()
+    {
+        QTemporaryDir directory;
+        const QString path = directory.filePath("source.png");
+        QImage image(64, 64, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(path));
+        Licasa::ImageSaveService service(*resourcePolicy_);
+        QSignalSpy failed(&service, &Licasa::ImageSaveService::saveFailed);
+        QMutexLocker lock(&resourcePolicy_->processingMutex());
+        const QString destination = directory.filePath("copy.png");
+        QVERIFY(service.save(QUrl::fromLocalFile(path), QUrl::fromLocalFile(destination), {},
+                             {{"format", "png"}, {"copyOnly", true}}));
+        image.fill(Qt::green);
+        QVERIFY(image.save(path));
+        lock.unlock();
+        QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 10000);
+        QVERIFY(!QFile::exists(destination));
+        QCOMPARE(QImage(path).pixelColor(0, 0), QColor(Qt::green));
+        const auto result = Licasa::ImageSaveOperations::writeEditedImage(
+            path, directory.filePath("ambiguous.jpg"), {},
+            Licasa::exportOptionsFromMap({{"format", "png"}, {"copyOnly", true}}), 100);
+        QVERIFY(!result.errorMessage.isEmpty());
+        QVERIFY(!QFile::exists(directory.filePath("ambiguous.png")));
+        QVERIFY(!QFile::exists(directory.filePath("ambiguous.jpg")));
+    }
+
+    void estimatesIdentifyOwnersAndCoalesceIndependently()
+    {
+        QTemporaryDir directory;
+        const QString path = directory.filePath("source.png");
+        QImage image(64, 64, QImage::Format_RGB32);
+        image.fill(Qt::green);
+        QVERIFY(image.save(path));
+        auto& policy = *resourcePolicy_;
+        Licasa::ImageSaveService service(policy);
+        QObject a, b;
+        QSignalSpy estimates(&service, &Licasa::ImageSaveService::sizeEstimateReady);
+        policy.processingMutex().lock();
+        service.estimateSize(QUrl::fromLocalFile(path), 1, {}, {{"format", "png"}}, &a);
+        service.estimateSize(QUrl::fromLocalFile(path), 1, {}, {{"format", "jpeg"}}, &b);
+        service.estimateSize(QUrl::fromLocalFile(path), 2, {}, {{"format", "png"}, {"scale", .5}},
+                             &a);
+        service.cancelSizeEstimate(&b);
+        service.estimateSize(QUrl::fromLocalFile(path), 3, {}, {{"format", "jpeg"}}, &b);
+        policy.processingMutex().unlock();
+        QTRY_COMPARE_WITH_TIMEOUT(estimates.count(), 3, 10000);
+        QList<int> aIds, bIds;
+        for (const auto& args : estimates) {
+            QVERIFY(args[2].toLongLong() > 0);
+            if (args[4].value<QObject*>() == &a) {
+                aIds << args[1].toInt();
+            }
+            if (args[4].value<QObject*>() == &b) {
+                bIds << args[1].toInt();
+            }
+        }
+        QCOMPARE(aIds, QList<int>({1, 2}));
+        QCOMPARE(bIds, QList<int>({3}));
+    }
+
+    void editedCopyPreservesResolutionFormatAndDensity_data()
+    {
+        QTest::addColumn<QByteArray>("format");
+        QTest::newRow("png") << QByteArrayLiteral("png");
+        QTest::newRow("jpeg") << QByteArrayLiteral("jpeg");
+    }
+
+    void editedCopyPreservesResolutionFormatAndDensity()
+    {
+        QFETCH(QByteArray, format);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString sourcePath = directory.filePath("source." + QString::fromLatin1(format));
+        const QString copyPath = directory.filePath("copy." + QString::fromLatin1(format));
+        QImage source(100, 80, QImage::Format_RGB32);
+        source.fill(QColor(60, 100, 140));
+        source.setDotsPerMeterX(11811);
+        source.setDotsPerMeterY(11811);
+        QVERIFY(source.save(sourcePath, format.constData()));
+        const QImage decodedSource(sourcePath);
+        QFile original(sourcePath);
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        const QByteArray before = original.readAll();
+        original.close();
+
+        Licasa::ImageSaveService service(*resourcePolicy_);
+        QSignalSpy saved(&service, &Licasa::ImageSaveService::saveCompleted);
+        QSignalSpy failed(&service, &Licasa::ImageSaveService::saveFailed);
+        QVERIFY(service.save(QUrl::fromLocalFile(sourcePath), QUrl::fromLocalFile(copyPath),
+                             {{"exposure", 0.2}}, {{"format", "original"}, {"scale", 1.0}}));
+        QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 1, 5000);
+        QCOMPARE(failed.count(), 0);
+        QImageReader reader(copyPath);
+        QCOMPARE(reader.format(), format);
+        const QImage copy = reader.read();
+        QVERIFY(!copy.isNull());
+        QCOMPARE(copy.size(), decodedSource.size());
+        QCOMPARE(copy.dotsPerMeterX(), decodedSource.dotsPerMeterX());
+        QCOMPARE(copy.dotsPerMeterY(), decodedSource.dotsPerMeterY());
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        QCOMPARE(original.readAll(), before);
+    }
+
+    void saveResultsIdentifyTheirRequestOwner_data()
+    {
+        QTest::addColumn<bool>("frameExport");
+        QTest::addColumn<QString>("outcome");
+        for (bool frame : {false, true}) {
+            const QByteArray prefix = frame ? "frame-" : "edited-";
+            for (const char* outcome :
+                 {"success", "invalid-source", "invalid-destination", "write-failure"}) {
+                QTest::newRow((prefix + outcome).constData()) << frame << QString(outcome);
+            }
+        }
+        QTest::newRow("frame-unavailable") << true << QStringLiteral("unavailable-frame");
+    }
+
+    void saveResultsIdentifyTheirRequestOwner()
+    {
+        QFETCH(bool, frameExport);
+        QFETCH(QString, outcome);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString sourcePath = directory.filePath(QStringLiteral("source.png"));
+        QImage image(12, 8, QImage::Format_RGBA8888);
+        image.fill(QColor(40, 120, 200, 170));
+        image.setColorSpace(QColorSpace::SRgb);
+        QVERIFY(image.save(sourcePath));
+        const QUrl sourceUrl = outcome == QStringLiteral("invalid-source")
+                                   ? QUrl(QStringLiteral("https://example.invalid/source.png"))
+                                   : QUrl::fromLocalFile(sourcePath);
+        const QString destinationPath = directory.filePath(
+            outcome == QStringLiteral("write-failure") ? QStringLiteral("missing/copy.png")
+                                                       : QStringLiteral("copy.png"));
+        const QUrl destinationUrl = outcome == QStringLiteral("invalid-destination")
+                                        ? QUrl(QStringLiteral("https://example.invalid/copy.png"))
+                                        : QUrl::fromLocalFile(destinationPath);
+        Licasa::ImageSaveService service(*resourcePolicy_);
+        QSignalSpy completed(&service, &Licasa::ImageSaveService::saveCompleted);
+        QSignalSpy failed(&service, &Licasa::ImageSaveService::saveFailed);
+        QSignalSpy frameCompleted(&service, &Licasa::ImageSaveService::frameSaveCompleted);
+        QSignalSpy frameFailed(&service, &Licasa::ImageSaveService::frameSaveFailed);
+        QObject owner;
+        const bool accepted =
+            frameExport ? service.saveFrameCopy(sourceUrl, destinationUrl,
+                                                outcome == QStringLiteral("unavailable-frame")
+                                                    ? Licasa::MotionPhotoFrameRaster{}
+                                                    : frameFromImage(image),
+                                                {}, &owner)
+                        : service.save(sourceUrl, destinationUrl, {}, {}, &owner);
+        const bool asynchronous =
+            outcome == QStringLiteral("success") || outcome == QStringLiteral("write-failure");
+        QCOMPARE(accepted, asynchronous);
+        if (asynchronous) {
+            QVERIFY(service.busy());
+            QTRY_VERIFY_WITH_TIMEOUT(!service.busy(), 5000);
+        }
+        const QSignalSpy& success = frameExport ? frameCompleted : completed;
+        const QSignalSpy& failure = frameExport ? frameFailed : failed;
+        QCOMPARE((frameExport ? completed : frameCompleted).count(), 0);
+        QCOMPARE((frameExport ? failed : frameFailed).count(), 0);
+        const QSignalSpy& result = outcome == QStringLiteral("success") ? success : failure;
+        QCOMPARE(result.count(), 1);
+        QCOMPARE(result.first().at(0).toUrl(), sourceUrl);
+        QCOMPARE(qvariant_cast<QObject*>(result.first().at(2)), &owner);
+        if (outcome == QStringLiteral("success")) {
+            QVERIFY(failure.isEmpty());
+            QCOMPARE(result.first().at(1).toUrl(), destinationUrl);
+            QCOMPARE(QImage(destinationPath).convertToFormat(QImage::Format_RGBA8888), image);
+        } else {
+            QVERIFY(success.isEmpty());
+            QVERIFY(!result.first().at(1).toString().isEmpty());
+            QVERIFY(!QFileInfo::exists(destinationPath));
+        }
+    }
+
+    void rejectedSaveDoesNotChangeTheActiveRequestOwner_data()
+    {
+        QTest::addColumn<bool>("frameExport");
+        QTest::newRow("edited-active-frame-rejected") << false;
+        QTest::newRow("frame-active-edited-rejected") << true;
+    }
+
+    void rejectedSaveDoesNotChangeTheActiveRequestOwner()
+    {
+        QFETCH(bool, frameExport);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QImage image(12, 8, QImage::Format_RGBA8888);
+        image.fill(Qt::darkCyan);
+        image.setColorSpace(QColorSpace::SRgb);
+        const QString sourcePath = directory.filePath(QStringLiteral("source.png"));
+        QVERIFY(image.save(sourcePath));
+        const QUrl sourceUrl = QUrl::fromLocalFile(sourcePath);
+        const QUrl destinationUrl =
+            QUrl::fromLocalFile(directory.filePath(QStringLiteral("copy.png")));
+        const QUrl rejectedDestination =
+            QUrl::fromLocalFile(directory.filePath(QStringLiteral("rejected.png")));
+        Licasa::ImageSaveService service(*resourcePolicy_);
+        QSignalSpy completed(&service, &Licasa::ImageSaveService::saveCompleted);
+        QSignalSpy failed(&service, &Licasa::ImageSaveService::saveFailed);
+        QSignalSpy frameCompleted(&service, &Licasa::ImageSaveService::frameSaveCompleted);
+        QSignalSpy frameFailed(&service, &Licasa::ImageSaveService::frameSaveFailed);
+        QObject activeOwner;
+        QObject rejectedOwner;
+        QMutexLocker gate(&resourcePolicy_->processingMutex());
+        const bool accepted = frameExport
+                                  ? service.saveFrameCopy(sourceUrl, destinationUrl,
+                                                          frameFromImage(image), {}, &activeOwner)
+                                  : service.save(sourceUrl, destinationUrl, {}, {}, &activeOwner);
+        QVERIFY(accepted);
+        const bool rejected =
+            frameExport ? service.save(sourceUrl, rejectedDestination, {}, {}, &rejectedOwner)
+                        : service.saveFrameCopy(sourceUrl, rejectedDestination,
+                                                frameFromImage(image), {}, &rejectedOwner);
+        QVERIFY(!rejected);
+        const QSignalSpy& rejection = frameExport ? failed : frameFailed;
+        QCOMPARE(rejection.count(), 1);
+        QCOMPARE(rejection.first().at(0).toUrl(), sourceUrl);
+        QCOMPARE(qvariant_cast<QObject*>(rejection.first().at(2)), &rejectedOwner);
+        QVERIFY(service.busy());
+        QVERIFY(completed.isEmpty());
+        QVERIFY(frameCompleted.isEmpty());
+        gate.unlock();
+        const QSignalSpy& success = frameExport ? frameCompleted : completed;
+        QTRY_COMPARE_WITH_TIMEOUT(success.count(), 1, 5000);
+        QCOMPARE(qvariant_cast<QObject*>(success.first().at(2)), &activeOwner);
+        QVERIFY(!QImage(destinationUrl.toLocalFile()).isNull());
+        QVERIFY(!QFileInfo::exists(rejectedDestination.toLocalFile()));
+    }
+
+    void saveContinuesAfterRequestOwnerDestroyed_data()
+    {
+        QTest::addColumn<bool>("frameExport");
+        QTest::newRow("edited") << false;
+        QTest::newRow("frame") << true;
+    }
+
+    void saveContinuesAfterRequestOwnerDestroyed()
+    {
+        QFETCH(bool, frameExport);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QImage image(12, 8, QImage::Format_RGBA8888);
+        image.fill(Qt::darkCyan);
+        image.setColorSpace(QColorSpace::SRgb);
+        const QString sourcePath = directory.filePath(QStringLiteral("source.png"));
+        const QString destinationPath = directory.filePath(QStringLiteral("copy.png"));
+        QVERIFY(image.save(sourcePath));
+        const QUrl sourceUrl = QUrl::fromLocalFile(sourcePath);
+        const QUrl destinationUrl = QUrl::fromLocalFile(destinationPath);
+        Licasa::ImageSaveService service(*resourcePolicy_);
+        QSignalSpy completed(&service, &Licasa::ImageSaveService::saveCompleted);
+        QSignalSpy failed(&service, &Licasa::ImageSaveService::saveFailed);
+        QSignalSpy frameCompleted(&service, &Licasa::ImageSaveService::frameSaveCompleted);
+        QSignalSpy frameFailed(&service, &Licasa::ImageSaveService::frameSaveFailed);
+        auto owner = std::make_unique<QObject>();
+        QPointer<QObject> ownerGuard(owner.get());
+        QMutexLocker gate(&resourcePolicy_->processingMutex());
+        const bool accepted = frameExport
+                                  ? service.saveFrameCopy(sourceUrl, destinationUrl,
+                                                          frameFromImage(image), {}, owner.get())
+                                  : service.save(sourceUrl, destinationUrl, {}, {}, owner.get());
+        QVERIFY(accepted);
+        owner.reset();
+        QVERIFY(ownerGuard.isNull());
+        QVERIFY(completed.isEmpty());
+        QVERIFY(frameCompleted.isEmpty());
+        gate.unlock();
+        const QSignalSpy& success = frameExport ? frameCompleted : completed;
+        QTRY_COMPARE_WITH_TIMEOUT(success.count(), 1, 5000);
+        QCOMPARE(qvariant_cast<QObject*>(success.first().at(2)), nullptr);
+        QVERIFY(failed.isEmpty());
+        QVERIFY(frameFailed.isEmpty());
+        QCOMPARE(QImage(destinationPath).convertToFormat(QImage::Format_RGBA8888), image);
+    }
+
     void sharpenMatchesOriginalPixelStencil()
     {
         QRandomGenerator random(0x51a4u);
@@ -362,7 +989,7 @@ class ImageSaveServiceTest final : public QObject {
         const qint64 estimatedBytes = estimates.first().at(2).toLongLong();
         QVERIFY(estimatedBytes > 0);
         QVERIFY(service.save(sourceUrl,
-                             QUrl::fromLocalFile(directory.filePath(QStringLiteral("edited.png"))),
+                             QUrl::fromLocalFile(directory.filePath(QStringLiteral("edited.bmp"))),
                              edits, exportValues));
         QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 1, 15000);
         QCOMPARE(QFileInfo(saved.first().at(1).toUrl().toLocalFile()).size(), estimatedBytes);
@@ -453,7 +1080,7 @@ class ImageSaveServiceTest final : public QObject {
         });
         QCOMPARE(nonFiniteExport.scale, 1.0);
         QCOMPARE(nonFiniteExport.quality, 1);
-        QVERIFY(nonFiniteExport.format.isEmpty());
+        QCOMPARE(nonFiniteExport.format, QByteArrayLiteral("gif"));
 
         const Licasa::ImageExportOptions boundedExport = Licasa::exportOptionsFromMap({
             {QStringLiteral("scale"), 40.0},

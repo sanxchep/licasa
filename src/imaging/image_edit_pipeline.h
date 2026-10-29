@@ -41,6 +41,31 @@ struct ImageExportOptions {
     qreal scale = 1.0;
     int quality = 95;
     QByteArray format;
+    int width = 0;
+    int height = 0;
+    int compression = 50;
+    bool progressive = false;
+    bool optimized = true;
+    bool lossless = false;
+    bool nearest = false;
+    bool keepAlpha = true;
+    QString matte = QStringLiteral("#ffffff");
+    int colorMode = 0; // RGB, grayscale, indexed
+    int paletteColors = 216;
+    bool dither = true;
+    int threshold = 128;
+    bool invert = false;
+    bool ascii = false;
+    int iconSize = 0; // zero preserves an existing legal icon canvas
+    bool iconCrop = false;
+    int hotspotX = 0;
+    int hotspotY = 0;
+    int dpi = 0; // zero preserves the decoded density
+    bool srgb = false;
+    bool stripMetadata = true;
+    bool copyOnly = false;
+    QString validationError;
+    QString symbol = QStringLiteral("licasa_image");
 };
 
 enum class ImageEditBackend { Automatic, Cpu, OpenCl, Cuda };

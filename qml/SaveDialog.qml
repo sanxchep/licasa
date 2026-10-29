@@ -7,6 +7,7 @@
 import QtQuick
 import QtQuick.Dialogs
 import "DialogRuntime.js" as DialogRuntime
+import "FileUrls.js" as FileUrls
 
 FileDialog {
     id: dialog
@@ -14,6 +15,7 @@ FileDialog {
 
     required property var formatSupport
     required property url suggestedFile
+    property string fileFormat: ""
 
     signal fileChosen(url fileUrl)
     signal openFailed(string message)
@@ -22,11 +24,32 @@ FileDialog {
         return DialogRuntime.open(dialog)
     }
 
-    title: "Save edited image as"
-    fileMode: FileDialog.SaveFile
-    nameFilters: formatSupport.saveNameFilters
-    defaultSuffix: "png"
+    function selectSuggestedFormat() {
+        const suffix = FileUrls.parts(suggestedFile).suffix
+        for (let index = 0; index < nameFilters.length; ++index) {
+            if (String(nameFilters[index]).split(/[\s()]+/).indexOf("*." + suffix) >= 0) {
+                selectedNameFilter.index = index
+                break
+            }
+        }
+    }
 
-    Component.onCompleted: selectedFile = suggestedFile
+    title: "Save as a copy"
+    fileMode: FileDialog.SaveFile
+    nameFilters: fileFormat.length > 0
+        ? formatSupport.saveNameFilters.filter(function(filter) {
+            return String(filter).indexOf("*." + FileUrls.parts(suggestedFile).suffix) >= 0
+                && String(filter).indexOf("All writable") < 0
+        }) : formatSupport.saveNameFilters
+    defaultSuffix: FileUrls.parts(suggestedFile).suffix || "png"
+
+    Component.onCompleted: {
+        selectedFile = suggestedFile
+        selectSuggestedFormat()
+    }
+    onSuggestedFileChanged: {
+        selectedFile = suggestedFile
+        selectSuggestedFormat()
+    }
     onAccepted: fileChosen(selectedFile)
 }

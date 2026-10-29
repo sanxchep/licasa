@@ -7,6 +7,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Window
 import "components"
 
 Item {
@@ -16,16 +17,36 @@ Item {
     required property bool hasImage
 
     property bool smoothMotionEnabled: true
+    property bool launcherBlocked: false
+    readonly property bool panelVisible: panelOpen || panel.revealProgress > 0.001
     property real cornerControlSize: 48
     property real cornerControlMargin: 24
     property bool compareOriginal: false
     property bool hasAdjustments: false
     property bool saveBusy: false
+    property bool sourceChanged: false
+    property url imageSource: ""
+    property bool overwriteConfirmationOpen: false
+    readonly property Item focusedItem: Window.window ? Window.window.activeFocusItem : null
+    readonly property EditorNumber focusedNumber: focusedItem as EditorNumber
+    onFocusedItemChanged: {
+        if (panelOpen) focusRevealTimer.restart()
+    }
+    Timer {
+        id: focusRevealTimer
+        interval: 0
+        onTriggered: { if (root.panelOpen) root.revealFocusedItem(root.focusedItem) }
+    }
+    readonly property bool pendingNumber: focusedNumber !== null && focusedNumber.dirty
+    readonly property bool canOverwrite: panelOpen && hasImage && (hasAdjustments || pendingNumber)
+        && !saveBusy && !cropMode && !sourceChanged
     property string saveStatus: ""
     property bool cropMode: false
     property string cropAspectPreset: "free"
     property int cropOutputWidth: 0
     property int cropOutputHeight: 0
+    property real cropImageWidth: 0
+    property real cropImageHeight: 0
     property string cropEstimatedFileSize: ""
     property bool customAspectEditorOpen: false
     property string customAspectWidthText: "4"
@@ -58,6 +79,19 @@ Item {
     property string exportFormat: "original"
     property real exportScale: 1.0
     property int exportQuality: 95
+    property var exportSettings: ({})
+    property var exportFormats: []
+    property string estimatedSize: ""
+    property string exportSourceFormat: "png"
+    signal exportSettingRequested(string name, var value)
+    signal exportRequested()
+    signal historyRequested(bool redo)
+    Connections {
+        target: root.focusedNumber
+        function onHistoryRequested(redo) { root.historyRequested(redo) }
+    }
+    property int unscaledOutputWidth: Math.max(1, Math.round(outputWidth / exportScale))
+    property int unscaledOutputHeight: Math.max(1, Math.round(outputHeight / exportScale))
     property int outputWidth: 0
     property int outputHeight: 0
 
@@ -99,6 +133,7 @@ Item {
     readonly property int panelMotionDuration: smoothMotionEnabled ? 220 : 0
     readonly property int buttonMotionDuration: smoothMotionEnabled ? 140 : 0
     readonly property string toolSubtitle: {
+        if (sourceChanged) return "File changed. Reopen to continue."
         switch (activeTool) {
         case "crop": return cropMode ? "Adjust the frame, then apply" : "Frame, rotate, and mirror"
         case "looks": return "One-click non-destructive styles"
@@ -107,12 +142,51 @@ Item {
         }
     }
 
+    function requestSaveConfirmation() {
+        finishPendingInput(true)
+        if (!canOverwrite || !hasAdjustments)
+            return
+        overwriteConfirmationOpen = true
+        overwriteNoButton.forceActiveFocus()
+    }
+
+    function cancelSaveConfirmation(restoreFocus = true) {
+        overwriteConfirmationOpen = false
+        if (restoreFocus && canOverwrite) {
+            if (activeTool === "export") toolTabRepeater.itemAt(3).forceActiveFocus()
+            else saveButton.forceActiveFocus()
+        }
+    }
+
+    function confirmOverwrite() {
+        if (!overwriteConfirmationOpen || !canOverwrite || !hasAdjustments)
+            return
+        overwriteConfirmationOpen = false
+        root.saveRequested()
+    }
+
+    onCanOverwriteChanged: {
+        if (!canOverwrite)
+            overwriteConfirmationOpen = false
+    }
+    onImageSourceChanged: overwriteConfirmationOpen = false
+    onActiveToolChanged: overwriteConfirmationOpen = false
+
     function activateTool(tool) {
         if (cropMode && tool !== "crop")
             return
+        finishPendingInput(true)
         activeTool = tool
         flick.contentY = 0
         toolActivated(tool)
+    }
+
+    function finishPendingInput(apply) {
+        const input = focusedNumber
+        if (!input) return
+        let ancestor = input.parent
+        while (ancestor && ancestor !== root) ancestor = ancestor.parent
+        if (ancestor) input.finishEditing(apply)
     }
 
     function scrollByPage(direction) {
@@ -165,6 +239,22 @@ Item {
         wheel.accepted = true
     }
 
+    // Controls consume their own arrows first (sliders, fields and tool tabs).
+    // An otherwise unhandled arrow dismisses the drawer without browsing/zooming.
+    Keys.priority: Keys.AfterItem
+    Keys.onPressed: function(event) {
+        if (overwriteConfirmationOpen && event.key === Qt.Key_Escape) {
+            cancelSaveConfirmation()
+            event.accepted = true
+            return
+        }
+        if (!root.panelOpen || event.modifiers !== Qt.NoModifier
+                || [Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down].indexOf(event.key) < 0)
+            return
+        event.accepted = true
+        root.panelOpenChangedByUser(false)
+    }
+
     anchors.fill: parent
     visible: hasImage || panelOpen
     enabled: visible
@@ -176,18 +266,37 @@ Item {
 
     RoundIconButton {
         id: editorButton
+        objectName: "editorMenuButton"
         visible: root.hasImage && !root.panelOpen
-            && panel.x <= -panel.width - 17
+            && panel.x <= -panel.width - 17 && hideProgress < 1
+        enabled: !root.launcherBlocked
+        Accessible.ignored: root.launcherBlocked
+        property real hideProgress: root.launcherBlocked ? 1 : 0
+        Behavior on hideProgress {
+            NumberAnimation { duration: root.panelMotionDuration; easing.type: Easing.OutCubic }
+        }
         width: root.cornerControlSize
         height: width
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         anchors.leftMargin: root.cornerControlMargin
+            - (root.cornerControlMargin + width + 8) * hideProgress
         anchors.bottomMargin: root.cornerControlMargin
         iconName: "edit"
         accessibleName: "Open editor"
         animationDuration: root.buttonMotionDuration
-        onClicked: root.panelOpenChangedByUser(true)
+        onClicked: {
+            if (!root.launcherBlocked)
+                root.panelOpenChangedByUser(true)
+        }
+    }
+
+    MouseArea {
+        objectName: "editorDismissArea"
+        anchors.fill: parent
+        // Keep the crop canvas available for drawing and dragging a crop.
+        enabled: root.panelOpen && !root.cropMode
+        onClicked: root.panelOpenChangedByUser(false)
     }
 
     Rectangle {
@@ -204,14 +313,16 @@ Item {
     Rectangle {
         id: panel
         objectName: "editorPanel"
+        clip: true
+        enabled: root.panelOpen
         width: root.panelWidth
         height: root.height - 24
         // The hidden position follows the window size without animating it.
         property real revealProgress: root.panelOpen ? 1 : 0
         x: -width - 18 + (width + 18 + root.panelLeftMargin) * revealProgress
         y: 12
-        radius: 26
-        color: "#F21A1A1A"
+        radius: 28
+        color: "#FA1A1A1A"
         border.width: 1
         border.color: "#30FFFFFF"
         antialiasing: true
@@ -226,6 +337,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.AllButtons
+            onPressed: root.forceActiveFocus()
             onWheel: function(wheel) { root.scrollEditorByWheel(wheel) }
         }
 
@@ -233,6 +345,7 @@ Item {
 
         Item {
             id: header
+            enabled: !root.overwriteConfirmationOpen
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
@@ -263,7 +376,7 @@ Item {
 
             Row {
                 anchors.right: parent.right
-                anchors.rightMargin: 14
+                anchors.rightMargin: 20
                 anchors.top: parent.top
                 anchors.topMargin: 16
                 spacing: 6
@@ -272,13 +385,14 @@ Item {
                     width: 64
                     height: 34
                     text: "Reset"
-                    enabled: root.hasAdjustments && !root.cropMode
+                    enabled: (root.hasAdjustments || root.pendingNumber) && !root.cropMode
                     highlighted: root.hasAdjustments && !root.cropMode
                     animationDuration: root.buttonMotionDuration
                     onClicked: root.resetRequested()
                 }
 
                 HeaderButton {
+                    objectName: "editorCloseButton"
                     width: 34
                     height: 34
                     text: "×"
@@ -291,11 +405,12 @@ Item {
 
         Rectangle {
             id: toolBar
+            enabled: !root.overwriteConfirmationOpen
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: header.bottom
-            anchors.leftMargin: 14
-            anchors.rightMargin: 14
+            anchors.leftMargin: 20
+            anchors.rightMargin: 20
             height: 46
             radius: 15
             color: "#D0121212"
@@ -391,20 +506,25 @@ Item {
 
         Flickable {
             id: flick
+            objectName: "editorScrollArea"
+            enabled: !root.overwriteConfirmationOpen
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: toolBar.bottom
             anchors.bottom: footer.top
-            anchors.margins: 14
+            anchors.margins: 20
             anchors.topMargin: 12
-            anchors.bottomMargin: 10
+            anchors.bottomMargin: 16
             clip: true
             contentWidth: width
             contentHeight: contentColumn.implicitHeight
+            onContentHeightChanged: focusRevealTimer.restart()
+            onHeightChanged: focusRevealTimer.restart()
             boundsBehavior: Flickable.StopAtBounds
 
             Column {
                 id: contentColumn
+                enabled: !root.sourceChanged
                 width: flick.width
                 spacing: 12
 
@@ -444,6 +564,8 @@ Item {
                     cropMode: root.cropMode
                     cropOutputWidth: root.cropOutputWidth
                     cropOutputHeight: root.cropOutputHeight
+                    imageWidth: root.cropImageWidth
+                    imageHeight: root.cropImageHeight
                     cropEstimatedFileSize: root.cropEstimatedFileSize
                     cropAspectPreset: root.cropAspectPreset
                     customAspectEditorOpen: root.customAspectEditorOpen
@@ -518,7 +640,7 @@ Item {
 
                     Text {
                         width: parent.width
-                        text: "Tip: hold Original below to compare any look without changing it."
+                        text: "Every look remains fully undoable."
                         color: "#90FFFFFF"
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
@@ -532,6 +654,16 @@ Item {
                     exportFormat: root.exportFormat
                     exportScale: root.exportScale
                     exportQuality: root.exportQuality
+                    exportFormats: root.exportFormats
+                    sourceFormat: root.exportSourceFormat
+                    exportSettings: root.exportSettings
+                    estimatedSize: root.estimatedSize
+                    saveBusy: root.saveBusy
+                    hasImage: root.hasImage
+                    onSettingRequested: function(name, value) { root.exportSettingRequested(name, value) }
+                    onExportRequested: root.exportRequested()
+                    unscaledWidth: root.unscaledOutputWidth
+                    unscaledHeight: root.unscaledOutputHeight
                     outputWidth: root.outputWidth
                     outputHeight: root.outputHeight
                     saveStatus: root.saveStatus
@@ -545,6 +677,7 @@ Item {
 
         InteractiveScrollBar {
             id: editorScrollBar
+            enabled: !root.overwriteConfirmationOpen
 
             flickable: flick
             width: 16
@@ -558,27 +691,135 @@ Item {
             activeHandleColor: "#E0FFFFFF"
         }
 
-        Rectangle {
+        MouseArea {
+            objectName: "editorOverwriteDismissArea"
+            anchors.fill: parent
+            z: 2
+            enabled: root.overwriteConfirmationOpen
+            visible: enabled
+            onClicked: root.cancelSaveConfirmation()
+        }
+
+        Item {
+            id: overwriteConfirmation
+            objectName: "editorOverwriteConfirmation"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: footer.top
+            anchors.leftMargin: 20
+            anchors.rightMargin: 20
+            anchors.bottomMargin: 12
+            height: warningBody.implicitHeight + 28
+            z: 30
+            clip: true
+            visible: root.overwriteConfirmationOpen || revealProgress > 0
+            enabled: root.overwriteConfirmationOpen
+            property real revealProgress: root.overwriteConfirmationOpen ? 1 : 0
+            Accessible.role: Accessible.Dialog
+            Accessible.name: "Overwrite original?"
+            Accessible.description: "This replaces the original image. The original will be lost. Continue?"
+            Accessible.ignored: !root.overwriteConfirmationOpen
+
+            Behavior on revealProgress {
+                NumberAnimation {
+                    duration: root.smoothMotionEnabled ? 180 : 0
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                radius: 16
+                color: "#292318"
+                border.width: 1
+                border.color: "#D9B34C"
+                opacity: overwriteConfirmation.revealProgress
+                transform: Translate {
+                    y: (overwriteConfirmation.height + 8) * (1 - overwriteConfirmation.revealProgress)
+                }
+
+                MouseArea { anchors.fill: parent }
+
+                Column {
+                    id: warningBody
+                    x: 14
+                    y: 14
+                    width: parent.width - 28
+                    spacing: 10
+
+                    Text {
+                        width: parent.width
+                        text: "⚠  Overwrite original?"
+                        color: "#F0CC70"
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
+                        wrapMode: Text.Wrap
+                        renderType: Text.NativeRendering
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: overwriteConfirmation.Accessible.description
+                        color: "#E6FFFFFF"
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                        renderType: Text.NativeRendering
+                    }
+
+                    Row {
+                        width: parent.width
+                        spacing: 8
+                        layoutDirection: Qt.RightToLeft
+
+                        ActionChip {
+                            id: overwriteYesButton
+                            objectName: "editorOverwriteYesButton"
+                            width: 68
+                            text: "Yes"
+                            checked: true
+                            accent: "#8A681E"
+                            enabled: root.overwriteConfirmationOpen && root.canOverwrite
+                            animationDuration: root.buttonMotionDuration
+                            KeyNavigation.tab: overwriteNoButton
+                            KeyNavigation.backtab: overwriteNoButton
+                            onClicked: root.confirmOverwrite()
+                        }
+
+                        ActionChip {
+                            id: overwriteNoButton
+                            objectName: "editorOverwriteNoButton"
+                            width: 68
+                            text: "No"
+                            animationDuration: root.buttonMotionDuration
+                            KeyNavigation.tab: overwriteYesButton
+                            KeyNavigation.backtab: overwriteYesButton
+                            onClicked: root.cancelSaveConfirmation()
+                        }
+                    }
+                }
+            }
+        }
+
+        Item {
             id: footer
+            objectName: "editorFooter"
+            z: 3
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            height: root.cropMode ? 76 : 88
-            radius: panel.radius
-            color: "#FA1A1A1A"
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                height: 1
-                color: "#24FFFFFF"
-            }
+            anchors.leftMargin: 20
+            anchors.rightMargin: 20
+            property real revealProgress: root.activeTool === "export" && !root.cropMode ? 0 : 1
+            Behavior on revealProgress { NumberAnimation { duration: root.smoothMotionEnabled ? 180 : 0; easing.type: Easing.OutCubic } }
+            enabled: root.activeTool !== "export" || root.cropMode
+            opacity: revealProgress
+            visible: revealProgress > .001
+            anchors.bottomMargin: 20 - 60 * (1 - revealProgress)
+            height: root.cropMode ? 44 : 40
 
             Row {
                 visible: root.cropMode
                 anchors.fill: parent
-                anchors.margins: 16
                 spacing: 10
 
                 ActionChip {
@@ -600,143 +841,38 @@ Item {
                 }
             }
 
-            Column {
+            Row {
                 visible: !root.cropMode
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 8
+                spacing: 10
 
-                Row {
-                    width: parent.width
-                    height: 34
-                    spacing: 8
-
-                    Rectangle {
-                        id: originalCompareButton
-                        objectName: "editorOriginalCompareButton"
-                        property bool heldByKeyboard: false
-                        width: 104
-                        height: parent.height
-                        radius: height / 2
-                        color: originalMouse.pressed || root.compareOriginal
-                            ? "#40FFFFFF" : "#18FFFFFF"
-                        border.width: 1
-                        border.color: activeFocus ? "#C8FFFFFF" : "#28FFFFFF"
-                        activeFocusOnTab: root.panelOpen && !root.cropMode
-
-                        Accessible.role: Accessible.CheckBox
-                        Accessible.name: "Compare with original"
-                        Accessible.description: "Hold Space or Enter for a temporary comparison"
-                        Accessible.checkable: true
-                        Accessible.checked: root.compareOriginal
-                        Accessible.focusable: activeFocusOnTab
-                        Accessible.focused: activeFocus
-                        Accessible.onPressAction: {
-                            if (root.compareOriginal)
-                                root.compareOriginalReleased()
-                            else
-                                root.compareOriginalPressed()
-                        }
-                        Accessible.onToggleAction: {
-                            if (root.compareOriginal)
-                                root.compareOriginalReleased()
-                            else
-                                root.compareOriginalPressed()
-                        }
-
-                        Keys.onPressed: function(event) {
-                            if ((event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
-                                    && event.key !== Qt.Key_Enter) || event.isAutoRepeat)
-                                return
-                            heldByKeyboard = true
-                            root.compareOriginalPressed()
-                            event.accepted = true
-                        }
-
-                        Keys.onReleased: function(event) {
-                            if (!heldByKeyboard || (event.key !== Qt.Key_Space
-                                    && event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter)
-                                    || event.isAutoRepeat)
-                                return
-                            heldByKeyboard = false
-                            root.compareOriginalReleased()
-                            event.accepted = true
-                        }
-
-                        onActiveFocusChanged: {
-                            if (!activeFocus && heldByKeyboard) {
-                                heldByKeyboard = false
-                                root.compareOriginalReleased()
-                            }
-                        }
-
-                        onVisibleChanged: {
-                            if (!visible && heldByKeyboard) {
-                                heldByKeyboard = false
-                                root.compareOriginalReleased()
-                            }
-                        }
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "Hold original"
-                            color: "white"
-                            font.pixelSize: 11
-                            font.weight: Font.Medium
-                            renderType: Text.NativeRendering
-                        }
-
-                        MouseArea {
-                            id: originalMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onPressed: {
-                                originalCompareButton.forceActiveFocus()
-                                root.compareOriginalPressed()
-                            }
-                            onReleased: root.compareOriginalReleased()
-                            onCanceled: root.compareOriginalReleased()
-                        }
-                    }
-
-                    ActionChip {
-                        width: (parent.width - 120) * 0.45
-                        height: parent.height
-                        text: root.saveBusy ? "Saving…" : "Save"
-                        enabled: !root.saveBusy && root.hasAdjustments
-                        checked: root.hasAdjustments && !root.saveBusy
-                        accent: "#48FFFFFF"
-                        animationDuration: root.buttonMotionDuration
-                        onClicked: root.saveRequested()
-                    }
-
-                    ActionChip {
-                        width: parent.width - x
-                        height: parent.height
-                        text: "Export…"
-                        enabled: !root.saveBusy
-                        animationDuration: root.buttonMotionDuration
-                        onClicked: {
-                            if (root.activeTool === "export")
-                                root.saveAsRequested()
-                            else
-                                root.activateTool("export")
-                        }
-                    }
+                ActionChip {
+                    id: saveButton
+                    objectName: "editorSaveButton"
+                    width: (parent.width - parent.spacing) * 0.38
+                    height: parent.height
+                    text: root.saveBusy ? "Saving…" : "Save"
+                    enabled: root.canOverwrite
+                    checked: root.hasAdjustments && !root.saveBusy
+                    accent: "#48FFFFFF"
+                    animationDuration: root.buttonMotionDuration
+                    onClicked: root.requestSaveConfirmation()
                 }
 
-                Text {
-                    width: parent.width
-                    text: root.activeTool === "export"
-                        ? "Export… opens the destination picker"
-                        : "Edits stay non-destructive until Save or Export"
-                    color: "#7FFFFFFF"
-                    font.pixelSize: 10
-                    horizontalAlignment: Text.AlignHCenter
-                    renderType: Text.NativeRendering
+                ActionChip {
+                    objectName: "editorSaveCopyButton"
+                    width: parent.width - x
+                    height: parent.height
+                    text: "Save as a copy"
+                    enabled: !root.saveBusy && root.hasImage && !root.sourceChanged
+                    animationDuration: root.buttonMotionDuration
+                    onClicked: {
+                        root.cancelSaveConfirmation(false)
+                        root.saveAsRequested()
+                    }
                 }
             }
+
         }
     }
 }

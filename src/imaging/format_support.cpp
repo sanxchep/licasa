@@ -1,4 +1,5 @@
 #include "imaging/format_support.h"
+#include "export/image_export_contract.h"
 #include <QCollator>
 #include <QDebug>
 #include <QDir>
@@ -132,17 +133,18 @@ FormatSupport::FormatSupport(QObject* parent) : QObject(parent)
         }
     }
 
-    const auto hasWritablePattern = [&writablePatterns](const QString& pattern) {
-        return writablePatterns.contains(pattern);
-    };
-    if (hasWritablePattern(QStringLiteral("*.png"))) {
-        saveNameFilters_ << QStringLiteral("PNG image (*.png)");
-    }
-    if (hasWritablePattern(QStringLiteral("*.jpg"))) {
-        saveNameFilters_ << QStringLiteral("JPEG image (*.jpg *.jpeg)");
-    }
-    if (hasWritablePattern(QStringLiteral("*.webp"))) {
-        saveNameFilters_ << QStringLiteral("WebP image (*.webp)");
+    for (const auto& entry : ImageExport::formats()) {
+        const auto item = entry.toMap();
+        const QString key = item.value(QStringLiteral("key")).toString();
+        QString extensions = QStringLiteral("*.") + item.value(QStringLiteral("suffix")).toString();
+        if (key == QStringLiteral("jpeg")) {
+            extensions += QStringLiteral(" *.jpeg");
+        }
+        if (key == QStringLiteral("tiff")) {
+            extensions += QStringLiteral(" *.tif");
+        }
+        saveNameFilters_ << item.value(QStringLiteral("label")).toString() +
+                                QStringLiteral(" image (") + extensions + ')';
     }
 
     QStringList allWritablePatterns = writablePatterns.values();
@@ -164,6 +166,8 @@ FormatSupport::~FormatSupport()
 }
 
 QStringList FormatSupport::nameFilters() const { return nameFilters_; }
+
+QVariantList FormatSupport::exportFormats() const { return ImageExport::formats(); }
 
 QStringList FormatSupport::saveNameFilters() const { return saveNameFilters_; }
 

@@ -90,13 +90,21 @@ function suggestedCopy(value, label, suffix) {
     return fromLocalPath(source.folder + source.stem + "-" + label + "." + suffix)
 }
 
-function suggestedEditedCopy(value, format) {
+function suggestedEditedCopy(value, format, writableFilters) {
     const source = parts(value)
     let suffix = ["jpg", "jpeg", "png", "webp"].indexOf(source.suffix) >= 0
         ? source.suffix : "png"
+    if (source.suffix && writableFilters) {
+        for (let index = 0; index < writableFilters.length; ++index) {
+            if (String(writableFilters[index]).split(/[\s()]+/).indexOf("*." + source.suffix) >= 0) {
+                suffix = source.suffix
+                break
+            }
+        }
+    }
     if (format === "jpeg")
         suffix = "jpg"
-    else if (format === "png" || format === "webp")
+    else if (["png", "webp", "tiff", "bmp", "ico", "cur", "icns", "pbm", "pgm", "ppm", "wbmp", "xbm", "xpm"].indexOf(format) >= 0)
         suffix = format
     return suggestedCopy(value, "edited", suffix)
 }

@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QThreadPool>
 #include <QUrl>
+#include <QVariantList>
 #include <atomic>
 
 namespace Licasa {
@@ -14,6 +15,7 @@ class FormatSupport final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QStringList nameFilters READ nameFilters CONSTANT)
     Q_PROPERTY(QStringList saveNameFilters READ saveNameFilters CONSTANT)
+    Q_PROPERTY(QVariantList exportFormats READ exportFormats CONSTANT)
 
   public:
     explicit FormatSupport(QObject* parent = nullptr);
@@ -21,6 +23,7 @@ class FormatSupport final : public QObject {
 
     QStringList nameFilters() const;
     QStringList saveNameFilters() const;
+    QVariantList exportFormats() const;
     Q_INVOKABLE bool canOpen(const QUrl& url) const;
     Q_INVOKABLE void prepareDirectoryIndex(const QUrl& current);
     Q_INVOKABLE bool hasDirectoryIndex(const QUrl& current) const;

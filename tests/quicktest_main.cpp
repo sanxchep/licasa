@@ -1,4 +1,6 @@
 #include "app/application_settings.h"
+#include "editor_test_support.h"
+#include "export/image_save_service.h"
 #include "imaging/async_image_provider.h"
 #include "imaging/codec_plugins.h"
 #include "imaging/image_animation.h"
@@ -167,11 +169,15 @@ class LicasaQuickSetup final : public QObject {
         auto* provider = new Licasa::AsyncImageProvider(*policy_);
         animations_ = std::make_unique<Licasa::ImageAnimationService>(*policy_, *provider);
         engine->addImageProvider("testStill", provider);
+        engine->addImageProvider("licasa", new Licasa::AsyncImageProvider(*policy_));
+        saveService_ = std::make_unique<Licasa::ImageSaveService>(*policy_);
         engine->addImageProvider("animation", animations_->createFrameProvider());
         engine->addImageProvider("previewTest",
                                  new ControlledPreviewProvider(previewRequests_.state));
         engine->rootContext()->setContextProperty("testAnimationService", animations_.get());
         engine->rootContext()->setContextProperty("testPreviewRequests", &previewRequests_);
+        engine->rootContext()->setContextProperty("testEditor", &editorSupport_);
+        engine->rootContext()->setContextProperty("testImageSaveService", saveService_.get());
     }
 
   private:
@@ -179,6 +185,8 @@ class LicasaQuickSetup final : public QObject {
     std::unique_ptr<Licasa::ImageResourcePolicy> policy_;
     std::unique_ptr<Licasa::ImageAnimationService> animations_;
     PreviewRequestController previewRequests_;
+    EditorTestSupport editorSupport_;
+    std::unique_ptr<Licasa::ImageSaveService> saveService_;
 };
 
 QUICK_TEST_MAIN_WITH_SETUP(licasa, LicasaQuickSetup)

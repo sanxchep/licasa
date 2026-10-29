@@ -77,6 +77,67 @@ Item {
     }
 
     Component {
+        id: editorNumberComponent
+        EditorNumber {
+            id: testNumber
+            width: 100
+            label: "Test number"
+            value: 25
+            minimum: -100
+            maximum: 100
+            decimals: 1
+            property int shortcutsTriggered: 0
+            Shortcut { sequence: "1"; onActivated: testNumber.shortcutsTriggered++ }
+            onValueRequested: function(v) { value = v }
+        }
+    }
+
+    Component {
+        id: adjustHistoryComponent
+        EditorAdjustContent {
+            width: 320
+            property EditorSession session: EditorSession {}
+            exposure: session.exposure
+            contrast: session.contrast
+            highlights: session.highlights
+            shadows: session.shadows
+            saturation: session.saturation
+            vibrance: session.vibrance
+            warmth: session.warmth
+            tint: session.tint
+            sharpen: session.sharpen
+            blur: session.blur
+            vignette: session.vignette
+            onInteractionStarted: session.beginInteraction()
+            onInteractionFinished: session.finishInteraction()
+            onExposureRequested: function(v) { session.setAdjustment("exposure", v) }
+        }
+    }
+
+    Component {
+        id: exportContentComponent
+        EditorExportContent {
+            width: 320
+            exportFormat: "png"
+            exportScale: 1
+            exportQuality: 95
+            unscaledWidth: 997
+            unscaledHeight: 613
+            outputWidth: Math.max(1, Math.round(unscaledWidth * exportScale))
+            outputHeight: Math.max(1, Math.round(unscaledHeight * exportScale))
+            saveStatus: ""
+            buttonMotionDuration: 0
+            onExportScaleRequested: function(v) { exportScale = v }
+            onExportQualityRequested: function(v) { exportQuality = v }
+            onSettingRequested: function(name, v) {
+                const next = Object.assign({}, exportSettings)
+                next[name] = v
+                exportSettings = next
+            }
+        }
+    }
+
+    Component {
         id: actionChipComponent
         ActionChip { text: "Apply" }
     }
@@ -115,6 +176,23 @@ Item {
             hasImage: true
             windowedCloseButtonX: 440
             windowedCloseButtonY: 12
+        }
+    }
+
+    Component {
+        id: infoOverlaysComponent
+        InfoOverlays {
+            width: 640
+            height: 480
+            fullScreenMode: true
+            infoOverlayEnabled: true
+            compareOriginal: true
+            imageReady: true
+            limitedToPreview: false
+            currentFileName: "photo.png"
+            imageWidth: 1920
+            imageHeight: 1080
+            currentScale: 0.5
         }
     }
 
@@ -507,6 +585,49 @@ Item {
         compare(about.contentTopSpacing, 4)
     }
 
+    function test_settingsFooterActionsUseSourceAndIssueLinks() {
+        const menu = createControl(settingsMenuComponent)
+        const about = findChild(menu, "aboutSection")
+        const quit = findChild(menu, "quitLicasaButton")
+        const source = findChild(menu, "viewSourceButton")
+        const issue = findChild(menu, "reportIssueButton")
+        verify(about && quit && source && issue)
+        compare(quit.text, "Fully Quit Licasa")
+        compare(quit.subtitle, "Closes the viewer and all Licasa background processes.")
+        verify(quit.destructive)
+        compare(source.text, "View Source")
+        compare(issue.text, "Report a Bug / Fix / Suggestion")
+        menu.smoothMotionEnabled = false
+        menu.panelOpen = true
+        const advanced = findChild(menu, "advancedSettingsButton")
+        for (const expanded of [false, true]) {
+            menu.advancedOpen = expanded
+            wait(0)
+            for (const action of [source, issue, quit]) {
+                compare(action.parent, about.parent)
+                compare(action.width, about.width)
+                verify(action.sectionStyle)
+                verify(action.visible)
+            }
+            verify(quit.y >= advanced.y + advanced.height)
+            verify(source.y >= quit.y + quit.height)
+            verify(issue.y >= source.y + source.height)
+            verify(about.y >= issue.y + issue.height)
+        }
+
+        const quitSpy = createSpy(menu, "quitRequested")
+        const linkSpy = createSpy(menu, "externalUrlRequested")
+        quit.clicked()
+        compare(quitSpy.count, 1)
+        source.clicked()
+        issue.clicked()
+        compare(linkSpy.count, 2)
+        compare(linkSpy.signalArguments[0][0].toString(),
+                "https://github.com/sanxchep/licasa")
+        compare(linkSpy.signalArguments[1][0].toString(),
+                "https://github.com/sanxchep/licasa/issues/new")
+    }
+
     function test_settingsBackdropFadesOutWithPanel() {
         const menu = createControl(settingsMenuComponent)
         const scrim = findChild(menu, "settingsScrim")
@@ -578,6 +699,174 @@ Item {
         tryCompare(editorPanel, "x", -editorPanel.width - 18, 400)
     }
 
+    function drawerControl(editor) {
+        const control = createControl(editor ? editorSidePanelComponent : settingsMenuComponent)
+        if (editor) {
+            control.panelOpenChangedByUser.connect(function(open) { control.panelOpen = open })
+        }
+        return control
+    }
+
+    function test_oppositeDrawerLauncherSlidesAway_data() {
+        return [{ tag: "edit-animated", editor: true, smooth: true },
+                { tag: "settings-animated", editor: false, smooth: true },
+                { tag: "edit-reduced-motion", editor: true, smooth: false },
+                { tag: "settings-reduced-motion", editor: false, smooth: false }]
+    }
+
+    function test_imageInfoSlidesBelowEditor_data() {
+        return [{ tag: "animated", smooth: true, filename: "photo.png" },
+                { tag: "without-filename", smooth: true, filename: "" },
+                { tag: "reduced-motion", smooth: false, filename: "photo.png" }]
+    }
+
+    function test_imageInfoSlidesBelowEditor(data) {
+        const control = createControl(infoOverlaysComponent)
+        control.smoothMotionEnabled = data.smooth
+        control.currentFileName = data.filename
+        const details = findChild(control, "imageInfoDetails")
+        const metrics = findChild(control, "imageMetrics")
+        const badge = findChild(control, "originalPreviewBadge")
+        const homeY = metrics.mapToItem(control, 0, 0).y
+        verify(details.visible)
+        control.editorPanelVisible = true
+        if (data.smooth) {
+            wait(35)
+            verify(details.hideProgress > 0 && details.hideProgress < 1)
+            verify(metrics.mapToItem(control, 0, 0).y > homeY)
+        }
+        tryCompare(details, "visible", false, 500)
+        verify(metrics.mapToItem(control, 0, 0).y >= control.height)
+        verify(badge.visible)
+        compare(badge.mapToItem(control, 0, 0).y, 18)
+        compare(control.infoOverlayEnabled, true)
+        control.editorPanelVisible = false
+        tryCompare(details, "hideProgress", 0, 500)
+        verify(details.visible)
+        fuzzyCompare(metrics.mapToItem(control, 0, 0).y, homeY, 0.1)
+    }
+
+    function test_imageInfoSlideCanReverse() {
+        const control = createControl(infoOverlaysComponent)
+        const details = findChild(control, "imageInfoDetails")
+        control.editorPanelVisible = true
+        wait(35)
+        verify(details.hideProgress > 0 && details.hideProgress < 1)
+        control.editorPanelVisible = false
+        tryCompare(details, "hideProgress", 0, 500)
+        verify(details.visible)
+        control.infoOverlayEnabled = false
+        control.editorPanelVisible = true
+        tryCompare(details, "hideProgress", 1, 500)
+        control.editorPanelVisible = false
+        tryCompare(details, "hideProgress", 0, 500)
+        compare(details.visible, false)
+        control.infoOverlayEnabled = true
+        control.fullScreenMode = false
+        compare(details.visible, false)
+        control.fullScreenMode = true
+        control.imageReady = false
+        compare(details.visible, false)
+    }
+
+    function test_oppositeDrawerLauncherSlidesAway(data) {
+        const control = drawerControl(data.editor)
+        control.smoothMotionEnabled = data.smooth
+        const button = findChild(control, data.editor ? "editorMenuButton" : "settingsMenuButton")
+        verify(button)
+        const homeX = button.x
+        verify(button.visible)
+        control.launcherBlocked = true
+        compare(button.enabled, false)
+        compare(button.activeFocusOnTab, false)
+        compare(button.Accessible.ignored, true)
+        if (data.smooth) {
+            wait(35)
+            verify(button.hideProgress > 0 && button.hideProgress < 1)
+            verify(data.editor ? button.x < homeX : button.x > homeX)
+        }
+        tryCompare(button, "visible", false, 400)
+        verify(data.editor ? button.x + button.width <= 0 : button.x >= control.width)
+        control.anchors.fill = null
+        control.width = 900
+        verify(data.editor ? button.x + button.width <= 0 : button.x >= control.width)
+        control.launcherBlocked = false
+        tryCompare(button, "hideProgress", 0, 400)
+        verify(button.visible && button.enabled)
+        fuzzyCompare(button.x, data.editor ? control.cornerControlMargin
+            : control.width - control.cornerControlMargin - button.width, 0.1)
+    }
+
+    function test_drawersDismissUnhandledArrows_data() {
+        const result = []
+        for (const editor of [false, true]) {
+            for (const key of [Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down])
+                result.push({ tag: (editor ? "edit-" : "settings-") + key, editor: editor, key: key })
+        }
+        return result
+    }
+
+    function test_drawersDismissUnhandledArrows(data) {
+        const control = drawerControl(data.editor)
+        control.smoothMotionEnabled = false
+        control.panelOpen = true
+        const close = findChild(control, data.editor ? "editorCloseButton" : "settingsCloseButton")
+        verify(close)
+        close.forceActiveFocus()
+        tryCompare(close, "activeFocus", true)
+        keyClick(data.key)
+        compare(control.panelOpen, false)
+    }
+
+    function test_drawersDismissOutsideClick_data() {
+        return [{ tag: "edit", editor: true }, { tag: "settings", editor: false }]
+    }
+
+    function test_drawersDismissOutsideClick(data) {
+        const control = drawerControl(data.editor)
+        control.smoothMotionEnabled = false
+        control.panelOpen = true
+        const panel = findChild(control, data.editor ? "editorPanel" : "settingsPanel")
+        mouseClick(control, panel.x + 6, panel.y + 50, Qt.LeftButton)
+        compare(control.panelOpen, true)
+        mouseClick(control, data.editor ? control.width - 50 : 50, 120, Qt.LeftButton)
+        compare(control.panelOpen, false)
+    }
+
+    function test_drawerSlidersKeepArrowInteraction_data() {
+        return [{ tag: "edit", editor: true }, { tag: "settings", editor: false }]
+    }
+
+    function test_drawerSlidersKeepArrowInteraction(data) {
+        const control = drawerControl(data.editor)
+        control.smoothMotionEnabled = false
+        control.panelOpen = true
+        const slider = findChild(control, data.editor ? "adjustmentAccessibleSlider" : "settingsAccessibleSlider")
+        verify(slider)
+        const spy = createSpy(slider.parent, data.editor ? "valueRequested" : "valueChangedByUser")
+        slider.forceActiveFocus()
+        tryCompare(slider, "activeFocus", true)
+        keyClick(Qt.Key_Right)
+        compare(spy.count, 1)
+        compare(control.panelOpen, true)
+    }
+
+    function test_drawerStaysVisibleUntilClosingAnimationFinishes_data() {
+        return [{ tag: "edit", editor: true }, { tag: "settings", editor: false }]
+    }
+
+    function test_drawerStaysVisibleUntilClosingAnimationFinishes(data) {
+        const control = drawerControl(data.editor)
+        control.panelOpen = true
+        const panel = findChild(control, data.editor ? "editorPanel" : "settingsPanel")
+        tryCompare(panel, "revealProgress", 1, 400)
+        control.panelOpen = false
+        verify(control.panelVisible)
+        wait(35)
+        verify(control.panelVisible)
+        tryCompare(control, "panelVisible", false, 400)
+    }
+
     function test_scrollBarHandleDragsTheFlickable() {
         const composition = createControl(scrollBarCompositionComponent)
         compare(composition.flickable.contentY, 0)
@@ -587,6 +876,242 @@ Item {
         verify(composition.flickable.contentY > 300)
         verify(composition.flickable.contentY
             <= composition.flickable.contentHeight - composition.flickable.height)
+    }
+
+    function typeNumber(input, text) {
+        input.forceActiveFocus()
+        tryCompare(input, "activeFocus", true)
+        input.selectAll()
+        keyClick(Qt.Key_Backspace)
+        for (let i = 0; i < text.length; ++i) keyClick(text[i])
+        compare(input.text, text)
+    }
+
+    function visualChild(item, name) {
+        if (!item || item.children === undefined) return null
+        if (item.objectName === name) return item
+        for (let i = 0; i < item.children.length; ++i) {
+            const found = visualChild(item.children[i], name)
+            if (found) return found
+        }
+        return null
+    }
+
+    function test_numericEntryBoundsAndInvalidText_data() {
+        return [
+            { tag: "signed-decimal", text: "-12.5", expected: -12.5 },
+            { tag: "positive-sign", text: "+12.5", expected: 12.5 },
+            { tag: "upper-bound", text: "999", expected: 100 },
+            { tag: "lower-bound", text: "-999", expected: -100 },
+            { tag: "round-precision", text: "12.345", expected: 12.3 },
+            { tag: "empty", text: "", expected: 25 },
+            { tag: "partial", text: "-", expected: 25 },
+            { tag: "not-number", text: "NaN", expected: 25 },
+            { tag: "partial-number", text: "12abc", expected: 25 },
+            { tag: "exponent", text: "1e3", expected: 25 }
+        ]
+    }
+
+    function test_numericEntryBoundsAndInvalidText(data) {
+        const input = createControl(editorNumberComponent)
+        const spy = createSpy(input, "valueRequested")
+        typeNumber(input, data.text)
+        compare(input.value, 25)
+        compare(input.shortcutsTriggered, 0)
+        keyClick(Qt.Key_Return)
+        compare(input.value, data.expected)
+        compare(input.text, String(data.expected))
+        compare(spy.count, data.expected === 25 ? 0 : 1)
+        keyClick(Qt.Key_Return)
+        visualRoot.forceActiveFocus()
+        compare(spy.count, data.expected === 25 ? 0 : 1)
+    }
+
+    function test_numericEntryEscapeBlurAndExternalReset() {
+        const input = createControl(editorNumberComponent)
+        const spy = createSpy(input, "valueRequested")
+        typeNumber(input, "47.5")
+        keyClick(Qt.Key_Escape)
+        compare(input.text, "25")
+        compare(spy.count, 0)
+        typeNumber(input, "37.5")
+        visualRoot.forceActiveFocus()
+        compare(input.value, 37.5)
+        compare(spy.count, 1)
+        typeNumber(input, "42")
+        input.value = -20
+        compare(input.text, "-20")
+        visualRoot.forceActiveFocus()
+        compare(spy.count, 1)
+        typeNumber(input, "60")
+        input.maximum = 50
+        compare(input.text, "-20")
+        visualRoot.forceActiveFocus()
+        compare(spy.count, 1)
+    }
+
+    function test_tabAppliesEntryOnce() {
+        const input = createControl(editorNumberComponent)
+        const spy = createSpy(input, "valueRequested")
+        typeNumber(input, "41")
+        keyClick(Qt.Key_Tab)
+        compare(input.value, 41)
+        compare(spy.count, 1)
+        compare(input.dirty, false)
+    }
+
+    function test_typedAdjustmentCreatesOneUndoStepAndTracksSliderReset() {
+        const content = createControl(adjustHistoryComponent)
+        const row = findChild(content, "editorExposureControl")
+        const input = findChild(row, "adjustmentValueInput")
+        const started = createSpy(row, "interactionStarted")
+        const finished = createSpy(row, "interactionFinished")
+        typeNumber(input, "37.5")
+        compare(content.session.undoStack.length, 0)
+        keyClick(Qt.Key_Return)
+        compare(content.session.exposure, .375)
+        compare(content.session.undoStack.length, 1)
+        compare(started.count, 1)
+        compare(finished.count, 1)
+        content.session.undo()
+        compare(input.text, "0")
+        content.session.redo()
+        compare(input.text, "+37.5")
+        const slider = findChild(row, "adjustmentAccessibleSlider")
+        slider.forceActiveFocus()
+        keyClick(Qt.Key_Right)
+        compare(input.text, "+39.5")
+        const reset = findChild(row, "adjustmentResetButton")
+        reset.forceActiveFocus()
+        keyClick(Qt.Key_Return)
+        compare(input.text, "0")
+    }
+
+    function test_everyAdjustmentHasEditableBoundedValue_data() {
+        const result = []
+        for (const name of ["Exposure", "Contrast", "Highlights", "Shadows", "Saturation", "Vibrance", "Warmth", "Tint"])
+            result.push({ tag: name, name: name, minimum: -100, maximum: 100 })
+        for (const name of ["Sharpen", "Soften", "Vignette"])
+            result.push({ tag: name, name: name, minimum: 0, maximum: name === "Soften" ? 35 : 100 })
+        return result
+    }
+
+    function test_everyAdjustmentHasEditableBoundedValue(data) {
+        const content = createControl(adjustHistoryComponent)
+        const row = findChild(content, "editor" + data.name + "Control")
+        const input = findChild(row, "adjustmentValueInput")
+        verify(input)
+        compare(input.minimum, data.minimum)
+        compare(input.maximum, data.maximum)
+        const spy = createSpy(row, "valueRequested")
+        typeNumber(input, "999")
+        keyClick(Qt.Key_Return)
+        compare(spy.count, 1)
+        compare(spy.signalArguments[0][0], data.maximum / 100)
+    }
+
+    function test_numericEntryDoesNotDismissDrawerOrTriggerShortcuts() {
+        const editor = drawerControl(true)
+        editor.smoothMotionEnabled = false
+        editor.panelOpen = true
+        const input = findChild(findChild(editor, "editorExposureControl"), "adjustmentValueInput")
+        const requested = createSpy(editor, "exposureRequested")
+        typeNumber(input, "12")
+        keyClick(Qt.Key_Left)
+        keyClick(Qt.Key_Right)
+        keyClick(Qt.Key_Up)
+        keyClick(Qt.Key_Down)
+        compare(editor.panelOpen, true)
+        compare(requested.count, 0)
+        keyClick(Qt.Key_Escape)
+        compare(editor.panelOpen, true)
+        compare(input.text, "0")
+        typeNumber(input, "20")
+        const panel = findChild(editor, "editorPanel")
+        mouseClick(panel, 8, panel.height / 2)
+        compare(requested.count, 1)
+        compare(requested.signalArguments[0][0], .2)
+    }
+
+    function test_exportNumericRangesForEveryFormat_data() {
+        return ["png", "jpeg", "webp", "tiff", "bmp", "ico", "cur", "icns", "pbm", "pgm", "ppm", "wbmp", "xbm", "xpm"].map(function(f) { return { tag: f, format: f } })
+    }
+
+    function test_exportNumericRangesForEveryFormat(data) {
+        const content = createControl(exportContentComponent)
+        content.exportFormat = data.format
+        wait(0)
+        if (!content.icon) {
+            const scale = findChild(content, "editorExportScaleControl")
+            const input = findChild(scale, "adjustmentValueInput")
+            compare(input.minimum, 1)
+            compare(input.maximum, 200)
+            typeNumber(input, "0")
+            keyClick(Qt.Key_Return)
+            compare(content.exportScale, .01)
+            compare(content.outputWidth, 10)
+            compare(content.outputHeight, 6)
+            typeNumber(input, "999")
+            keyClick(Qt.Key_Return)
+            compare(content.exportScale, 2)
+            const width = findChild(content, "editorExportWidth")
+            compare(width.minimum, 10)
+            compare(width.maximum, 1994)
+            typeNumber(width, "333")
+            keyClick(Qt.Key_Return)
+            compare(content.outputWidth, 333)
+            typeNumber(width, "10")
+            keyClick(Qt.Key_Return)
+            compare(content.outputWidth, 10)
+            typeNumber(width, "333")
+            keyClick(Qt.Key_Return)
+            compare(content.outputWidth, 333)
+        }
+        if (["jpeg", "webp"].indexOf(data.format) >= 0) {
+            const quality = visualChild(content, "editorExport_qualitySlider")
+            verify(quality)
+            const input = findChild(quality, "adjustmentValueInput")
+            compare(input.minimum, 1)
+            compare(input.maximum, data.format === "webp" ? 99 : 100)
+            typeNumber(input, "0")
+            keyClick(Qt.Key_Return)
+            compare(content.exportQuality, 1)
+            typeNumber(input, "999")
+            keyClick(Qt.Key_Return)
+            compare(content.exportQuality, data.format === "webp" ? 99 : 100)
+        }
+        if (content.mono || data.format === "xpm") {
+            const threshold = visualChild(content, "editorExport_thresholdSlider")
+            verify(threshold)
+            const input = findChild(threshold, "adjustmentValueInput")
+            compare(input.minimum, 0)
+            compare(input.maximum, 255)
+            compare(input.suffix, "")
+            compare(input.text, "128")
+            typeNumber(input, "255")
+            keyClick(Qt.Key_Return)
+            compare(content.exportSettings.threshold, 255)
+        }
+        if (data.format === "cur") {
+            const hotspot = visualChild(content, "editorExport_hotspotXNumber")
+            compare(hotspot.minimum, 0)
+            compare(hotspot.maximum, 63)
+            typeNumber(hotspot, "999")
+            keyClick(Qt.Key_Return)
+            compare(content.exportSettings.hotspotX, 63)
+        }
+        if (["png", "jpeg", "tiff", "bmp"].indexOf(data.format) >= 0) {
+            content.advancedOpen = true
+            const dpi = findChild(content, "editorExportDpi")
+            compare(dpi.minimum, 0)
+            compare(dpi.maximum, 2400)
+            typeNumber(dpi, "9999")
+            keyClick(Qt.Key_Return)
+            compare(content.exportSettings.dpi, 2400)
+            typeNumber(dpi, "0")
+            keyClick(Qt.Key_Return)
+            compare(content.exportSettings.dpi, 0)
+        }
     }
 
     function test_adjustmentSliderHasAUsableHitTarget() {
@@ -754,38 +1279,170 @@ Item {
         compare(scaleSpy.count, 1)
         fuzzyCompare(scaleSpy.signalArguments[0][0], 1.8, 0.000001)
 
-        const jpeg = findChild(editor, "editorExportFormat_jpeg")
-        verify(jpeg)
+        editor.exportFormats = [{ "key": "jpeg", "label": "JPEG", "suffix": "jpg" }]
+        wait(0)
+        const formats = findChild(editor, "editorExportFormat")
+        verify(formats)
         const formatSpy = createSpy(editor, "exportFormatRequested")
-        jpeg.clicked()
+        formats.currentIndex = 1
+        formats.activated(1)
         compare(formatSpy.count, 1)
         compare(formatSpy.signalArguments[0][0], "jpeg")
     }
 
-    function test_originalComparisonSupportsAccessibleToggleAndKeyboardRelease() {
+    function test_editorSaveNeedsConfirmation_data() {
+        return [{ tag: "animated", smooth: true }, { tag: "reduced-motion", smooth: false }]
+    }
+
+    function test_editorSaveNeedsConfirmation(data) {
+        const editor = createControl(editorSidePanelComponent)
+        editor.smoothMotionEnabled = data.smooth
+        editor.panelOpen = true
+        editor.hasAdjustments = true
+        const saved = createSpy(editor, "saveRequested")
+        const save = findChild(editor, "editorSaveButton")
+        const popup = findChild(editor, "editorOverwriteConfirmation")
+        verify(!findChild(editor, "editorOriginalCompareButton"))
+        save.clicked()
+        compare(saved.count, 0)
+        compare(editor.overwriteConfirmationOpen, true)
+        if (data.smooth) {
+            wait(35)
+            verify(popup.revealProgress > 0 && popup.revealProgress < 1)
+        }
+        tryCompare(popup, "revealProgress", 1, 500)
+        verify(popup.y + popup.height <= findChild(editor, "editorFooter").y)
+        findChild(editor, "editorOverwriteYesButton").clicked()
+        compare(editor.overwriteConfirmationOpen, false)
+        compare(saved.count, 1)
+        findChild(editor, "editorOverwriteYesButton").clicked()
+        compare(saved.count, 1)
+    }
+
+    function test_editorOverwriteCanBeDeclined_data() {
+        return [{ tag: "no", action: "no" }, { tag: "escape", action: "escape" },
+                { tag: "outside", action: "outside" }]
+    }
+
+    function test_editorOverwriteCanBeDeclined(data) {
+        const editor = createControl(editorSidePanelComponent)
+        editor.smoothMotionEnabled = false
+        editor.panelOpen = true
+        editor.hasAdjustments = true
+        const saved = createSpy(editor, "saveRequested")
+        editor.requestSaveConfirmation()
+        const no = findChild(editor, "editorOverwriteNoButton")
+        tryCompare(no, "activeFocus", true)
+        if (data.action === "no")
+            no.clicked()
+        else if (data.action === "escape")
+            keyClick(Qt.Key_Escape)
+        else {
+            const outside = findChild(editor, "editorOverwriteDismissArea")
+            mouseClick(outside, outside.width / 2, 35, Qt.LeftButton)
+        }
+        compare(editor.overwriteConfirmationOpen, false)
+        compare(saved.count, 0)
+        compare(editor.panelOpen, true)
+    }
+
+    function test_editorOverwriteInvalidatesWithContext_data() {
+        return [{ tag: "closed", field: "panelOpen", value: false },
+                { tag: "busy", field: "saveBusy", value: true },
+                { tag: "unchanged", field: "hasAdjustments", value: false },
+                { tag: "crop", field: "cropMode", value: true },
+                { tag: "another-image", field: "imageSource", value: "file:///another.png" }]
+    }
+
+    function test_editorOverwriteInvalidatesWithContext(data) {
+        const editor = createControl(editorSidePanelComponent)
+        editor.smoothMotionEnabled = false
+        editor.panelOpen = true
+        editor.hasAdjustments = true
+        const saved = createSpy(editor, "saveRequested")
+        editor.requestSaveConfirmation()
+        verify(editor.overwriteConfirmationOpen)
+        editor[data.field] = data.value
+        compare(editor.overwriteConfirmationOpen, false)
+        editor.confirmOverwrite()
+        compare(saved.count, 0)
+    }
+
+    function test_saveCopyOpensDirectly_data() {
+        return [{ tag: "adjust", tool: "adjust" }, { tag: "looks", tool: "looks" }]
+    }
+
+    function test_saveCopyOpensDirectly(data) {
+        const editor = createControl(editorSidePanelComponent)
+        editor.smoothMotionEnabled = false
+        editor.panelOpen = true
+        editor.hasAdjustments = true
+        editor.activeTool = data.tool
+        const copied = createSpy(editor, "saveAsRequested")
+        const saved = createSpy(editor, "saveRequested")
+        editor.requestSaveConfirmation()
+        const copy = findChild(editor, "editorSaveCopyButton")
+        compare(copy.text, "Save as a copy")
+        copy.clicked()
+        compare(copied.count, 1)
+        compare(saved.count, 0)
+        compare(editor.overwriteConfirmationOpen, false)
+        compare(editor.activeTool, data.tool)
+    }
+
+    function test_exportHidesFooterAndKeepsDedicatedAction_data() {
+        return [{ tag: "motion", smooth: true }, { tag: "reduced-motion", smooth: false }]
+    }
+
+    function test_exportHidesFooterAndKeepsDedicatedAction(data) {
         const editor = createControl(editorSidePanelComponent)
         editor.panelOpen = true
-        editor.activeTool = "adjust"
-        const button = findChild(editor, "editorOriginalCompareButton")
-        verify(button)
-        const pressed = createSpy(editor, "compareOriginalPressed")
-        const released = createSpy(editor, "compareOriginalReleased")
+        editor.hasAdjustments = true
+        editor.smoothMotionEnabled = data.smooth
+        editor.exportFormats = [{ "key": "png", "label": "PNG", "suffix": "png" },
+                                { "key": "cur", "label": "CUR", "suffix": "cur" }]
+        editor.exportFormat = "png"
+        editor.estimatedSize = "~2.4 MB"
+        const footer = findChild(editor, "editorFooter")
+        const copy = findChild(editor, "editorSaveCopyButton")
+        const action = findChild(editor, "editorExportButton")
+        editor.requestSaveConfirmation()
+        editor.activateTool("export")
+        compare(editor.overwriteConfirmationOpen, false)
+        compare(footer.enabled, false)
+        compare(copy.enabled, false)
+        tryCompare(footer, "visible", false)
+        verify(action.sectionStyle)
+        verify(action.text.indexOf("~2.4 MB") >= 0)
+        const exported = createSpy(editor, "exportRequested")
+        action.clicked()
+        compare(exported.count, 1)
+        editor.activateTool("adjust")
+        tryCompare(footer, "revealProgress", 1)
+        compare(copy.enabled, true)
+        editor.activateTool("export")
+        editor.activateTool("looks")
+        tryCompare(footer, "revealProgress", 1)
+    }
 
-        compare(button.Accessible.checkable, true)
-        button.Accessible.toggleAction()
-        compare(pressed.count, 1)
-        editor.compareOriginal = true
-        compare(button.Accessible.checked, true)
-        button.Accessible.toggleAction()
-        compare(released.count, 1)
-
-        editor.compareOriginal = false
-        button.forceActiveFocus()
-        keyPress(Qt.Key_Space)
-        compare(pressed.count, 2)
-        keyRelease(Qt.Key_Space)
-        compare(released.count, 2)
-        compare(button.heldByKeyboard, false)
+    function test_exportDropdownHandlesKeyboardWithoutDismissingEditor() {
+        const editor = createControl(editorSidePanelComponent)
+        editor.smoothMotionEnabled = false
+        editor.panelOpen = true
+        editor.exportFormats = [{ "key": "png", "label": "PNG", "suffix": "png" },
+                                { "key": "cur", "label": "CUR", "suffix": "cur" }]
+        editor.activeTool = "export"
+        const formats = findChild(editor, "editorExportFormat")
+        const requested = createSpy(editor, "exportFormatRequested")
+        formats.forceActiveFocus()
+        keyClick(Qt.Key_Down)
+        compare(requested.count, 1)
+        compare(editor.panelOpen, true)
+        keyClick(Qt.Key_Space)
+        tryCompare(formats.popup, "visible", true)
+        keyClick(Qt.Key_Escape)
+        tryCompare(formats.popup, "visible", false)
+        compare(editor.panelOpen, true)
     }
 
     function test_editorTabsRequestWorkspaceRefit() {
@@ -807,29 +1464,6 @@ Item {
         editor.activateTool("looks")
         compare(editor.activeTool, "crop")
         compare(spy.count, 5)
-    }
-
-    function test_holdOriginalHasKeyboardPressReleaseAndFocusCancellation() {
-        const composition = createControl(editorCropCompositionComponent)
-        const editor = composition.editorPanel
-        editor.cropMode = false
-        editor.activeTool = "adjust"
-        const original = findChild(editor, "editorOriginalCompareButton")
-        verify(original)
-        const pressed = createSpy(editor, "compareOriginalPressed")
-        const released = createSpy(editor, "compareOriginalReleased")
-
-        original.forceActiveFocus()
-        keyPress(Qt.Key_Space)
-        compare(pressed.count, 1)
-        compare(released.count, 0)
-        keyRelease(Qt.Key_Space)
-        compare(released.count, 1)
-
-        keyPress(Qt.Key_Return)
-        compare(pressed.count, 2)
-        editor.forceActiveFocus()
-        compare(released.count, 2)
     }
 
     function test_editorReopenFocusesSelectedTool() {

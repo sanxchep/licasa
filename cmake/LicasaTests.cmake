@@ -510,11 +510,16 @@ set_property(TEST licasa_file_dialog_missing_module APPEND PROPERTY ENVIRONMENT
 
 add_executable(licasa_qml_tests
         tests/quicktest_main.cpp
+        tests/editor_test_support.h
         src/imaging/codec_plugins.cpp
         src/imaging/image_animation.cpp
         )
 target_link_libraries(licasa_qml_tests PRIVATE licasa_image_services)
 target_include_directories(licasa_qml_tests PRIVATE src)
+qt_add_resources(licasa_qml_tests "editor_dialog_fixtures"
+        PREFIX "/Licasa/qml"
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+        FILES qml/SaveDialog.qml qml/FileUrls.js qml/DialogRuntime.js)
 
 # The harness uses Qt Gui/Qml APIs directly; the production service target
 # additionally propagates its Qt Quick requirements.
@@ -725,6 +730,14 @@ foreach(value IN ITEMS 0 1 2147483647 -1 invalid 9999999999999999999999)
 endforeach()
 set_tests_properties(licasa_image_save_tests PROPERTIES
         TIMEOUT 60 LABELS "core;policy;fast")
+
+add_executable(licasa_editor_export_tests tests/tst_editor_export_contracts.cpp src/imaging/codec_plugins.cpp)
+target_link_libraries(licasa_editor_export_tests PRIVATE licasa_image_services Qt6::Test Qt6::Quick)
+licasa_enable_warnings(licasa_editor_export_tests)
+list(APPEND LICASA_TEST_TARGETS licasa_editor_export_tests)
+list(APPEND LICASA_CORE_TEST_TARGETS licasa_editor_export_tests)
+add_test(NAME licasa_editor_export_tests COMMAND licasa_editor_export_tests -platform offscreen)
+set_tests_properties(licasa_editor_export_tests PROPERTIES TIMEOUT 60 LABELS "core;editing;export;fast")
 
 # Compile the production observers into the test even when the standalone
 # diagnostics executable is disabled, including sanitizer-only test builds.

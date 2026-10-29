@@ -19,6 +19,8 @@ Item {
     property real cornerControlMargin: 24
     property bool infoOverlayEnabled: true
     property bool smoothMotionEnabled: true
+    property bool launcherBlocked: false
+    readonly property bool panelVisible: panelOpen || panel.revealProgress > 0.001
     property bool startInFullscreenEnabled: true
     property var backgroundModeManager: null
     property string appVersion: ""
@@ -66,6 +68,10 @@ Item {
     signal maximumImageMemoryMiBRequested(int value)
     signal cropShieldOpacityRequested(real value)
     signal quitRequested()
+    signal externalUrlRequested(url targetUrl)
+
+    readonly property url sourceRepositoryUrl: "https://github.com/sanxchep/licasa"
+    readonly property url issueReportUrl: "https://github.com/sanxchep/licasa/issues/new"
 
     readonly property int panelMotionDuration: smoothMotionEnabled ? 220 : 0
     readonly property int scrimMotionDuration: smoothMotionEnabled ? 180 : 0
@@ -124,6 +130,17 @@ Item {
         return currentImageMegapixels.toFixed(decimals) + " MP"
     }
 
+    // Controls consume their own arrows first (sliders, fields and tool tabs).
+    // An otherwise unhandled arrow dismisses the drawer without browsing/zooming.
+    Keys.priority: Keys.AfterItem
+    Keys.onPressed: function(event) {
+        if (!root.panelOpen || event.modifiers !== Qt.NoModifier
+                || [Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down].indexOf(event.key) < 0)
+            return
+        event.accepted = true
+        root.panelOpen = false
+    }
+
     anchors.fill: parent
     visible: fullscreen || panelOpen
     enabled: visible
@@ -134,8 +151,12 @@ Item {
     }
     onPanelOpenChanged: {
         if (panelOpen) {
+            if (launcherBlocked) {
+                panelOpen = false
+                return
+            }
             closeButton.forceActiveFocus()
-        } else if (fullscreen)
+        } else if (fullscreen && !launcherBlocked)
             menuButton.forceActiveFocus()
     }
 
@@ -164,12 +185,19 @@ Item {
     RoundIconButton {
         id: menuButton
         objectName: "settingsMenuButton"
-        visible: root.fullscreen && !root.panelOpen
+        visible: root.fullscreen && !root.panelOpen && hideProgress < 1
+        enabled: !root.launcherBlocked
+        Accessible.ignored: root.launcherBlocked
+        property real hideProgress: root.launcherBlocked ? 1 : 0
+        Behavior on hideProgress {
+            NumberAnimation { duration: root.panelMotionDuration; easing.type: Easing.OutCubic }
+        }
         width: root.cornerControlSize
         height: width
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: root.cornerControlMargin
+            - (root.cornerControlMargin + width + 8) * hideProgress
         anchors.bottomMargin: root.cornerControlMargin
         iconName: "settings"
         accessibleName: root.panelOpen ? "Close settings" : "Open settings"
@@ -182,6 +210,7 @@ Item {
     Rectangle {
         id: panel
         objectName: "settingsPanel"
+        enabled: root.panelOpen
         visible: root.panelOpen || revealProgress > 0.001
         width: Math.min(400, Math.max(280, root.width - 40))
         height: root.height - 40
@@ -218,20 +247,11 @@ Item {
             Text {
                 id: titleText
                 x: 0
-                y: 0
+                anchors.verticalCenter: closeButton.verticalCenter
                 text: "Settings"
                 color: "white"
                 font.pixelSize: 22
                 font.weight: Font.DemiBold
-            }
-
-            Text {
-                id: subtitleText
-                x: 0
-                y: titleText.y + titleText.height + 4
-                text: "Customize your viewer"
-                color: "#B3FFFFFF"
-                font.pixelSize: 12
             }
 
             RoundIconButton {
@@ -252,7 +272,7 @@ Item {
             Rectangle {
                 id: divider
                 x: 0
-                y: subtitleText.y + subtitleText.height + 16
+                y: Math.max(titleText.height, closeButton.height) + 16
                 width: parent.width
                 height: 1
                 color: "#18FFFFFF"
@@ -322,9 +342,7 @@ Item {
                             && root.backgroundModeManager.supported
                         width: parent.width
                         title: "Background process"
-                        subtitle: root.installedAsSnap
-                            ? "Stay ready for one minute after closing, then allow Snap updates. Start at your next login."
-                            : "Stay ready after closing and start at your next login"
+                        subtitle: "Keep a lightweight background process open. Starts at next login."
                         checked: root.backgroundModeManager
                             ? root.backgroundModeManager.enabled : false
                         buttonMotionDuration: root.buttonMotionDuration
@@ -350,8 +368,8 @@ Item {
 
                     ToggleRow {
                         width: parent.width
-                        title: "Transparency grid"
-                        subtitle: "Show a checkerboard behind transparent pixels"
+                        title: "Full screen transparency grid"
+                        subtitle: "Show a checkerboard behind transparent pixels in full screen"
                         checked: root.transparencyCheckerboardEnabled
                         buttonMotionDuration: root.buttonMotionDuration
                         switchMotionDuration: root.switchMotionDuration
@@ -366,7 +384,7 @@ Item {
                         title: "Grid opacity"
                         subtitle: root.transparencyCheckerboardEnabled
                             ? "Strength of the transparency checkerboard"
-                            : "Turn on Transparency grid to adjust"
+                            : "Turn on the full screen grid to adjust"
                         value: root.transparencyCheckerboardOpacity
                         step: 0.05
                         enabled: root.transparencyCheckerboardEnabled
@@ -381,7 +399,7 @@ Item {
                     ToggleRow {
                         width: parent.width
                         title: "Floating transparency grid"
-                        subtitle: "Use a checkerboard instead of a solid backing"
+                        subtitle: "Show a checkerboard instead of solid backing in floating mode"
                         checked: root.windowedTransparencyCheckerboardEnabled
                         buttonMotionDuration: root.buttonMotionDuration
                         switchMotionDuration: root.switchMotionDuration
@@ -413,6 +431,7 @@ Item {
                     }
 
                     ActionChip {
+                        objectName: "advancedSettingsButton"
                         width: parent.width
                         text: root.advancedOpen
                             ? "Advanced settings  ▲"
@@ -428,7 +447,6 @@ Item {
                         visible: root.advancedOpen
                         width: parent.width
                         title: "Rendering quality"
-                        subtitle: "Quality-first controls for photos and graphics"
 
                         ToggleRow {
                             width: parent.width
@@ -491,69 +509,53 @@ Item {
                         }
                     }
 
-                    SectionCard {
+                    ValueRow {
+                        visible: root.advancedOpen
+                        objectName: "maximumImageMemoryControl"
+                        width: parent.width
+                        title: "Maximum working memory per image"
+                        subtitle: root.estimatedLargeImageMemoryText()
+                            + "\nImages above this budget open in a bounded preview"
+                        from: root.minimumImageMemoryMiB
+                        to: root.maximumImageMemoryLimitMiB
+                        value: root.maximumImageMemoryMiB
+                        step: 128
+                        displayMultiplier: 1.0 / 1024.0
+                        displayDecimals: 2
+                        displaySuffix: " GiB"
+                        accessibleUnit: "MiB"
+                        buttonMotionDuration: root.buttonMotionDuration
+                        onValueChangedByUser: function(value) {
+                            root.maximumImageMemoryMiBRequested(
+                                Math.max(root.minimumImageMemoryMiB,
+                                    root.minimumImageMemoryMiB
+                                        + Math.round((value - root.minimumImageMemoryMiB) / 128)
+                                            * 128)
+                            )
+                        }
+                    }
+
+                    ValueRow {
                         visible: root.advancedOpen
                         width: parent.width
-                        title: "Large images"
-                        subtitle: root.currentImageLimitedToPreview
-                            ? "This " + root.currentImageMegapixelsText()
-                                + " image exceeds the budget. Raise it for full detail."
-                            : "Images above the budget open in a bounded preview"
-
-                        ValueRow {
-                            objectName: "maximumImageMemoryControl"
-                            width: parent.width
-                            title: "Maximum working memory per image"
-                            subtitle: root.estimatedLargeImageMemoryText()
-                            from: root.minimumImageMemoryMiB
-                            to: root.maximumImageMemoryLimitMiB
-                            value: root.maximumImageMemoryMiB
-                            step: 128
-                            displayMultiplier: 1.0 / 1024.0
-                            displayDecimals: 2
-                            displaySuffix: " GiB"
-                            accessibleUnit: "MiB"
-                            buttonMotionDuration: root.buttonMotionDuration
-                            onValueChangedByUser: function(value) {
-                                root.maximumImageMemoryMiBRequested(
-                                    Math.max(root.minimumImageMemoryMiB,
-                                        root.minimumImageMemoryMiB
-                                            + Math.round((value - root.minimumImageMemoryMiB) / 128)
-                                                * 128)
-                                )
-                            }
+                        title: "Crop shield opacity"
+                        subtitle: "Dim only the area outside the crop frame"
+                        value: root.cropShieldOpacity
+                        step: 0.05
+                        buttonMotionDuration: root.buttonMotionDuration
+                        onValueChangedByUser: function(value) {
+                            root.cropShieldOpacityRequested(value)
                         }
                     }
 
                     SectionCard {
                         visible: root.advancedOpen
                         width: parent.width
-                        title: "Editing"
-                        subtitle: "Visual guidance used by precise editing tools"
-
-                        ValueRow {
-                            width: parent.width
-                            title: "Crop shield opacity"
-                            subtitle: "Dim only the area outside the crop frame"
-                            value: root.cropShieldOpacity
-                            step: 0.05
-                            buttonMotionDuration: root.buttonMotionDuration
-                            onValueChangedByUser: function(value) {
-                                root.cropShieldOpacityRequested(value)
-                            }
-                        }
-                    }
-
-                    SectionCard {
-                        visible: root.advancedOpen
-                        width: parent.width
-                        title: "Animation"
-                        subtitle: "Playback for GIF, animated WebP, and supported formats"
+                        title: "Animated Playback Settings"
 
                         ToggleRow {
                             width: parent.width
                             title: "Play animated images"
-                            subtitle: "Use every frame instead of a static preview"
                             checked: root.animatedImagePlaybackEnabled
                             buttonMotionDuration: root.buttonMotionDuration
                             switchMotionDuration: root.switchMotionDuration
@@ -565,9 +567,6 @@ Item {
                         ValueRow {
                             width: parent.width
                             title: "Playback speed"
-                            subtitle: root.animatedImagePlaybackEnabled
-                                ? "Adjust animation timing without changing the file"
-                                : "Turn on Play animated images to adjust"
                             from: 0.25
                             to: 2.0
                             value: root.animationSpeed
@@ -584,12 +583,48 @@ Item {
                         }
                     }
 
+                    ActionChip {
+                        objectName: "quitLicasaButton"
+                        width: parent.width
+                        text: "Fully Quit Licasa"
+                        subtitle: "Closes the viewer and all Licasa background processes."
+                        sectionStyle: true
+                        destructive: true
+                        animationDuration: root.buttonMotionDuration
+                        Accessible.description: subtitle + " Shortcut Control Shift Q."
+                        onClicked: root.quitRequested()
+                    }
+
+                    ActionChip {
+                        objectName: "viewSourceButton"
+                        width: parent.width
+                        text: "View Source"
+                        sectionStyle: true
+                        animationDuration: root.buttonMotionDuration
+                        Accessible.description: "Open the Licasa source repository on GitHub."
+                        onClicked: root.externalUrlRequested(root.sourceRepositoryUrl)
+                    }
+
+                    ActionChip {
+                        objectName: "reportIssueButton"
+                        width: parent.width
+                        text: "Report a Bug / Fix / Suggestion"
+                        sectionStyle: true
+                        animationDuration: root.buttonMotionDuration
+                        Accessible.description: "Open a new GitHub issue for a bug, fix, or suggestion."
+                        onClicked: root.externalUrlRequested(root.issueReportUrl)
+                    }
+
                     SectionCard {
                         objectName: "aboutSection"
                         width: parent.width
                         title: "About Licasa"
                         subtitle: "Version " + root.appVersion
                         contentTopSpacing: 4
+                        color: "transparent"
+                        radius: 12
+                        border.width: 1
+                        border.color: "#24FFFFFF"
 
                         Text {
                             objectName: "aboutReleaseDate"
@@ -608,15 +643,8 @@ Item {
                             font.pixelSize: 12
                             wrapMode: Text.Wrap
                         }
-
-                        ActionChip {
-                            objectName: "quitLicasaButton"
-                            text: "Quit Licasa"
-                            animationDuration: root.buttonMotionDuration
-                            Accessible.description: "Exit Licasa completely after saving your work. Shortcut Control Shift Q."
-                            onClicked: root.quitRequested()
-                        }
                     }
+
                 }
             }
 

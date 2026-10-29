@@ -1,7 +1,10 @@
 #include "export/image_save_operations.h"
+#include "export/image_export_contract.h"
+#include "export/image_export_encoder.h"
 #include "imaging/image_decode_contract.h"
 #include "imaging/image_edit_pipeline.h"
 #include "imaging/image_processing.h"
+#include "io/external_file_identity.h"
 #include "media/motion/motion_photo_frame.h"
 #include <QColorSpace>
 #include <QDir>
@@ -12,6 +15,7 @@
 #include <QTemporaryDir>
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <utility>
 
@@ -24,8 +28,7 @@ QByteArray normalizedWriterFormat(const QString& suffix)
         return {};
     }
 
-    const QByteArray canonical =
-        requested == QByteArrayLiteral("jpg") ? QByteArrayLiteral("jpeg") : requested;
+    const QByteArray canonical = ImageExport::canonicalFormat(requested);
     const QList<QByteArray> supported = QImageWriter::supportedImageFormats();
     for (QByteArray format : supported) {
         format = format.toLower();
@@ -48,11 +51,12 @@ struct ImageDestination {
 ImageDestination resolveImageDestination(QString destinationPath, const ImageExportOptions& options,
                                          const QString& fallbackSuffix = {})
 {
+    if (!options.validationError.isEmpty()) {
+        return {{}, {}, options.validationError};
+    }
     QByteArray requestedFormat = normalizedWriterFormat(QString::fromLatin1(options.format));
     if (!options.format.isEmpty() && requestedFormat.isEmpty()) {
-        return {{},
-                {},
-                QStringLiteral("This export format is unavailable. Choose PNG, JPEG, or WebP.")};
+        return {{}, {}, QStringLiteral("This export format is unavailable in this installation.")};
     }
 
     if (!requestedFormat.isEmpty()) {
@@ -63,6 +67,13 @@ ImageDestination resolveImageDestination(QString destinationPath, const ImageExp
         if (currentSuffix.isEmpty()) {
             destinationPath += QStringLiteral(".") + extension;
         } else if (normalizedWriterFormat(currentSuffix) != requestedFormat) {
+            if (options.copyOnly) {
+                return {{},
+                        {},
+                        QStringLiteral(
+                            "Use .%1 for this export format, then confirm the destination again.")
+                            .arg(extension)};
+            }
             destinationPath.chop(currentSuffix.size());
             destinationPath += extension;
         }
@@ -83,8 +94,7 @@ ImageDestination resolveImageDestination(QString destinationPath, const ImageExp
                                         ? normalizedWriterFormat(destinationInfo.suffix())
                                         : requestedFormat;
     if (writerFormat.isEmpty()) {
-        return {
-            {}, {}, QStringLiteral("This file type cannot be saved. Choose PNG, JPEG, or WebP.")};
+        return {{}, {}, QStringLiteral("Choose an available export format.")};
     }
 
     return {destinationInfo.absoluteFilePath(), writerFormat, {}};
@@ -93,28 +103,36 @@ ImageDestination resolveImageDestination(QString destinationPath, const ImageExp
 // Own the raster during scaling and writing. Both callers retain the same
 // processing-policy lock until QSaveFile has committed or cancelled the write.
 ImageSaveResult writeExportImage(QImage image, const ImageDestination& destination,
-                                 const ImageExportOptions& options, int maximumMegapixels)
+                                 const ImageExportOptions& options, int maximumMegapixels,
+                                 const std::function<QString()>& validateSource = {},
+                                 const std::function<void()>& beforeCommit = {})
 {
     const quint64 maximumPixels = ImageProcessing::pixelsForMegapixels(maximumMegapixels);
-    const qreal scale = std::isfinite(options.scale) ? std::clamp(options.scale, 0.1, 2.0) : 1.0;
-    if (!qFuzzyCompare(scale, 1.0)) {
-        const double scaledWidth = image.width() * static_cast<double>(scale);
-        const double scaledHeight = image.height() * static_cast<double>(scale);
-        if (!std::isfinite(scaledWidth) || !std::isfinite(scaledHeight) ||
-            scaledWidth > std::numeric_limits<int>::max() ||
-            scaledHeight > std::numeric_limits<int>::max()) {
-            return {{}, QStringLiteral("That export resolution is too large.")};
-        }
-
-        const QSize scaledSize(std::max(1, static_cast<int>(std::lround(scaledWidth))),
-                               std::max(1, static_cast<int>(std::lround(scaledHeight))));
-        if (!ImageDecodeContract::allows(scaledSize, maximumPixels)) {
-            return {{},
-                    QStringLiteral("That export exceeds the %1 MP full-resolution limit. Increase "
-                                   "Maximum image size in Advanced Settings.")
-                        .arg(maximumMegapixels)};
-        }
-        image = image.scaled(scaledSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    const qreal scale = std::isfinite(options.scale) ? std::clamp(options.scale, 0.01, 2.0) : 1.0;
+    if ((options.width > 0) != (options.height > 0) || options.width < 0 || options.height < 0) {
+        return {{}, QStringLiteral("Choose valid output dimensions.")};
+    }
+    const double w = options.width > 0 ? options.width : image.width() * static_cast<double>(scale);
+    const double h =
+        options.height > 0 ? options.height : image.height() * static_cast<double>(scale);
+    if (!std::isfinite(w) || !std::isfinite(h) || w > std::numeric_limits<int>::max() ||
+        h > std::numeric_limits<int>::max()) {
+        return {{}, QStringLiteral("That export resolution is too large.")};
+    }
+    const QSize size(std::max(1, int(std::lround(w))), std::max(1, int(std::lround(h))));
+    if (!ImageDecodeContract::allows(size, maximumPixels)) {
+        return {{}, QStringLiteral("That export exceeds the configured working memory limit.")};
+    }
+    if (!ImageExport::isIcon(destination.format) && options.width > 0 &&
+        (w < image.width() * .01 - 1 || h < image.height() * .01 - 1 ||
+         w > image.width() * 2.0 + 1 || h > image.height() * 2.0 + 1)) {
+        return {
+            {},
+            QStringLiteral("Output dimensions must be between 1% and 200% of the edited image.")};
+    }
+    if (size != image.size() && !ImageExport::isIcon(destination.format)) {
+        image = image.scaled(size, Qt::IgnoreAspectRatio,
+                             options.nearest ? Qt::FastTransformation : Qt::SmoothTransformation);
         if (image.isNull()) {
             return {{}, QStringLiteral("The scaled image could not be allocated.")};
         }
@@ -125,17 +143,21 @@ ImageSaveResult writeExportImage(QImage image, const ImageDestination& destinati
         return {{}, output.errorString()};
     }
 
-    QImageWriter writer(&output, destination.format);
-    writer.setOptimizedWrite(true);
-    if (destination.format == QByteArrayLiteral("jpeg") ||
-        destination.format == QByteArrayLiteral("webp")) {
-        writer.setQuality(options.quality);
-    }
-
-    if (!writer.write(image)) {
-        const QString error = writer.errorString();
+    const QString error =
+        ImageExport::encode(&output, std::move(image), destination.format, options);
+    if (!error.isEmpty()) {
         output.cancelWriting();
         return {{}, error};
+    }
+    if (beforeCommit) {
+        beforeCommit();
+    }
+    if (validateSource) {
+        const QString sourceError = validateSource();
+        if (!sourceError.isEmpty()) {
+            output.cancelWriting();
+            return {{}, sourceError};
+        }
     }
     if (!output.commit()) {
         return {{}, output.errorString()};
@@ -148,7 +170,9 @@ ImageSaveResult writeExportImage(QImage image, const ImageDestination& destinati
 
 ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationPath,
                                  const ImageEditParameters& parameters,
-                                 const ImageExportOptions& options, int maximumMegapixels)
+                                 const ImageExportOptions& options, int maximumMegapixels,
+                                 std::optional<ExternalFileIdentity> expectedSource,
+                                 const std::function<void()>& beforeCommit)
 {
     const quint64 maximumPixels = ImageProcessing::pixelsForMegapixels(maximumMegapixels);
     const QFileInfo sourceInfo(sourcePath);
@@ -162,7 +186,31 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
         return {{}, destination.errorMessage};
     }
 
-    QImageReader reader(sourceInfo.absoluteFilePath());
+    QFile source(sourceInfo.absoluteFilePath());
+    if (!source.open(QIODevice::ReadOnly)) {
+        return {{}, source.errorString()};
+    }
+    QString identityError;
+    const auto identity = externalFileIdentity(source, &identityError);
+    if (!identity) {
+        return {{}, identityError};
+    }
+    if (expectedSource && *identity != *expectedSource) {
+        return {{}, QStringLiteral("The original image changed before export. Try again.")};
+    }
+    bool aliasesSource =
+        QFileInfo(destination.path).canonicalFilePath() == sourceInfo.canonicalFilePath();
+#if defined(Q_OS_UNIX)
+    struct stat destinationStatus {};
+    if (::stat(QFile::encodeName(destination.path).constData(), &destinationStatus) == 0) {
+        aliasesSource = aliasesSource || (quint64(destinationStatus.st_dev) == identity->device &&
+                                          quint64(destinationStatus.st_ino) == identity->inode);
+    }
+#endif
+    if (options.copyOnly && aliasesSource) {
+        return {{}, QStringLiteral("Choose a copy destination different from the original image.")};
+    }
+    QImageReader reader(&source);
     // Saving is an explicit full-pixel operation. RAW viewing's embedded
     // preview is never silently substituted for the requested export.
     ImageDecodeContract::configure(reader, maximumPixels, nullptr, true);
@@ -191,7 +239,20 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
         return {{}, QStringLiteral("The image could not be processed safely.")};
     }
 
-    return writeExportImage(std::move(image), destination, options, maximumMegapixels);
+    return writeExportImage(
+        std::move(image), destination, options, maximumMegapixels,
+        [&]() {
+            const auto after = externalFileIdentity(source, &identityError);
+            QFile current(sourcePath);
+            if (!current.open(QIODevice::ReadOnly)) {
+                return QStringLiteral("The source changed during export.");
+            }
+            const auto currentIdentity = externalFileIdentity(current, &identityError);
+            return after && currentIdentity && *after == *identity && *currentIdentity == *identity
+                       ? QString()
+                       : QStringLiteral("The source changed during export. Try again.");
+        },
+        beforeCommit);
 }
 
 ImageSaveResult writeFrameImage(const MotionPhotoFrameRaster& frame, QString destinationPath,
@@ -236,10 +297,10 @@ SizeEstimateResult measureEditedImageSize(const QString& sourcePath,
     // byte count reflects the same edits, format, quality and scaling as Save As.
     const QString sourceSuffix = QFileInfo(sourcePath).suffix().toLower();
     const QString suggestionSuffix =
-        sourceSuffix == QStringLiteral("jpg") || sourceSuffix == QStringLiteral("jpeg") ||
-                sourceSuffix == QStringLiteral("png") || sourceSuffix == QStringLiteral("webp")
-            ? sourceSuffix
-            : QStringLiteral("png");
+        !options.format.isEmpty() ? (options.format == "jpeg" ? QStringLiteral("jpg")
+                                                              : QString::fromLatin1(options.format))
+        : normalizedWriterFormat(sourceSuffix).isEmpty() ? QStringLiteral("png")
+                                                         : sourceSuffix;
     const ImageSaveResult result = writeEditedImage(
         sourcePath, directory.filePath(QStringLiteral("estimate.") + suggestionSuffix), parameters,
         options, maximumMegapixels);

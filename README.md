@@ -13,7 +13,7 @@ Licasa is an image viewer and editor for the Linux desktop inspired by Google's 
 **Licasa is an independent open-source project and is not affiliated with or endorsed by Google.**
 
 > [!CAUTION]
-> **Upgrading from 0.8.1? Fully quit Licasa before installing 0.9.0.**
+> **Upgrading from 0.8.1? Fully quit Licasa before installing.**
 >
 > Save your edits, finish exports and close dialogs. Focus the Licasa viewer and press **Ctrl+Shift+Q**. Do this for each running copy, including copies in other user sessions if applicable.
 >
@@ -21,11 +21,14 @@ Licasa is an image viewer and editor for the Linux desktop inspired by Google's 
 
 ## Try Licasa
 
-**[Download published releases](https://github.com/sanxchep/licasa/releases)** · [0.9.0 release notes](packaging/release-notes/v0.9.0.md)
+**[Download published releases](https://github.com/sanxchep/licasa/releases)** · [0.9.5 release notes](packaging/release-notes/v0.9.5.md)
 
 - View photos fullscreen or in a floating window, then crop, adjust, and export them.
 - Open JPEG, PNG, TIFF, WebP, HEIC/HEIF, JPEG XL, AVIF, JPEG 2000, and RAW previews.
 - Play Motion Photos and animated APNG files.
+- Type exact adjustment values and keep independent edits in each window.
+- Confirm before overwriting an original, or choose **Save as a copy**.
+- Export to 14 formats with tailored settings, linked dimensions and estimated file size.
 
 If you try it, [report a bug or suggest a feature](https://github.com/sanxchep/licasa/issues/new).
 
@@ -56,7 +59,7 @@ the other distribution.
 1. **Fully quit the old version** as described in the warning above.
 2. **Use the same package format** and the matching distribution package,
    following the checksum and installation commands below.
-3. **Launch 0.9.0 once after installing**, then check **Settings → Background
+3. **Launch 0.9.5 once after installing**, then check **Settings → Background
    process** matches your preference. Recognized, unmodified startup entries
    migrate automatically; a settings reset or reboot is not normally needed.
 
@@ -91,8 +94,8 @@ snap list licasa
 A release `.snap` file is installed or updated manually with the same command:
 
 ```sh
-sha256sum -c licasa_0.9.0_amd64.snap.sha256 &&
-  sudo snap install --dangerous ./licasa_0.9.0_amd64.snap
+sha256sum -c licasa_0.9.5_amd64.snap.sha256 &&
+  sudo snap install --dangerous ./licasa_0.9.5_amd64.snap
 ```
 
 `--dangerous` bypasses Store assertion verification for a local file. Keep
@@ -113,8 +116,8 @@ the download directory. APT resolves the runtime and lifecycle dependencies.
 On Ubuntu 26.04, use the AppImage instructions below.
 
 ```sh
-sha256sum -c licasa_0.9.0-1_amd64.deb.sha256 &&
-  sudo apt install ./licasa_0.9.0-1_amd64.deb
+sha256sum -c licasa_0.9.5-1_amd64.deb.sha256 &&
+  sudo apt install ./licasa_0.9.5-1_amd64.deb
 ```
 
 ### Debian 13 / Trixie (amd64, experimental)
@@ -124,15 +127,15 @@ in the support matrix. Use the Debian-specific `+deb13` package, built against
 Debian's Qt 6.8.2 and multimedia libraries:
 
 ```sh
-sha256sum -c licasa_0.9.0-1+deb13_amd64.deb.sha256 &&
-  sudo apt install ./licasa_0.9.0-1+deb13_amd64.deb
+sha256sum -c licasa_0.9.5-1+deb13_amd64.deb.sha256 &&
+  sudo apt install ./licasa_0.9.5-1+deb13_amd64.deb
 ```
 
 ### Fedora 44 (x86-64)
 
 ```sh
-sha256sum -c licasa-appimage-0.9.0-1.fc44.x86_64.rpm.sha256 &&
-  sudo dnf install ./licasa-appimage-0.9.0-1.fc44.x86_64.rpm
+sha256sum -c licasa-appimage-0.9.5-1.fc44.x86_64.rpm.sha256 &&
+  sudo dnf install ./licasa-appimage-0.9.5-1.fc44.x86_64.rpm
 ```
 
 The RPM installs the bundled runtime through DNF and includes native transaction
@@ -144,8 +147,8 @@ The ready-to-install package includes the lifecycle helper and pre-transaction
 hook:
 
 ```sh
-sha256sum -c licasa-appimage-0.9.0-1-x86_64.pkg.tar.zst.sha256 &&
-  sudo pacman -U ./licasa-appimage-0.9.0-1-x86_64.pkg.tar.zst
+sha256sum -c licasa-appimage-0.9.5-1-x86_64.pkg.tar.zst.sha256 &&
+  sudo pacman -U ./licasa-appimage-0.9.5-1-x86_64.pkg.tar.zst
 ```
 
 To build the Arch package yourself, download `PKGBUILD`, `PKGBUILD.sha256`,
@@ -172,9 +175,9 @@ Download the AppImage, installer and both checksum files from the same release.
 Run the installer as your regular desktop user, **without sudo**:
 
 ```sh
-sha256sum -c Licasa-0.9.0-x86_64.AppImage.sha256 &&
+sha256sum -c Licasa-0.9.5-x86_64.AppImage.sha256 &&
   sha256sum -c install-licasa-appimage.sh.sha256 &&
-  bash install-licasa-appimage.sh ./Licasa-0.9.0-x86_64.AppImage
+  bash install-licasa-appimage.sh ./Licasa-0.9.5-x86_64.AppImage
 ```
 
 This installs **Licasa (AppImage)** under `~/.local/opt/licasa-appimage`, with a
@@ -189,9 +192,9 @@ still needs compatible system desktop libraries.
 To run the downloaded file directly, without the managed installer:
 
 ```sh
-sha256sum -c Licasa-0.9.0-x86_64.AppImage.sha256 &&
-  chmod +x Licasa-0.9.0-x86_64.AppImage &&
-  ./Licasa-0.9.0-x86_64.AppImage
+sha256sum -c Licasa-0.9.5-x86_64.AppImage.sha256 &&
+  chmod +x Licasa-0.9.5-x86_64.AppImage &&
+  ./Licasa-0.9.5-x86_64.AppImage
 ```
 
 Fully quit before **every** replacement. Keep the file location/name used by
@@ -230,7 +233,7 @@ Licasa.
 For an AppImage support report without starting the viewer:
 
 ```sh
-bash install-licasa-appimage.sh --diagnose ./Licasa-0.9.0-x86_64.AppImage > licasa-support.txt
+bash install-licasa-appimage.sh --diagnose ./Licasa-0.9.5-x86_64.AppImage > licasa-support.txt
 ```
 
 Omit the AppImage filename to inspect an existing installation. The report checks
@@ -289,8 +292,8 @@ The Ubuntu `.deb`, AppImage, installer and SHA-256 files appear in
 published packages does not require it. To check the local files:
 
 ```sh
-(cd build/deb-output && sha256sum -c licasa_0.9.0-1_amd64.deb.sha256)
-(cd build/deb-output && sha256sum -c Licasa-0.9.0-x86_64.AppImage.sha256)
+(cd build/deb-output && sha256sum -c licasa_0.9.5-1_amd64.deb.sha256)
+(cd build/deb-output && sha256sum -c Licasa-0.9.5-x86_64.AppImage.sha256)
 (cd build/deb-output && sha256sum -c install-licasa-appimage.sh.sha256)
 ```
 

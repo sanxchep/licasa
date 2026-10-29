@@ -24,7 +24,8 @@ class MotionPhotoFrameSaveCoordinator final : public QObject {
     bool canSaveFrame() const noexcept;
 
     Q_INVOKABLE bool saveCurrentFrame(const QUrl& sourceUrl, const QUrl& destinationUrl,
-                                      const QVariantMap& exportValues = {});
+                                      const QVariantMap& exportValues = {},
+                                      QObject* requestOwner = nullptr);
 
   signals:
     void canSaveFrameChanged();
