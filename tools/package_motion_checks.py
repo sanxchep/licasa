@@ -21,6 +21,7 @@ REQUIRED_CONTROLS = frozenset((
     "timeline_state_mirrored", "multimedia_loaded_after_play", "transport_interaction_enabled_during_active_motion",
     "scrub_from_visible_control", "scrub_presentation_frame_visible", "resume_from_visible_control",
     "floating_transition_preserves_playback", "floating_single_click_pauses", "floating_has_no_transport_object",
+    "floating_pause_intent_observed", "floating_resume_intent_observed",
     "paused_double_click_preserves_position", "paused_floating_transition_preserves_position",
     "floating_single_click_resumes", "floating_double_click_restores_fullscreen_without_pause",
     "editor_transition_stops_playback", "editor_transition_removes_tray", "tray_returns_after_editor",
@@ -162,7 +163,18 @@ def installed_check(args, environment: dict | None = None) -> dict:
     output.with_suffix(".stdout.json").write_text(result.stdout)
     output.with_suffix(".stderr.log").write_text(result.stderr)
     if result.returncode:
-        raise RuntimeError(f"Installed Motion diagnostic exited {result.returncode}: {result.stderr[-500:]}")
+        try:
+            failure = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            failure = None
+        detail = ""
+        if isinstance(failure, dict) and failure.get("error"):
+            detail = str(failure["error"])[:500]
+            state = failure.get("final_state")
+            if isinstance(state, dict) and state.get("stage"):
+                detail += f" (stage {str(state['stage'])[:80]})"
+            detail += "; "
+        raise RuntimeError(f"Installed Motion diagnostic exited {result.returncode}: {detail}{result.stderr[-500:]}")
     if "Attempting to create QWindow-based QOffscreenSurface outside the gui thread" in result.stderr:
         raise RuntimeError("Installed Motion conversion created a native surface outside the GUI thread")
     controls = json.loads(result.stdout)

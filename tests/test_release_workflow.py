@@ -111,7 +111,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
         visit("snapcraft-build.yml")
         combined = "\n".join(scripts)
-        for command in ("unittest discover -s tests -p 'test_*.py'", "tools/check_code_style.py",
+        for command in ("tools/run_python_tests.py", "tools/check_code_style.py",
                         "tools/check_support_manifest.py"):
             self.assertEqual(combined.count(command), 1, command)
         for script in ("packaging/install-licasa-appimage.sh", "tools/check_appimage_install.sh"):

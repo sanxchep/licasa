@@ -750,6 +750,7 @@ set_tests_properties(licasa_editor_export_tests PROPERTIES TIMEOUT 60 LABELS "co
 # diagnostics executable is disabled, including sanitizer-only test builds.
 add_executable(licasa_diagnostic_driver_tests
         tests/tst_diagnostic_drivers.cpp
+        tools/diagnostics_playback_click.h
         tools/diagnostics_common.cpp
         tools/diagnostics_raw_behavior.cpp
         tools/diagnostics_viewer_measurement.cpp)

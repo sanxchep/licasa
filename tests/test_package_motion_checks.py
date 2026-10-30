@@ -69,6 +69,18 @@ class PackagedMotionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Incomplete packaged Motion lifecycle"):
                 validate_controls(evidence, "/usr", "6.8.2", 0)
 
+    def test_floating_playback_requires_observed_pause_and_resume_intents(self):
+        for name in ("floating_pause_intent_observed", "floating_resume_intent_observed"):
+            for value in (None, False):
+                with self.subTest(name=name, value=value):
+                    evidence = self.controls()
+                    if value is None:
+                        evidence.pop(name, None)
+                    else:
+                        evidence[name] = value
+                    with self.assertRaisesRegex(RuntimeError, name):
+                        validate_controls(evidence, "/usr", "6.8.2", 0)
+
     def test_rotated_output_and_teardown_are_required(self):
         with self.assertRaisesRegex(RuntimeError, "orientation"):
             validate_controls(self.controls(), "/usr", "6.8.2", 90)
@@ -139,6 +151,47 @@ class PackagedMotionTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "outside the GUI thread"):
                     checks.installed_check(args, environment={})
             self.assertIn("QOffscreenSurface", (root / "report.stderr.log").read_text())
+
+    def test_failed_diagnostic_exposes_its_lifecycle_error_and_stage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = SimpleNamespace(output=root / "report.json", diagnostic=root / "diagnostic",
+                fixture=root / "motion.jpg", runtime_root="/usr", qt_version="6.4.2",
+                mode="default", protocol="wayland", rotation_degrees=90)
+            controls = {"error": "Floating single click did not pause playback",
+                        "final_state": {"stage": "AwaitSingleClickPause"}}
+            probe = {"qt_version": "6.4.2", "samples": [{"decoded": True}]}
+            results = [SimpleNamespace(returncode=0, stdout=json.dumps(probe), stderr=""),
+                SimpleNamespace(returncode=2, stdout=json.dumps(controls),
+                                stderr="scene graph invalidated")]
+            with patch.object(checks.subprocess, "run", side_effect=results):
+                with self.assertRaisesRegex(RuntimeError,
+                        "Floating single click did not pause playback.*AwaitSingleClickPause.*scene graph invalidated"):
+                    checks.installed_check(args, environment={})
+            self.assertEqual(json.loads((root / "report.stdout.json").read_text()), controls)
+            self.assertFalse(args.output.exists())
+
+    def test_reported_error_cannot_pass_even_with_all_lifecycle_flags(self):
+        evidence = self.controls()
+        evidence["error"] = "Floating single click did not pause playback"
+        with self.assertRaisesRegex(RuntimeError, "Floating single click did not pause playback"):
+            validate_controls(evidence, "/usr", "6.8.2", 0)
+
+    def test_failed_diagnostic_keeps_exit_and_stderr_without_structured_error(self):
+        for output in ("not JSON", "null", "[]", '{"final_state": null}'):
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                args = SimpleNamespace(output=root / "report.json", diagnostic=root / "diagnostic",
+                    fixture=root / "motion.jpg", runtime_root="/usr", qt_version="6.4.2",
+                    mode="default", protocol="wayland", rotation_degrees=90)
+                probe = {"qt_version": "6.4.2", "samples": [{"decoded": True}]}
+                results = [SimpleNamespace(returncode=0, stdout=json.dumps(probe), stderr=""),
+                    SimpleNamespace(returncode=2, stdout=output, stderr="native diagnostic failed")]
+                with patch.object(checks.subprocess, "run", side_effect=results):
+                    with self.assertRaisesRegex(RuntimeError, "exited 2: native diagnostic failed"):
+                        checks.installed_check(args, environment={})
+                self.assertEqual((root / "report.stdout.json").read_text(), output)
+                self.assertFalse(args.output.exists())
 
     def test_portable_sonames_require_actual_matching_version_and_library_probes(self):
         controls = self.controls("6.4.2")

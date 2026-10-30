@@ -180,7 +180,7 @@ jobs:
           python3 tools/check_support_manifest.py
           python3 tools/prepare_ci_tools.py --output "$RUNNER_TEMP/ci-tools"
           python3 tools/check_ci_inputs.py --actionlint "$RUNNER_TEMP/ci-tools/actionlint"
-          /usr/bin/python3 -B -m unittest discover -s tests -p 'test_*.py' -v
+          /usr/bin/python3 -B tools/run_python_tests.py
 
   test:
     needs: [plan, package_contract, rpm_preflight]

@@ -1,4 +1,5 @@
 #include "diagnostics_common.h"
+#include "diagnostics_playback_click.h"
 
 #include <QCoreApplication>
 #include <QGuiApplication>
@@ -23,6 +24,7 @@ class ControlledViewport final : public QObject {
 
   signals:
     void imageReady();
+    void playbackToggleRequested();
 };
 
 class ControlledWindow final : public QQuickWindow {
@@ -156,6 +158,89 @@ ChildResult runChild(const QString& driver, const QString& mode)
 class DiagnosticDriverTests final : public QObject {
     Q_OBJECT
   private slots:
+    void delayedPlaybackClick_data()
+    {
+        QTest::addColumn<bool>("expectedPlaying");
+        QTest::newRow("pause") << false;
+        QTest::newRow("resume") << true;
+    }
+
+    void delayedPlaybackClick()
+    {
+        QFETCH(bool, expectedPlaying);
+        using Check = LicasaDiagnostics::PlaybackClickCheck;
+        ControlledViewport viewport(nullptr);
+        Check check(&viewport, expectedPlaying);
+        bool playing = !expectedPlaying;
+        // Reproduce a busy GUI thread: the observer can run before a delayed
+        // QML click timer even after the old double-click interval + 50 ms.
+        QTest::qSleep(650);
+        QCOMPARE(check.check(true, playing), Check::Outcome::Pending);
+        QTimer::singleShot(0, &viewport, [&] { emit viewport.playbackToggleRequested(); });
+        QTRY_COMPARE(check.requests(), 1);
+        QCOMPARE(check.check(true, playing), Check::Outcome::Pending);
+        // The media backend need not apply the intent in the same event turn.
+        QTimer::singleShot(40, &viewport, [&] { playing = expectedPlaying; });
+        QTRY_COMPARE(check.check(true, playing), Check::Outcome::Applied);
+    }
+
+    void matchingPlaybackStateRequiresClickIntent()
+    {
+        using Check = LicasaDiagnostics::PlaybackClickCheck;
+        ControlledViewport viewport(nullptr);
+        Check check(&viewport, false, 80);
+        QCOMPARE(check.check(true, false), Check::Outcome::Pending);
+        QCOMPARE(check.check(false, false), Check::Outcome::Pending);
+        QTest::qSleep(100);
+        QCOMPARE(check.check(true, false), Check::Outcome::Failed);
+    }
+
+    void playbackClickRequiresActiveSessionAndAppliedState()
+    {
+        using Check = LicasaDiagnostics::PlaybackClickCheck;
+        ControlledViewport viewport(nullptr);
+        Check check(&viewport, false, 80);
+        emit viewport.playbackToggleRequested();
+        QCOMPARE(check.check(false, false), Check::Outcome::Pending);
+        QCOMPARE(check.check(true, true), Check::Outcome::Pending);
+        QTest::qSleep(100);
+        QCOMPARE(check.check(true, true), Check::Outcome::Failed);
+    }
+
+    void duplicatePlaybackClickFails()
+    {
+        using Check = LicasaDiagnostics::PlaybackClickCheck;
+        ControlledViewport viewport(nullptr);
+        Check check(&viewport, false);
+        emit viewport.playbackToggleRequested();
+        emit viewport.playbackToggleRequested();
+        QCOMPARE(check.requests(), 2);
+        QCOMPARE(check.check(true, false), Check::Outcome::Failed);
+    }
+
+    void playbackClickObservationIsScopedToItsGesture()
+    {
+        using Check = LicasaDiagnostics::PlaybackClickCheck;
+        ControlledViewport viewport(nullptr);
+        {
+            Check pause(&viewport, false);
+            emit viewport.playbackToggleRequested();
+            QCOMPARE(pause.check(true, false), Check::Outcome::Applied);
+        }
+        Check resume(&viewport, true);
+        QCOMPARE(resume.requests(), 0);
+        QCOMPARE(resume.check(true, true), Check::Outcome::Pending);
+        emit viewport.playbackToggleRequested();
+        QCOMPARE(resume.check(true, true), Check::Outcome::Applied);
+    }
+
+    void playbackClickRequiresConnectedViewport()
+    {
+        using Check = LicasaDiagnostics::PlaybackClickCheck;
+        Check missing(nullptr, false);
+        QCOMPARE(missing.check(true, false), Check::Outcome::Failed);
+    }
+
     void rawPolicyObservation_data()
     {
         QTest::addColumn<QString>("mode");

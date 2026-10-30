@@ -1,4 +1,5 @@
 #include "diagnostics_common.h"
+#include "diagnostics_playback_click.h"
 
 #include "media/motion/motion_photo_session.h"
 
@@ -8,6 +9,7 @@
 #include <QGuiApplication>
 #include <QImageReader>
 #include <QJsonArray>
+#include <QMetaMethod>
 #include <QMouseEvent>
 #include <QQuickWindow>
 #include <QStyleHints>
@@ -54,6 +56,15 @@ class MotionPhotoControlsCheck final : public QObject, public DiagnosticCheck {
         }
 
         elapsed_.start();
+        QObject* viewport = window_->findChild<QObject*>(QStringLiteral("imageViewport"));
+        if (!viewport) {
+            return false;
+        }
+        if (QObject* pointer = viewport->findChild<QObject*>(QStringLiteral("imagePointerLayer"))) {
+            connect(pointer, SIGNAL(clicked(QQuickMouseEvent*)), this, SLOT(recordPointerEvent()));
+            connect(pointer, SIGNAL(canceled()), this, SLOT(recordPointerEvent()));
+        }
+        connect(viewport, SIGNAL(playbackToggleRequested()), this, SLOT(recordPointerEvent()));
         recordState(QStringLiteral("attached"));
         timer_.setInterval(20);
         connect(&timer_, &QTimer::timeout, this, &MotionPhotoControlsCheck::poll);
@@ -104,9 +115,10 @@ class MotionPhotoControlsCheck final : public QObject, public DiagnosticCheck {
                                                     Q_ARG(double, normalized));
     }
 
-    void clickFloatingImage(bool doubleClick = false)
+    void clickFloatingImage(bool doubleClick = false, bool expectedPlaying = false)
     {
         QObject* viewport = window_->findChild<QObject*>(QStringLiteral("imageViewport"));
+        clickCheck_ = std::make_unique<PlaybackClickCheck>(viewport, expectedPlaying);
         const QPointF point(viewport->property("imageX").toDouble() +
                                 viewport->property("imageWidth").toDouble() *
                                     viewport->property("currentScale").toDouble() * 0.5,
@@ -118,6 +130,7 @@ class MotionPhotoControlsCheck final : public QObject, public DiagnosticCheck {
         result_["floating_click_x"] = point.x();
         result_["floating_click_y"] = point.y();
         const QPointF global = window_->mapToGlobal(point.toPoint());
+        recordState(QStringLiteral("floating-click-before"));
         const auto send = [&](QEvent::Type type, Qt::MouseButtons buttons) {
             QMouseEvent event(type, point, global, Qt::LeftButton, buttons, Qt::NoModifier);
             QCoreApplication::sendEvent(window_, &event);
@@ -132,11 +145,16 @@ class MotionPhotoControlsCheck final : public QObject, public DiagnosticCheck {
             send(QEvent::MouseButtonRelease, Qt::NoButton);
         }
         gestureTimer_.restart();
+        recordState(QStringLiteral("floating-click-after"));
     }
 
     void poll()
     {
         if (done_ || !window_ || !session_) {
+            return;
+        }
+        if (unexpectedFloatingToggle_) {
+            finish(QStringLiteral("Floating playback toggled outside a single-click gesture"));
             return;
         }
 
@@ -336,32 +354,35 @@ class MotionPhotoControlsCheck final : public QObject, public DiagnosticCheck {
             }
             result_["floating_has_no_transport_object"] = true;
             result_["floating_transition_preserves_playback"] = true;
-            clickFloatingImage();
             setStage(Stage::AwaitSingleClickPause);
+            clickFloatingImage();
             return;
 
-        case Stage::AwaitSingleClickPause:
-            if (gestureTimer_.elapsed() <
-                QGuiApplication::styleHints()->mouseDoubleClickInterval() + 50) {
+        case Stage::AwaitSingleClickPause: {
+            const auto outcome = clickCheck_->check(session_->active(), session_->playing());
+            if (outcome == PlaybackClickCheck::Outcome::Pending) {
                 return;
             }
-            if (!session_->active() || session_->playing()) {
-                finish(QStringLiteral("Floating single click did not pause playback"));
+            if (outcome == PlaybackClickCheck::Outcome::Failed) {
+                finish(QStringLiteral("Floating single click did not pause playback after its "
+                                      "intent and state observation deadline"));
                 return;
             }
+            result_["floating_pause_intent_observed"] = true;
             result_["floating_single_click_pauses"] = true;
             targetMs_ = session_->positionMs();
-            clickFloatingImage(true);
             setStage(Stage::AwaitPausedDoubleClick);
+            clickFloatingImage(true);
             return;
+        }
 
         case Stage::AwaitPausedDoubleClick:
             if (gestureTimer_.elapsed() <
                 QGuiApplication::styleHints()->mouseDoubleClickInterval() + 50) {
                 return;
             }
-            if (!window_->property("fullScreenMode").toBool() || !controls() ||
-                !session_->active() || session_->playing() ||
+            if (clickCheck_->requests() != 0 || !window_->property("fullScreenMode").toBool() ||
+                !controls() || !session_->active() || session_->playing() ||
                 qAbs(session_->positionMs() - targetMs_) > 50) {
                 finish(QStringLiteral("Paused double click changed playback or position"));
                 return;
@@ -385,31 +406,34 @@ class MotionPhotoControlsCheck final : public QObject, public DiagnosticCheck {
                 return;
             }
             result_["paused_floating_transition_preserves_position"] = true;
-            clickFloatingImage();
             setStage(Stage::AwaitSingleClickResume);
+            clickFloatingImage(false, true);
             return;
 
-        case Stage::AwaitSingleClickResume:
-            if (gestureTimer_.elapsed() <
-                QGuiApplication::styleHints()->mouseDoubleClickInterval() + 50) {
+        case Stage::AwaitSingleClickResume: {
+            const auto outcome = clickCheck_->check(session_->active(), session_->playing());
+            if (outcome == PlaybackClickCheck::Outcome::Pending) {
                 return;
             }
-            if (!session_->playing()) {
-                finish(QStringLiteral("Floating single click did not resume playback"));
+            if (outcome == PlaybackClickCheck::Outcome::Failed) {
+                finish(QStringLiteral("Floating single click did not resume playback after its "
+                                      "intent and state observation deadline"));
                 return;
             }
+            result_["floating_resume_intent_observed"] = true;
             result_["floating_single_click_resumes"] = true;
-            clickFloatingImage(true);
             setStage(Stage::AwaitPlayingDoubleClick);
+            clickFloatingImage(true, true);
             return;
+        }
 
         case Stage::AwaitPlayingDoubleClick:
             if (gestureTimer_.elapsed() <
                 QGuiApplication::styleHints()->mouseDoubleClickInterval() + 50) {
                 return;
             }
-            if (!window_->property("fullScreenMode").toBool() || !controls() ||
-                !session_->playing()) {
+            if (clickCheck_->requests() != 0 || !window_->property("fullScreenMode").toBool() ||
+                !controls() || !session_->playing()) {
                 finish(
                     QStringLiteral("Floating double click failed fullscreen/playback arbitration"));
                 return;
@@ -594,6 +618,25 @@ class MotionPhotoControlsCheck final : public QObject, public DiagnosticCheck {
         QJsonObject state;
         state["stage"] = stageName();
         state["target_ms"] = double(targetMs_);
+        state["floating_toggle_requests"] = clickCheck_ ? clickCheck_->requests() : 0;
+        state["window_exposed"] = window_->isExposed();
+        state["window_active"] = window_->isActive();
+        state["window_visibility"] = int(window_->visibility());
+        state["window_width"] = window_->width();
+        state["window_height"] = window_->height();
+        QObject* viewport = window_->findChild<QObject*>(QStringLiteral("imageViewport"));
+        state["viewport_width"] = viewport->property("width").toDouble();
+        state["viewport_height"] = viewport->property("height").toDouble();
+        state["playback_interaction_enabled"] =
+            viewport->property("playbackInteractionEnabled").toBool();
+        state["interaction_blocked"] = viewport->property("interactionBlocked").toBool();
+        if (QObject* pointer = viewport->findChild<QObject*>(QStringLiteral("imagePointerLayer"))) {
+            state["pointer_pressed_on_image"] = pointer->property("pressedOnImage").toBool();
+            state["pointer_dragged"] = pointer->property("dragged").toBool();
+            state["pointer_enabled"] = pointer->property("enabled").toBool();
+            state["pointer_width"] = pointer->property("width").toDouble();
+            state["pointer_height"] = pointer->property("height").toDouble();
+        }
         if (session_) {
             state["available"] = session_->available();
             state["active"] = session_->active();
@@ -617,6 +660,19 @@ class MotionPhotoControlsCheck final : public QObject, public DiagnosticCheck {
         return state;
     }
 
+  private slots:
+    void recordPointerEvent()
+    {
+        const QString event =
+            QString::fromLatin1(sender()->metaObject()->method(senderSignalIndex()).name());
+        if (event == QStringLiteral("playbackToggleRequested") &&
+            stage_ != Stage::AwaitSingleClickPause && stage_ != Stage::AwaitSingleClickResume) {
+            unexpectedFloatingToggle_ = true;
+        }
+        recordState(event);
+    }
+
+  private:
     void recordState(const QString& event)
     {
         QJsonObject state = stateSnapshot();
@@ -681,9 +737,11 @@ class MotionPhotoControlsCheck final : public QObject, public DiagnosticCheck {
     qint64 stageStartedMs_ = 0;
     QJsonArray trace_;
     QJsonObject lastScrubState_;
+    std::unique_ptr<PlaybackClickCheck> clickCheck_;
     Stage stage_ = Stage::AwaitInitialTray;
     bool sawReplayDecodeBlock_ = false;
     bool done_ = false;
+    bool unexpectedFloatingToggle_ = false;
 };
 
 } // namespace

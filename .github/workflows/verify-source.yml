@@ -168,8 +168,8 @@ jobs:
             -DLICASA_ENABLE_MOTION_PLAYBACK=OFF -DLICASA_ENABLE_JP2=OFF \
             -DLICASA_QT_QUICK_BACKPORT_LIBRARY="$PWD/build/deps/qt-backport-runtime/libQt6Quick.so.6.4.2"
           cmake --build build/core --parallel "$(nproc)"
-          cmake --build build/core --target all_qmllint --parallel 2
-          ctest --test-dir build/core --output-on-failure
+          cmake --build build/core --target all_qmllint --parallel "$(nproc)"
+          ctest --test-dir build/core --parallel "$(nproc)" --output-on-failure
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -290,8 +290,8 @@ jobs:
             -DCMAKE_PREFIX_PATH="$PWD/build/codecs/prefix" \
             -DLICASA_QT_QUICK_BACKPORT_LIBRARY="$PWD/build/deps/qt-backport-runtime/libQt6Quick.so.6.4.2"
       - run: cmake --build --preset ${{ matrix.preset }} --parallel "$(nproc)"
-      - run: cmake --build --preset ${{ matrix.preset }} --target all_qmllint --parallel 2
-      - run: ctest --preset ${{ matrix.preset }}
+      - run: cmake --build --preset ${{ matrix.preset }} --target all_qmllint --parallel "$(nproc)"
+      - run: ctest --preset ${{ matrix.preset }} --parallel "$(nproc)"
       - name: Verify installed release
         if: matrix.preset == 'release'
         run: |

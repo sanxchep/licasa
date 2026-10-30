@@ -739,6 +739,7 @@ if(LICASA_BUILD_DIAGNOSTICS)
             tools/diagnostics_common.cpp
             tools/diagnostics_raw_behavior.cpp
             tools/diagnostics_motion_controls.cpp
+            tools/diagnostics_playback_click.h
             tools/diagnostics_navigation_transition.cpp
             tools/diagnostics_viewer_measurement.cpp
             ${LICASA_APPLICATION_SOURCES})
