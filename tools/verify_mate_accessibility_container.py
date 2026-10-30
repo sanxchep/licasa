@@ -11,8 +11,51 @@ import tempfile
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+SPEECH_SETUP = r'''
+printf 'speech-module-preflight\n' > /reports/bootstrap-phase.txt
+for module in sd_dummy sd_espeak-ng; do
+    if [ ! -x "/usr/lib/speech-dispatcher-modules/$module" ]; then
+        printf 'Required Speech Dispatcher module is missing or not executable: %s\n' "$module" >&2
+        exit 1
+    fi
+done
+# Dummy output still initializes Speech Dispatcher's built-in eSpeak fallback.
+# Verify both modules, then connect without autospawn so a failed private daemon
+# cannot be replaced by an unrelated/default-config process.
+mkdir -p "$HOME/speechd/modules" /reports/speechd
+: > "$HOME/speechd/modules/dummy.conf"
+cat > "$HOME/speechd/speechd.conf" <<'EOF'
+AddModule "dummy" "sd_dummy" "dummy.conf"
+DefaultModule "dummy"
+LogLevel 5
+AudioOutputMethod "alsa"
+AudioALSADevice "null"
+EOF
+printf 'speech-dispatcher-start\n' > /reports/bootstrap-phase.txt
+speech-dispatcher -d -t 0 -C "$HOME/speechd" -L /reports/speechd >/reports/speech-dispatcher.log 2>&1
+printf 'speech-dispatcher-ready\n' > /reports/bootstrap-phase.txt
+python3 - <<'PY'
+from pathlib import Path
+import speechd
+
+log = Path('/reports/speechd/speech-dispatcher.log').read_text()
+missing = [name for name in ('dummy', 'espeak-ng-fallback')
+           if f'Module {name} started successfully' not in log]
+if missing:
+    raise RuntimeError('Speech Dispatcher did not initialize required modules: ' + repr(missing))
+# LIST OUTPUT_MODULES deliberately hides these built-in modules in speechd 0.12.
+# Check their fresh initialization log and the connected client's actual default.
+client = speechd.SSIPClient('licasa-qualification-bootstrap', autospawn=False)
+try:
+    if client.get_output_module() != 'dummy':
+        raise RuntimeError('Speech Dispatcher is not using the private dummy configuration')
+finally:
+    client.close()
+PY
+'''
 SCRIPT = r'''
 set -eu
+printf 'extract-package\n' > /reports/bootstrap-phase.txt
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 chmod 700 "$HOME" "$XDG_RUNTIME_DIR"
 cd /tmp
@@ -34,8 +77,10 @@ while ! xdotool getdisplaygeometry >/dev/null 2>&1 && [ "$attempt" -lt 50 ]; do
     attempt=$((attempt + 1))
 done
 xdotool getdisplaygeometry >/dev/null
+printf 'runtime-formats\n' > /reports/bootstrap-phase.txt
 /tmp/squashfs-root/usr/bin/licasa_diagnostics --formats /samples/photo.png > /reports/runtime-formats.json 2>/reports/runtime-formats.log
 # Enable the desktop's actual accessibility infrastructure before launching Qt.
+printf 'desktop-start\n' > /reports/bootstrap-phase.txt
 gsettings set org.mate.interface accessibility true
 mate-session --failsafe --disable-acceleration-check >/reports/mate-session.log 2>&1 &
 mate_pid=$!
@@ -46,20 +91,11 @@ while ! pgrep -x marco >/dev/null && [ "$attempt" -lt 80 ]; do
 done
 pgrep -x mate-session >/dev/null
 pgrep -x marco >/dev/null
-# A dummy Speech Dispatcher output accepts the real Orca speech requests. Its
-# debug log retains the generated utterances without requiring audio hardware.
-mkdir -p "$HOME/speechd/modules" /reports/speechd
-: > "$HOME/speechd/modules/dummy.conf"
-cat > "$HOME/speechd/speechd.conf" <<'EOF'
-AddModule "dummy" "sd_dummy" "dummy.conf"
-DefaultModule "dummy"
-LogLevel 5
-AudioOutputMethod "alsa"
-AudioALSADevice "null"
-EOF
-speech-dispatcher -d -t 0 -C "$HOME/speechd" -L /reports/speechd >/reports/speech-dispatcher.log 2>&1
+''' + SPEECH_SETUP + r'''
+printf 'orca-start\n' > /reports/bootstrap-phase.txt
 orca --replace --enable speech --disable braille --debug-file /reports/orca-debug.log >/reports/orca.log 2>&1 &
 orca_pid=$!
+printf 'desktop-check\n' > /reports/bootstrap-phase.txt
 python3 /qualification/tools/verify_desktop_accessibility.py --app /tmp/squashfs-root/AppRun --sample /samples/photo.png --output /reports/desktop.json
 status=$?
 kill "$orca_pid" "$mate_pid" 2>/dev/null || true
@@ -115,6 +151,8 @@ def main() -> int:
         result = subprocess.run(command, capture_output=True, text=True, timeout=150)
         (raw / "container.log").write_text(result.stdout + "\n" + result.stderr)
         report["exit_code"] = result.returncode
+        phase_file = raw / "bootstrap-phase.txt"
+        report["bootstrap_phase"] = phase_file.read_text().strip() if phase_file.exists() else "unknown"
         if (raw / "runtime-formats.json").exists():
             formats = json.loads((raw / "runtime-formats.json").read_text())
             report["qt_version"] = formats.get("qt_version")
@@ -129,7 +167,9 @@ def main() -> int:
             if result.returncode or desktop.get("status") != "passed":
                 raise RuntimeError(desktop.get("error", "Desktop accessibility check failed"))
         else:
-            raise RuntimeError("Desktop check did not produce AT-SPI evidence")
+            raise RuntimeError("Desktop check did not produce AT-SPI evidence "
+                               f"(container exit {result.returncode}, phase {report['bootstrap_phase']}); "
+                               "see container.log and speech-dispatcher.log")
         orca = raw / "orca-debug.log"
         if not orca.exists() or not orca.stat().st_size:
             raise RuntimeError("Orca did not produce its event/debug log")
