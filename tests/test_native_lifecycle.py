@@ -17,6 +17,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import native_lifecycle as native
 import package_deb
+from process_fixture import start_fixture, wait_for_message
 
 
 SERVER = r'''import json,os,socket,sys,time
@@ -48,19 +49,9 @@ time.sleep(1)
 class NativeLifecycleTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="lc-native-")
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.peers = []
-
-    def tearDown(self):
-        for peer in self.peers:
-            if peer.poll() is None:
-                peer.terminate()
-            peer.wait(timeout=3)
-            if peer.stdout:
-                peer.stdout.close()
-            if peer.stderr:
-                peer.stderr.close()
-        self.temporary.cleanup()
 
     def test_private_runtime_accepts_only_owned_non_symlinked_private_path(self):
         runtime = self.root / "runtime"
@@ -115,11 +106,11 @@ class NativeLifecycleTests(unittest.TestCase):
                 self.assertFalse(native.is_headless_control(command_line))
 
     def test_root_observes_transient_client_exit_and_refuses_nonexiting_claim(self):
-        transient = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.1)"])
+        transient = start_fixture(self, [sys.executable, "-c", "import time; time.sleep(0.1)"])
         self.peers.append(transient)
         native.wait_for_control_exit(transient.pid, native.start_identity(transient.pid), timeout=2.0)
         self.assertEqual(transient.wait(timeout=2), 0)
-        live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+        live = start_fixture(self, [sys.executable, "-c", "import time; time.sleep(5)"])
         self.peers.append(live)
         with self.assertRaisesRegex(native.NativeLifecycleError, "has not exited"):
             native.wait_for_control_exit(live.pid, native.start_identity(live.pid), timeout=0.05)
@@ -129,10 +120,9 @@ class NativeLifecycleTests(unittest.TestCase):
         source = ('import ctypes,time; c=ctypes.CDLL(None); '
                   'assert c.prctl(15,b"unrelated")==0; '
                   'print("ready",flush=True); time.sleep(5)')
-        peer = subprocess.Popen([sys.executable, "-c", source], stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True)
+        peer = start_fixture(self, [sys.executable, "-c", source])
         self.peers.append(peer)
-        self.assertEqual(peer.stdout.readline().strip(), "ready")
+        wait_for_message(peer)
         directory = Path(f"/proc/{peer.pid}")
         self.assertEqual((directory / "comm").read_text().strip(), "unrelated")
         with patch.object(Path, "iterdir", return_value=iter([directory])):
@@ -150,10 +140,9 @@ class NativeLifecycleTests(unittest.TestCase):
         reply_file = self.root / f"reply-{len(self.peers)}.json"
         source = SERVER.replace("path,reply=sys.argv[1:]", "path,reply_file=sys.argv[1:]\nfrom pathlib import Path")
         source = source.replace("    if reply=='oversized':", "    reply=Path(reply_file).read_text()\n    if reply=='oversized':")
-        peer = subprocess.Popen([sys.executable, "-c", source, str(endpoint), str(reply_file)],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        peer = start_fixture(self, [sys.executable, "-c", source, str(endpoint), str(reply_file)])
         self.peers.append(peer)
-        self.assertEqual(peer.stdout.readline().strip(), "ready")
+        wait_for_message(peer)
         process = {"pid": peer.pid, "uid": os.geteuid(), "gid": os.getegid(),
                    "runtime": str(runtime), "installationId": identity,
                    "startIdentity": native.start_identity(peer.pid),

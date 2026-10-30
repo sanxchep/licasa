@@ -19,6 +19,7 @@ INSTALLER = ROOT / "packaging/install-licasa-appimage.sh"
 BASH = shutil.which("bash")
 sys.path.insert(0, str(ROOT / "tools"))
 from lifecycle_update import InstallationGate, recover_appimage, start_identity
+from process_fixture import start_fixture, stop_fixture, wait_for_message
 
 
 class AppImageInstallerTests(unittest.TestCase):
@@ -324,8 +325,7 @@ exec "{real_mv}" "$@"
         foreign.write_text("foreign startup")
         paths = {path: path.read_bytes() for path in self.user_home.rglob("*")
                  if path.is_file() and ".local/state" not in str(path)}
-        process = subprocess.Popen([str(target / "usr/bin/licasa"), "60"])
-        self.addCleanup(lambda: process.poll() is None and process.kill())
+        process = start_fixture(self, [str(target / "usr/bin/licasa"), "60"])
         completed = subprocess.run([BASH, str(standalone), "--uninstall"], env=self.environment,
                                    capture_output=True, text=True, timeout=10)
         self.assertNotEqual(completed.returncode, 0)
@@ -366,9 +366,9 @@ assert libc.prctl(4, 0, 0, 0, 0) == 0
 print("ready", flush=True)
 time.sleep(60)
 '''
-        process = subprocess.Popen([sys.executable, "-c", code, str(endpoint)], stdout=subprocess.PIPE, text=True)
+        process = start_fixture(self, [sys.executable, "-c", code, str(endpoint)])
         try:
-            self.assertEqual(process.stdout.readline().strip(), "ready")
+            wait_for_message(process)
             try:
                 os.readlink(f"/proc/{process.pid}/exe")
             except PermissionError:
@@ -408,9 +408,7 @@ time.sleep(60)
             self.assertFalse(target.exists())
             self.assertIsNone(process.poll())
         finally:
-            process.terminate()
-            process.wait(timeout=5)
-            process.stdout.close()
+            stop_fixture(process)
 
     def test_real_desktop_parser_launches_from_special_path_with_exact_photo_argument(self):
         python = "/usr/bin/python3"
@@ -422,7 +420,8 @@ time.sleep(60)
         self.environment["HOME"] = str(self.user_home)
         self.assertEqual(self.run_installer().returncode, 0)
         target = self.user_home / ".local/opt/licasa-appimage"
-        (target / "AppRun").write_text('#!/bin/bash\nprintf "%s\\0" "$@" > "$APP_STARTED"\n')
+        (target / "AppRun").write_text('#!/bin/bash\nprintf "%s\\0" "$@" > "$APP_STARTED.pending"\n'
+                                     'mv -- "$APP_STARTED.pending" "$APP_STARTED"\n')
         photo = self.user_home / 'photo "quoted" % 日本語.png'
         photo.write_bytes(b"fixture")
         desktop = self.user_home / ".local/share/applications/licasa-appimage.desktop"

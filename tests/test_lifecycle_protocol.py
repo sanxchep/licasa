@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from process_fixture import start_fixture, stop_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -126,10 +127,7 @@ class LifecycleProtocolTests(unittest.TestCase):
         self.assertIsNone(LIFECYCLE.socket_request(endpoint, {"operation": "status"}, 2))
 
     def test_acknowledgment_alone_does_not_establish_process_exit(self):
-        child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.buffer.read()"],
-                                 stdin=subprocess.PIPE)
-        self.addCleanup(lambda: child.poll() is None and child.kill())
-        self.addCleanup(lambda: child.stdin.close())
+        child = start_fixture(self, [sys.executable, "-c", "import sys; sys.stdin.buffer.read()"])
         try:
             with self.assertRaisesRegex(LIFECYCLE.QualificationFailure, "still alive"):
                 LIFECYCLE.wait_for_exit(child, 0.01)
@@ -137,11 +135,14 @@ class LifecycleProtocolTests(unittest.TestCase):
             self.assertTrue(LIFECYCLE.process_start_identity(child.pid))
         finally:
             child.stdin.close()
-            child.wait(timeout=2)
+            try:
+                child.wait(timeout=2)
+            finally:
+                stop_fixture(child)
         self.assertIsNone(LIFECYCLE.process_start_identity(child.pid))
 
     def test_normal_exit_is_observed_independently_of_reply(self):
-        child = subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"])
+        child = start_fixture(self, [sys.executable, "-c", "raise SystemExit(0)"])
         self.assertEqual(LIFECYCLE.wait_for_exit(child, 2), 0)
         self.assertIsNone(LIFECYCLE.process_start_identity(child.pid))
 

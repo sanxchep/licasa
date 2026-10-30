@@ -2,9 +2,11 @@
 from pathlib import Path
 import importlib.util
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -29,11 +31,14 @@ from pathlib import Path
 class ParallelTest(unittest.TestCase):
     def test_overlap(self):
         root = Path({str(root)!r})
-        (root / {name!r}).write_text(str(os.getpid()))
+        pending = root / {name + '.pending'!r}
+        pending.write_text(str(os.getpid()))
+        pending.replace(root / {name!r})
         deadline = time.monotonic() + 5
         while not (root / {other!r}).exists() and time.monotonic() < deadline:
             time.sleep(0.01)
         self.assertTrue((root / {other!r}).exists(), "other worker never started")
+        self.assertTrue((root / {other!r}).read_text().isdigit())
         self.assertNotEqual((root / {name!r}).read_text(), (root / {other!r}).read_text())
 ''')
             result = self.run_suite(root, "--jobs", "2")
@@ -94,6 +99,52 @@ class ParallelTest(unittest.TestCase):
         with patch.object(runner.os, "sched_getaffinity", side_effect=OSError), \
                 patch.object(runner.os, "cpu_count", return_value=None):
             self.assertEqual(runner.available_jobs(), 1)
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux process-group timeout inspection")
+    def test_timeout_stops_a_fixture_blocked_in_accept(self):
+        with tempfile.TemporaryDirectory(prefix="lc-runner-") as temporary:
+            root = Path(temporary)
+            marker = root / "peer.pid"
+            source = ("import socket,sys; server=socket.socket(socket.AF_UNIX); "
+                      f"server.bind({str(root / 'peer.sock')!r}); server.listen(1); "
+                      "print('ready',flush=True); server.accept()")
+            (root / "test_blocked.py").write_text(f'''import sys,time,unittest
+from pathlib import Path
+sys.path.insert(0, {str(ROOT / 'tests')!r})
+from process_fixture import start_fixture, wait_for_message
+class Blocked(unittest.TestCase):
+    def test_accept(self):
+        peer = start_fixture(self, [sys.executable, '-c', {source!r}])
+        wait_for_message(peer)
+        pending = Path({str(marker) + '.pending'!r})
+        pending.write_text(str(peer.pid))
+        pending.replace({str(marker)!r})
+        time.sleep(60)
+''')
+            pid = None
+            try:
+                result = self.run_suite(root, "--jobs", "1", "--timeout", "2")
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("Module timed out", result.stdout)
+                pid = int(marker.read_text())
+                status = Path(f"/proc/{pid}/stat")
+                deadline = time.monotonic() + 5
+                while status.exists():
+                    try:
+                        state = status.read_text().rsplit(")", 1)[1].split()[0]
+                    except FileNotFoundError:
+                        break
+                    if state == "Z":
+                        break
+                    if time.monotonic() >= deadline:
+                        self.fail("Module timeout left its socket fixture running")
+                    time.sleep(0.01)
+            finally:
+                if pid is not None:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_workflow_uses_parallel_python_and_ctest_entry_points(self):
         import yaml

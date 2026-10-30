@@ -307,7 +307,6 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                               << "cancelled=" << isCancelled() << "error=" << !error_.isEmpty()
                               << "output=" << image_.size();
         }
-        emit finished();
         if (prewarm) {
             // Keep driver setup off the serial decoder and the full-detail
             // publication path. The shared compute lock makes this safe if an
@@ -319,6 +318,11 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                 },
                 -1);
         }
+        // Qt can retire the response as soon as it observes completion. Queue
+        // publication on the response's owner thread so it cannot be destroyed
+        // by the pixmap reader while this worker is still emitting its signal.
+        // This also lets Qt finish registering a very fast/cancelled response.
+        QMetaObject::invokeMethod(this, [this] { emit finished(); }, Qt::QueuedConnection);
     }
 
   private:

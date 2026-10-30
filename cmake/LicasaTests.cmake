@@ -72,6 +72,9 @@ add_test(NAME licasa_lifecycle_update_tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_unprivileged.py"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lifecycle_update.py")
 set_tests_properties(licasa_lifecycle_update_tests PROPERTIES TIMEOUT 60 LABELS "lifecycle;packaging")
+add_test(NAME licasa_process_fixture_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_process_fixture.py")
+set_tests_properties(licasa_process_fixture_tests PROPERTIES TIMEOUT 15 LABELS "lifecycle;fast")
 
 add_executable(licasa_background_mode_tests
         tests/tst_background_mode.cpp

@@ -23,6 +23,7 @@
 #include <QProcessEnvironment>
 #include <QQuickTextureFactory>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QSemaphore>
 #include <QSettings>
 #include <QSignalSpy>
@@ -100,6 +101,71 @@ class AsyncImageProviderTest final : public QObject {
   private slots:
 
     void initTestCase() { qputenv("LICASA_TRACE_FAST_PNM", QByteArrayLiteral("1")); }
+
+    void completionIsDeliveredOnResponseThread_data()
+    {
+        QTest::addColumn<bool>("cancelled");
+        QTest::addColumn<bool>("missing");
+        QTest::newRow("decoded") << false << false;
+        QTest::newRow("cancelled") << true << false;
+        QTest::newRow("missing") << false << true;
+    }
+
+    void completionIsDeliveredOnResponseThread()
+    {
+        QFETCH(bool, cancelled);
+        QFETCH(bool, missing);
+        QTemporaryDir settings;
+        QTemporaryDir images;
+        QVERIFY(settings.isValid());
+        QVERIFY(images.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+        Licasa::ViewerPreferences preferences;
+        Licasa::ImageResourcePolicy policy(preferences);
+        Licasa::AsyncImageProvider provider(policy);
+        const QString path = images.filePath(QStringLiteral("response.png"));
+        if (!missing) {
+            QImage image(64, 48, QImage::Format_RGB32);
+            image.fill(Qt::green);
+            QVERIFY(image.save(path));
+        }
+
+        // Hold the serial worker until connections and cancellation are ready.
+        QSemaphore entered, release;
+        provider.enqueueWork([&] {
+            entered.release();
+            release.acquire();
+        });
+        const bool workerEntered = entered.tryAcquire(1, 5000);
+        std::unique_ptr<QQuickImageResponse> response(provider.requestImageResponse(
+            QStringLiteral("1/") + QString::fromLatin1(QUrl::toPercentEncoding(path)), QSize()));
+        const auto drain = qScopeGuard([&] {
+            release.release();
+            provider.waitForPendingWork();
+        });
+        QVERIFY(workerEntered);
+        QSignalSpy finished(response.get(), &QQuickImageResponse::finished);
+        std::atomic_bool wrongThread{false};
+        QThread* owner = response->thread();
+        QObject::connect(
+            response.get(), &QQuickImageResponse::finished, response.get(),
+            [&] { wrongThread.store(QThread::currentThread() != owner); }, Qt::DirectConnection);
+        if (cancelled) {
+            response->cancel();
+        }
+        release.release();
+        provider.waitForPendingWork();
+        // The owner is blocked here. Workers may finish decoding, but must not
+        // publish to Qt while another thread can delete the response.
+        QVERIFY(!wrongThread.load());
+        QCOMPARE(finished.count(), 0);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, 5000);
+        QVERIFY(!wrongThread.load());
+        QCOMPARE(response->errorString().isEmpty(), !missing);
+        std::unique_ptr<QQuickTextureFactory> texture(response->textureFactory());
+        QCOMPARE(bool(texture), !cancelled && !missing);
+    }
 
     void parallelPairsJoinEitherRequestOrder_data()
     {

@@ -18,6 +18,33 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import lifecycle_update as lifecycle
 from deploy_local import desktop_exec_argument
+from process_fixture import FixtureError, start_fixture, stop_fixture, wait_for_message
+
+
+RECEIPT_SERVER = """
+import json, os, pathlib, socket, sys
+sys.path.insert(0, sys.argv[1])
+import lifecycle_update as lc
+endpoint, identity, mode, gated = sys.argv[2:]
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+    os.umask(0o022)
+    server.bind(endpoint)
+    if gated == 'yes':
+        print('bound', flush=True)
+        assert sys.stdin.buffer.read(1) == b'x'
+    os.chmod(endpoint, 0o600)
+    server.listen(1)
+    print('ready', flush=True)
+    connection, _ = server.accept()
+    with connection:
+        request = json.loads(connection.recv(16384))
+        result = dict(protocol=1, installationId=identity, result='ready', pid=os.getpid(),
+                      startIdentity=lc.start_identity(os.getpid()), generation=lc.generation(pathlib.Path('/proc/self/exe')))
+        if mode == 'generation': result['generation'] = '0' * 64
+        if mode == 'protocol': result['protocol'] = 77
+        if mode == 'non-object': result = None
+        connection.sendall(json.dumps(result).encode() + b'\\n')
+"""
 
 
 class LifecycleUpdateTests(unittest.TestCase):
@@ -129,8 +156,7 @@ class LifecycleUpdateTests(unittest.TestCase):
 
     def test_legacy_running_process_is_never_sent_quit_or_replaced(self):
         shutil.copy2("/bin/sleep", self.binary)
-        process = subprocess.Popen([str(self.binary), "60"])
-        self.addCleanup(lambda: process.poll() is None and process.kill())
+        process = start_fixture(self, [str(self.binary), "60"])
         old_hash = lifecycle.generation(self.binary)
         with lifecycle.InstallationGate(self.root) as gate:
             with mock.patch.object(lifecycle, "control", return_value={"result": "absent"}):
@@ -144,8 +170,7 @@ class LifecycleUpdateTests(unittest.TestCase):
 
     def test_deleted_executable_is_still_discovered(self):
         shutil.copy2("/bin/sleep", self.binary)
-        process = subprocess.Popen([str(self.binary), "60"])
-        self.addCleanup(lambda: process.poll() is None and process.kill())
+        process = start_fixture(self, [str(self.binary), "60"])
         self.binary.unlink()
         self.assertIn(process.pid, lifecycle.owned_processes(self.binary))
         process.terminate()
@@ -162,9 +187,9 @@ assert libc.prctl(4, 0, 0, 0, 0) == 0
 print("ready", flush=True)
 time.sleep(60)
 '''
-        process = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+        process = start_fixture(self, [sys.executable, "-c", code])
         try:
-            self.assertEqual(process.stdout.readline().strip(), "ready")
+            wait_for_message(process)
             try:
                 os.readlink(f"/proc/{process.pid}/exe")
             except PermissionError:
@@ -192,9 +217,7 @@ time.sleep(60)
                 lifecycle.owned_processes(self.binary, strict=True)
             self.assertEqual(self.binary.read_bytes(), b"old viewer")
         finally:
-            process.terminate()
-            process.wait(timeout=5)
-            process.stdout.close()
+            stop_fixture(process)
 
     def test_registered_nondumpable_peer_refuses_even_without_a_readable_target_process(self):
         runtime = self.work / "runtime"
@@ -210,9 +233,9 @@ assert libc.prctl(4, 0, 0, 0, 0) == 0
 print("ready", flush=True)
 time.sleep(60)
 '''
-        process = subprocess.Popen([sys.executable, "-c", code, str(endpoint)], stdout=subprocess.PIPE, text=True)
+        process = start_fixture(self, [sys.executable, "-c", code, str(endpoint)])
         try:
-            self.assertEqual(process.stdout.readline().strip(), "ready")
+            wait_for_message(process)
             try:
                 os.readlink(f"/proc/{process.pid}/exe")
             except PermissionError:
@@ -227,17 +250,14 @@ time.sleep(60)
                     self.assertGreaterEqual(gate.read()["unknownProcessCount"], 1)
             self.assertEqual(self.binary.read_bytes(), b"old viewer")
         finally:
-            process.terminate()
-            process.wait(timeout=5)
-            process.stdout.close()
+            stop_fixture(process)
 
     def test_historical_renamed_appimage_runtime_remains_a_blocker(self):
         root = self.work / "licasa-appimage"
         binary = root / "usr/bin/licasa"
         binary.parent.mkdir(parents=True)
         shutil.copy2("/bin/sleep", binary)
-        process = subprocess.Popen([str(binary), "60"], env=dict(os.environ, APPDIR=str(root)))
-        self.addCleanup(lambda: process.poll() is None and process.kill())
+        process = start_fixture(self, [str(binary), "60"], env=dict(os.environ, APPDIR=str(root)))
         backup = self.work / ".licasa-appimage.historical/previous-app"
         backup.parent.mkdir()
         os.replace(root, backup)
@@ -264,47 +284,46 @@ time.sleep(60)
                     gate.prepare(self.binary, "filesystem", timeout=0.01)
             self.assertEqual(gate.read()["state"], "verified")
 
-    def test_authenticated_socket_receipt_rejects_generation_and_protocol_mismatch(self):
-        # The peer is a real separate process. Kernel credentials and /proc
-        # identity are checked independently of its supplied JSON fields.
+    def receipt_peer(self, mode="valid", gated=False):
         runtime = self.work / "runtime"
-        runtime.mkdir(mode=0o700)
+        runtime.mkdir(mode=0o700, exist_ok=True)
         binary = Path(os.path.realpath(sys.executable))
         identity = lifecycle.installation_id(binary, self.root, "filesystem")
         endpoint = runtime / f"licasa-lc-{identity}.sock"
-        code = """
-import json, os, pathlib, socket, sys
-sys.path.insert(0, sys.argv[1])
-import lifecycle_update as lc
-endpoint, identity, mode = sys.argv[2:]
-with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-    server.bind(endpoint); os.chmod(endpoint, 0o600); server.listen(1)
-    connection, _ = server.accept()
-    with connection:
-        request = json.loads(connection.recv(16384))
-        result = dict(protocol=1, installationId=identity, result='ready', pid=os.getpid(),
-                      startIdentity=lc.start_identity(os.getpid()), generation=lc.generation(pathlib.Path('/proc/self/exe')))
-        if mode == 'generation': result['generation'] = '0' * 64
-        if mode == 'protocol': result['protocol'] = 77
-        if mode == 'non-object': result = None
-        connection.sendall(json.dumps(result).encode() + b'\\n')
-"""
+        endpoint.unlink(missing_ok=True)
+        process = start_fixture(self, [sys.executable, "-c", RECEIPT_SERVER, str(ROOT / "tools"),
+                                       str(endpoint), identity, mode, "yes" if gated else "no"])
+        return process, runtime, binary, endpoint
+
+    def test_authenticated_socket_receipt_rejects_generation_and_protocol_mismatch(self):
+        # The peer is a real separate process. Kernel credentials and /proc
+        # identity are checked independently of its supplied JSON fields.
         for mode in ("valid", "generation", "protocol", "non-object"):
-            endpoint.unlink(missing_ok=True)
-            process = subprocess.Popen([sys.executable, "-c", code, str(ROOT / "tools"),
-                                        str(endpoint), identity, mode])
-            try:
-                deadline = time.monotonic() + 5
-                while not endpoint.exists() and time.monotonic() < deadline:
-                    time.sleep(0.01)
+            with self.subTest(mode=mode):
+                process, runtime, binary, _ = self.receipt_peer(mode)
+                wait_for_message(process)
                 if mode == "valid":
                     self.assertEqual(lifecycle.control(binary, self.root, "filesystem", "status", runtime=runtime)["result"], "ready")
                 else:
                     with self.assertRaisesRegex(lifecycle.LifecycleError, "receipt|reply"):
                         lifecycle.control(binary, self.root, "filesystem", "status", runtime=runtime)
-            finally:
-                if process.poll() is None:
-                    process.wait(timeout=5)
+                self.assertEqual(process.wait(timeout=5), 0)
+
+    def test_socket_path_existence_does_not_signal_ready(self):
+        process, runtime, binary, endpoint = self.receipt_peer(gated=True)
+        # A pipe gate forces bind-before-chmod/listen, independent of CPU timing.
+        wait_for_message(process, b"bound\n")
+        self.assertTrue(endpoint.exists())
+        self.assertEqual(endpoint.stat().st_mode & 0o777, 0o755)
+        with self.assertRaisesRegex(lifecycle.LifecycleError, "Unsafe lifecycle endpoint"):
+            lifecycle.control(binary, self.root, "filesystem", "status", runtime=runtime)
+        with self.assertRaisesRegex(FixtureError, "Timed out"):
+            wait_for_message(process, timeout=0.05)
+        process.stdin.write(b"x")
+        wait_for_message(process)
+        self.assertEqual(endpoint.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(lifecycle.control(binary, self.root, "filesystem", "status", runtime=runtime)["result"], "ready")
+        self.assertEqual(process.wait(timeout=5), 0)
 
     def test_identity_requires_a_json_object_receipt(self):
         for contents in ("null", "[]", '"text"', "{"):
@@ -514,7 +533,8 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
         directory.mkdir()
         launcher = directory / "licasa-launch"
         marker = self.work / "launched-arguments"
-        launcher.write_text('#!/bin/bash\nprintf "%s\\0" "$@" > "$CAPTURE_ARGUMENTS"\n')
+        launcher.write_text('#!/bin/bash\nprintf "%s\\0" "$@" > "$CAPTURE_ARGUMENTS.pending"\n'
+                            'mv -- "$CAPTURE_ARGUMENTS.pending" "$CAPTURE_ARGUMENTS"\n')
         launcher.chmod(0o755)
         photo = directory / 'photo "quoted" % 日本語.png'
         photo.write_bytes(b"fixture")
