@@ -2,8 +2,9 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import "components"
 
-Column {
+Item {
     id: root
+    objectName: "editorExportContent"
     required property string exportFormat
     required property real exportScale
     required property int exportQuality
@@ -34,7 +35,9 @@ Column {
     signal exportQualityRequested(int value)
     signal settingRequested(string name, var value)
     signal exportRequested()
-    spacing: 12
+    property real minimumHeight: 0
+    implicitHeight: Math.max(minimumHeight, settingsColumn.implicitHeight + 12 + actionColumn.implicitHeight)
+    height: implicitHeight
 
     function contains(values, value) {
         for (const candidate of values) if (candidate === value) return true
@@ -107,242 +110,255 @@ Column {
         if (!alpha || !setting("keepAlpha", true)) result.push(choice("matte", "Background", ["White background", "Black background"], ["#ffffff", "#000000"], "#ffffff"))
         return result
     }
-    SectionCard {
+    Column {
+        id: settingsColumn
+        objectName: "editorExportSettings"
         width: parent.width
-        title: "File format"
-        contentTopSpacing: 8
-        ExportChoice {
-            objectName: "editorExportFormat"
+        spacing: 12
+        SectionCard {
             width: parent.width
-            accessibleLabel: "Export file format"
-            model: root.formatChoices()
-            currentIndex: root.indexFor(model, root.exportFormat)
-            onActivated: root.exportFormatRequested(currentValue)
-        }
-    }
-    SectionCard {
-        width: parent.width
-        title: root.icon ? "Icon canvas" : "Resolution"
-        ExportChoice {
-            objectName: "editorExportIconSize"
-            visible: root.icon
-            width: parent.width
-            accessibleLabel: "Icon dimensions"
-            model: root.iconChoices()
-            currentIndex: root.indexFor(model, root.iconPixels)
-            onActivated: root.settingRequested("iconSize", currentValue)
-        }
-        ExportChoice {
-            objectName: "editorExportIconCrop"
-            visible: root.icon
-            width: parent.width
-            accessibleLabel: "Icon framing"
-            model: [{ "text": "Fit (Keep whole image)", "value": false }, { "text": "Fill (Crop edges)", "value": true }]
-            currentIndex: root.indexFor(model, root.setting("iconCrop", false))
-            onActivated: root.settingRequested("iconCrop", currentValue)
-        }
-        AdjustRow {
-            objectName: "editorExportScaleControl"
-            visible: !root.icon
-            width: parent.width
-            label: "Output scale"
-            value: root.exportScale
-            from: 0.01
-            to: 2.0
-            defaultValue: 1.0
-            keyboardStep: 0.01
-            signedDisplay: false
-            onValueRequested: function(v) { root.exportScaleRequested(v) }
-        }
-        Row {
-            visible: !root.icon
-            width: parent.width
-            spacing: 8
-            ExportNumber {
-                objectName: "editorExportWidth"
-                width: (parent.width - 26) / 2
-                value: root.outputWidth
-                minimum: Math.max(1, Math.round(root.unscaledWidth * .01))
-                maximum: root.unscaledWidth * 2
-                label: "Output width in pixels; aspect ratio locked"
-                onValueRequested: function(v) { if (root.unscaledWidth > 0) root.exportScaleRequested(Math.max(.01, Math.min(2, v / root.unscaledWidth))) }
-            }
-            Text { text: "×"; color: "#B8FFFFFF"; height: 40; verticalAlignment: Text.AlignVCenter }
-            ExportNumber {
-                objectName: "editorExportHeight"
-                width: (parent.width - 26) / 2
-                value: root.outputHeight
-                minimum: Math.max(1, Math.round(root.unscaledHeight * .01))
-                maximum: root.unscaledHeight * 2
-                label: "Output height in pixels; aspect ratio locked"
-                onValueRequested: function(v) { if (root.unscaledHeight > 0) root.exportScaleRequested(Math.max(.01, Math.min(2, v / root.unscaledHeight))) }
+            title: "File format"
+            contentTopSpacing: 8
+            ExportChoice {
+                objectName: "editorExportFormat"
+                width: parent.width
+                accessibleLabel: "Export file format"
+                model: root.formatChoices()
+                currentIndex: root.indexFor(model, root.exportFormat)
+                onActivated: root.exportFormatRequested(currentValue)
             }
         }
-        Text {
+        SectionCard {
             width: parent.width
-            text: root.icon ? root.iconPixels + " × " + root.iconPixels + " pixels"
-                : root.outputWidth + " × " + root.outputHeight + " pixels · aspect ratio locked"
-            color: "#B8FFFFFF"
-            font.pixelSize: 12
-            wrapMode: Text.Wrap
-        }
-    }
-    SectionCard {
-        width: parent.width
-        title: root.formatLabel + " settings"
-        visible: true
-        Repeater {
-            model: root.rows
-            Column {
-                id: row
-                required property var modelData
-                width: parent ? parent.width : 0
-                spacing: 6
-                Text {
-                    visible: row.modelData.type === "choice" || row.modelData.type === "number"
-                    text: row.modelData.title
-                    color: "#B8FFFFFF"
-                    font.pixelSize: 12
-                }
-                Text {
-                    visible: (row.modelData.type === "choice" || row.modelData.type === "number")
-                        && text.length > 0
-                    width: parent.width
-                    text: root.descriptionFor(row.modelData.key)
-                    color: "#B3FFFFFF"
-                    font.pixelSize: 12
-                    wrapMode: Text.Wrap
-                }
-                ExportChoice {
-                    objectName: "editorExport_" + row.modelData.key
-                    visible: row.modelData.type === "choice"
-                    width: parent.width
-                    accessibleLabel: row.modelData.title
-                    model: row.modelData.choices || []
-                    currentIndex: root.indexFor(model, root.setting(row.modelData.key, row.modelData.fallback))
-                    onActivated: root.request(row.modelData.key, currentValue)
-                }
-                ToggleRow {
-                    objectName: "editorExport_" + row.modelData.key + "Toggle"
-                    visible: row.modelData.type === "toggle"
-                    width: parent.width
-                    title: row.modelData.title
-                    subtitle: root.descriptionFor(row.modelData.key)
-                    buttonMotionDuration: root.buttonMotionDuration
-                    switchMotionDuration: root.buttonMotionDuration > 0 ? 160 : 0
-                    checked: root.setting(row.modelData.key, row.modelData.fallback) === true
-                    onToggled: function(v) { root.request(row.modelData.key, v) }
-                }
-                AdjustRow {
-                    objectName: "editorExport_" + row.modelData.key + "Slider"
-                    visible: row.modelData.type === "slider"
-                    width: parent.width
-                    label: row.modelData.title
-                    value: row.modelData.type !== "slider" ? 0 : row.modelData.key === "quality"
-                        ? Math.min(root.exportQuality, row.modelData.maximum) : root.setting(row.modelData.key, row.modelData.fallback)
-                    from: row.modelData.minimum !== undefined ? row.modelData.minimum : 0
-                    to: row.modelData.maximum !== undefined ? row.modelData.maximum : 100
-                    defaultValue: row.modelData.type === "slider" ? row.modelData.fallback : 0
-                    displayMultiplier: 1
-                    suffix: row.modelData.key === "quality" ? "%" : ""
-                    decimals: 0
-                    keyboardStep: 1
-                    signedDisplay: false
-                    onValueRequested: function(v) { root.request(row.modelData.key, Math.round(v)) }
-                }
-                Text {
-                    visible: row.modelData.type === "slider" && text.length > 0
-                    width: parent.width
-                    text: root.descriptionFor(row.modelData.key)
-                    color: "#B3FFFFFF"
-                    font.pixelSize: 12
-                    wrapMode: Text.Wrap
-                }
+            title: root.icon ? "Icon canvas" : "Resolution"
+            ExportChoice {
+                objectName: "editorExportIconSize"
+                visible: root.icon
+                width: parent.width
+                accessibleLabel: "Icon dimensions"
+                model: root.iconChoices()
+                currentIndex: root.indexFor(model, root.iconPixels)
+                onActivated: root.settingRequested("iconSize", currentValue)
+            }
+            ExportChoice {
+                objectName: "editorExportIconCrop"
+                visible: root.icon
+                width: parent.width
+                accessibleLabel: "Icon framing"
+                model: [{ "text": "Fit (Keep whole image)", "value": false }, { "text": "Fill (Crop edges)", "value": true }]
+                currentIndex: root.indexFor(model, root.setting("iconCrop", false))
+                onActivated: root.settingRequested("iconCrop", currentValue)
+            }
+            AdjustRow {
+                objectName: "editorExportScaleControl"
+                visible: !root.icon
+                width: parent.width
+                label: "Output scale"
+                value: root.exportScale
+                from: 0.01
+                to: 2.0
+                defaultValue: 1.0
+                keyboardStep: 0.01
+                signedDisplay: false
+                onValueRequested: function(v) { root.exportScaleRequested(v) }
+            }
+            Row {
+                visible: !root.icon
+                width: parent.width
+                spacing: 8
                 ExportNumber {
-                    objectName: "editorExport_" + row.modelData.key + "Number"
-                    visible: row.modelData.type === "number"
-                    width: parent.width
-                    label: row.modelData.title
-                    value: row.modelData.type === "number" ? root.setting(row.modelData.key, row.modelData.fallback) : 0
-                    maximum: row.modelData.maximum !== undefined ? row.modelData.maximum : 100000
-                    onValueRequested: function(v) { root.request(row.modelData.key, v) }
+                    objectName: "editorExportWidth"
+                    width: (parent.width - 26) / 2
+                    value: root.outputWidth
+                    minimum: Math.max(1, Math.round(root.unscaledWidth * .01))
+                    maximum: root.unscaledWidth * 2
+                    label: "Output width in pixels; aspect ratio locked"
+                    onValueRequested: function(v) { if (root.unscaledWidth > 0) root.exportScaleRequested(Math.max(.01, Math.min(2, v / root.unscaledWidth))) }
+                }
+                Text { text: "×"; color: "#B8FFFFFF"; height: 40; verticalAlignment: Text.AlignVCenter }
+                ExportNumber {
+                    objectName: "editorExportHeight"
+                    width: (parent.width - 26) / 2
+                    value: root.outputHeight
+                    minimum: Math.max(1, Math.round(root.unscaledHeight * .01))
+                    maximum: root.unscaledHeight * 2
+                    label: "Output height in pixels; aspect ratio locked"
+                    onValueRequested: function(v) { if (root.unscaledHeight > 0) root.exportScaleRequested(Math.max(.01, Math.min(2, v / root.unscaledHeight))) }
+                }
+            }
+            Text {
+                width: parent.width
+                text: root.icon ? root.iconPixels + " × " + root.iconPixels + " pixels"
+                    : root.outputWidth + " × " + root.outputHeight + " pixels · aspect ratio locked"
+                color: "#B8FFFFFF"
+                font.pixelSize: 12
+                wrapMode: Text.Wrap
+            }
+        }
+        SectionCard {
+            width: parent.width
+            title: root.formatLabel + " settings"
+            visible: true
+            Repeater {
+                model: root.rows
+                Column {
+                    id: row
+                    required property var modelData
+                    width: parent ? parent.width : 0
+                    spacing: 6
+                    Text {
+                        visible: row.modelData.type === "choice" || row.modelData.type === "number"
+                        text: row.modelData.title
+                        color: "#B8FFFFFF"
+                        font.pixelSize: 12
+                    }
+                    Text {
+                        visible: (row.modelData.type === "choice" || row.modelData.type === "number")
+                            && text.length > 0
+                        width: parent.width
+                        text: root.descriptionFor(row.modelData.key)
+                        color: "#B3FFFFFF"
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+                    ExportChoice {
+                        objectName: "editorExport_" + row.modelData.key
+                        visible: row.modelData.type === "choice"
+                        width: parent.width
+                        accessibleLabel: row.modelData.title
+                        model: row.modelData.choices || []
+                        currentIndex: root.indexFor(model, root.setting(row.modelData.key, row.modelData.fallback))
+                        onActivated: root.request(row.modelData.key, currentValue)
+                    }
+                    ToggleRow {
+                        objectName: "editorExport_" + row.modelData.key + "Toggle"
+                        visible: row.modelData.type === "toggle"
+                        width: parent.width
+                        title: row.modelData.title
+                        subtitle: root.descriptionFor(row.modelData.key)
+                        buttonMotionDuration: root.buttonMotionDuration
+                        switchMotionDuration: root.buttonMotionDuration > 0 ? 160 : 0
+                        checked: root.setting(row.modelData.key, row.modelData.fallback) === true
+                        onToggled: function(v) { root.request(row.modelData.key, v) }
+                    }
+                    AdjustRow {
+                        objectName: "editorExport_" + row.modelData.key + "Slider"
+                        visible: row.modelData.type === "slider"
+                        width: parent.width
+                        label: row.modelData.title
+                        value: row.modelData.type !== "slider" ? 0 : row.modelData.key === "quality"
+                            ? Math.min(root.exportQuality, row.modelData.maximum) : root.setting(row.modelData.key, row.modelData.fallback)
+                        from: row.modelData.minimum !== undefined ? row.modelData.minimum : 0
+                        to: row.modelData.maximum !== undefined ? row.modelData.maximum : 100
+                        defaultValue: row.modelData.type === "slider" ? row.modelData.fallback : 0
+                        displayMultiplier: 1
+                        suffix: row.modelData.key === "quality" ? "%" : ""
+                        decimals: 0
+                        keyboardStep: 1
+                        signedDisplay: false
+                        onValueRequested: function(v) { root.request(row.modelData.key, Math.round(v)) }
+                    }
+                    Text {
+                        visible: row.modelData.type === "slider" && text.length > 0
+                        width: parent.width
+                        text: root.descriptionFor(row.modelData.key)
+                        color: "#B3FFFFFF"
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+                    ExportNumber {
+                        objectName: "editorExport_" + row.modelData.key + "Number"
+                        visible: row.modelData.type === "number"
+                        width: parent.width
+                        label: row.modelData.title
+                        value: row.modelData.type === "number" ? root.setting(row.modelData.key, row.modelData.fallback) : 0
+                        maximum: row.modelData.maximum !== undefined ? row.modelData.maximum : 100000
+                        onValueRequested: function(v) { root.request(row.modelData.key, v) }
+                    }
                 }
             }
         }
+        ActionChip {
+            objectName: "editorExportAdvanced"
+            width: parent.width
+            text: root.advancedOpen ? "Advanced  ⌃" : "Advanced  ⌄"
+            onClicked: root.advancedOpen = !root.advancedOpen
+        }
+        SectionCard {
+            visible: root.advancedOpen
+            width: parent.width
+            title: "Advanced"
+            ToggleRow {
+                objectName: "editorExportNearest"
+                width: parent.width
+                title: "Pixel-art scaling"
+                subtitle: "Keep pixel edges sharp."
+                buttonMotionDuration: root.buttonMotionDuration
+                switchMotionDuration: root.buttonMotionDuration > 0 ? 160 : 0
+                checked: root.setting("nearest", false)
+                onToggled: function(v) { root.settingRequested("nearest", v) }
+            }
+            ToggleRow {
+                objectName: "editorExportSrgb"
+                visible: root.contains(["png", "jpeg", "tiff"], root.effectiveFormat)
+                width: parent.width
+                title: "Convert to sRGB"
+                subtitle: "Use standard colors for screens."
+                buttonMotionDuration: root.buttonMotionDuration
+                switchMotionDuration: root.buttonMotionDuration > 0 ? 160 : 0
+                checked: root.setting("srgb", false)
+                onToggled: function(v) { root.settingRequested("srgb", v) }
+            }
+            Text {
+                visible: root.contains(["png", "jpeg", "tiff", "bmp"], root.effectiveFormat)
+                text: "Density (DPI) · 0 keeps source"
+                color: "#B8FFFFFF"
+                font.pixelSize: 12
+            }
+            Text {
+                visible: root.contains(["png", "jpeg", "tiff", "bmp"], root.effectiveFormat)
+                width: parent.width
+                text: "Change print density, not pixel size."
+                color: "#B3FFFFFF"
+                font.pixelSize: 12
+                wrapMode: Text.Wrap
+            }
+            ExportNumber {
+                objectName: "editorExportDpi"
+                visible: root.contains(["png", "jpeg", "tiff", "bmp"], root.effectiveFormat)
+                width: parent.width
+                label: "Output DPI; zero preserves source density"
+                value: root.setting("dpi", 0)
+                maximum: 2400
+                onValueRequested: function(v) { root.settingRequested("dpi", v) }
+            }
+        }
     }
-    ActionChip {
-        objectName: "editorExportAdvanced"
+    Column {
+        id: actionColumn
+        objectName: "editorExportActionArea"
         width: parent.width
-        text: root.advancedOpen ? "Advanced  ⌃" : "Advanced  ⌄"
-        onClicked: root.advancedOpen = !root.advancedOpen
-    }
-    SectionCard {
-        visible: root.advancedOpen
-        width: parent.width
-        title: "Advanced"
-        ToggleRow {
-            objectName: "editorExportNearest"
-            width: parent.width
-            title: "Pixel-art scaling"
-            subtitle: "Keep pixel edges sharp."
-            buttonMotionDuration: root.buttonMotionDuration
-            switchMotionDuration: root.buttonMotionDuration > 0 ? 160 : 0
-            checked: root.setting("nearest", false)
-            onToggled: function(v) { root.settingRequested("nearest", v) }
-        }
-        ToggleRow {
-            objectName: "editorExportSrgb"
-            visible: root.contains(["png", "jpeg", "tiff"], root.effectiveFormat)
-            width: parent.width
-            title: "Convert to sRGB"
-            subtitle: "Use standard colors for screens."
-            buttonMotionDuration: root.buttonMotionDuration
-            switchMotionDuration: root.buttonMotionDuration > 0 ? 160 : 0
-            checked: root.setting("srgb", false)
-            onToggled: function(v) { root.settingRequested("srgb", v) }
-        }
+        y: Math.max(settingsColumn.implicitHeight + 12, root.height - implicitHeight)
+        spacing: 12
         Text {
-            visible: root.contains(["png", "jpeg", "tiff", "bmp"], root.effectiveFormat)
-            text: "Density (DPI) · 0 keeps source"
-            color: "#B8FFFFFF"
-            font.pixelSize: 12
-        }
-        Text {
-            visible: root.contains(["png", "jpeg", "tiff", "bmp"], root.effectiveFormat)
+            visible: root.saveStatus.length > 0
             width: parent.width
-            text: "Change print density, not pixel size."
-            color: "#B3FFFFFF"
-            font.pixelSize: 12
+            text: root.saveStatus
+            color: "#C8FFFFFF"
+            font.pixelSize: 11
             wrapMode: Text.Wrap
         }
-        ExportNumber {
-            objectName: "editorExportDpi"
-            visible: root.contains(["png", "jpeg", "tiff", "bmp"], root.effectiveFormat)
+        ActionChip {
+            objectName: "editorExportButton"
             width: parent.width
-            label: "Output DPI; zero preserves source density"
-            value: root.setting("dpi", 0)
-            maximum: 2400
-            onValueRequested: function(v) { root.settingRequested("dpi", v) }
+            sectionStyle: true
+            affirmative: true
+            text: root.saveBusy ? "Exporting…" : "Export " + root.formatLabel
+                + (root.estimatedSize.length > 0 ? " · " + root.estimatedSize : "")
+            subtitle: root.icon ? root.iconPixels + " × " + root.iconPixels + " pixels" : root.outputWidth + " × " + root.outputHeight + " pixels"
+            enabled: root.hasImage && !root.saveBusy
+            animationDuration: root.buttonMotionDuration
+            onClicked: { if (enabled) root.exportRequested() }
         }
-    }
-    ActionChip {
-        objectName: "editorExportButton"
-        width: parent.width
-        sectionStyle: true
-        affirmative: true
-        text: root.saveBusy ? "Exporting…" : "Export " + root.formatLabel
-            + (root.estimatedSize.length > 0 ? " · " + root.estimatedSize : "")
-        subtitle: root.icon ? root.iconPixels + " × " + root.iconPixels + " pixels" : root.outputWidth + " × " + root.outputHeight + " pixels"
-        enabled: root.hasImage && !root.saveBusy
-        animationDuration: root.buttonMotionDuration
-        onClicked: { if (enabled) root.exportRequested() }
-    }
-    Text {
-        visible: root.saveStatus.length > 0
-        width: parent.width
-        text: root.saveStatus
-        color: "#C8FFFFFF"
-        font.pixelSize: 11
-        wrapMode: Text.Wrap
     }
 }

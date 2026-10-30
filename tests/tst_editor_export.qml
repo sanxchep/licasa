@@ -77,6 +77,27 @@ Item {
         function test_everyFormatSettingsAndRestore_data() {
             return testEditor.formats().map(function(f) { return {tag:f.key, format:f.key} })
         }
+        function test_exportActionUsesAvailableSpaceWithoutOverlappingSettings_data() {
+            return testEditor.formats().map(function(f) { return {tag:f.key, format:f.key} })
+        }
+        function test_exportActionUsesAvailableSpaceWithoutOverlappingSettings(data) {
+            const f = create(data.format), content = f.content
+            const action = child(f, "editorExportButton")
+            const settings = child(f, "editorExportSettings")
+            const natural = content.height
+            content.minimumHeight = natural + 240
+            tryCompare(content, "height", natural + 240)
+            fuzzyCompare(action.mapToItem(content, 0, action.height).y, content.height, 1)
+            verify(action.mapToItem(content, 0, 0).y >= settings.height + 240)
+            content.saveStatus = "Ready to export your image."
+            wait(0)
+            fuzzyCompare(action.mapToItem(content, 0, action.height).y, content.height, 1)
+            content.minimumHeight = 1
+            wait(0)
+            verify(content.height > content.minimumHeight)
+            verify(action.mapToItem(content, 0, 0).y >= settings.height + 12)
+            fuzzyCompare(action.mapToItem(content, 0, action.height).y, content.height, 1)
+        }
         function test_everyFormatSettingsAndRestore(data) {
             const f = create(data.format), format = data.format
             if (["png", "tiff"].indexOf(format) >= 0) {

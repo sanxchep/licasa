@@ -3,7 +3,7 @@ import QtQuick
 Rectangle {
     id: root
 
-    required property string title
+    property string title: ""
     property string subtitle: ""
     property real contentTopSpacing: 14
     default property alias content: bodyColumn.data
@@ -13,12 +13,7 @@ Rectangle {
     border.width: 1
     border.color: "#1EFFFFFF"
     antialiasing: true
-    implicitHeight: 16
-        + sectionTitle.implicitHeight
-        + (sectionSubtitle.visible ? 3 + sectionSubtitle.implicitHeight : 0)
-        + contentTopSpacing
-        + bodyColumn.implicitHeight
-        + 16
+    implicitHeight: bodyColumn.y + bodyColumn.implicitHeight + 16
 
     Text {
         id: sectionTitle
@@ -27,6 +22,7 @@ Rectangle {
         width: Math.max(1, root.width - 32)
         height: implicitHeight
         text: root.title
+        visible: text.length > 0
         color: "white"
         font.pixelSize: 14
         font.weight: Font.DemiBold
@@ -37,7 +33,7 @@ Rectangle {
     Text {
         id: sectionSubtitle
         x: 16
-        y: sectionTitle.y + sectionTitle.implicitHeight + 3
+        y: root.title.length > 0 ? sectionTitle.y + sectionTitle.implicitHeight + 3 : 16
         width: Math.max(1, root.width - 32)
         height: implicitHeight
         text: root.subtitle
@@ -51,9 +47,9 @@ Rectangle {
     Column {
         id: bodyColumn
         x: 16
-        y: sectionSubtitle.visible
+        y: root.subtitle.length > 0
             ? sectionSubtitle.y + sectionSubtitle.implicitHeight + root.contentTopSpacing
-            : sectionTitle.y + sectionTitle.implicitHeight + root.contentTopSpacing
+            : root.title.length > 0 ? sectionTitle.y + sectionTitle.implicitHeight + root.contentTopSpacing : 16
         width: parent.width - 32
         spacing: 12
     }

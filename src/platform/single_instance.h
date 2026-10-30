@@ -14,7 +14,6 @@ class ApplicationLifecycle;
 struct LaunchOptions {
     QUrl initialUrl;
     bool background = false;
-    bool quit = false;
 };
 
 LaunchOptions parseLaunchOptions(const QStringList& arguments);

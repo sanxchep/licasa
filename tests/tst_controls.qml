@@ -1425,6 +1425,97 @@ Item {
         tryCompare(footer, "revealProgress", 1)
     }
 
+    function test_cropFooterTransition_data() {
+        return [{ tag: "motion", smooth: true }, { tag: "reduced-motion", smooth: false }]
+    }
+
+    function test_cropFooterTransition(data) {
+        const editor = createControl(editorSidePanelComponent)
+        editor.panelOpen = true
+        editor.hasAdjustments = true
+        editor.smoothMotionEnabled = data.smooth
+        editor.activateTool("crop")
+        const footer = findChild(editor, "editorFooter")
+        const saves = findChild(editor, "editorSaveActions")
+        const crops = findChild(editor, "editorCropActions")
+        const save = findChild(editor, "editorSaveButton")
+        const copy = findChild(editor, "editorSaveCopyButton")
+        const cancel = findChild(editor, "editorCancelCropButton")
+        const apply = findChild(editor, "editorApplyCropButton")
+        const copied = createSpy(editor, "saveAsRequested")
+        const canceled = createSpy(editor, "cropCanceled")
+        const applied = createSpy(editor, "cropApplied")
+        const scroll = findChild(editor, "editorScrollArea")
+        const viewportHeight = scroll.height
+        compare(cancel.sectionStyle, save.sectionStyle)
+        compare(apply.sectionStyle, copy.sectionStyle)
+        compare(cancel.height, save.height)
+        compare(apply.height, copy.height)
+        compare(apply.textAlignment, copy.textAlignment)
+        verify(apply.affirmative)
+        copy.forceActiveFocus()
+        editor.cropMode = true
+        compare(copy.enabled, false)
+        compare(copy.activeFocusOnTab, false)
+        compare(copy.Accessible.ignored, true)
+        compare(cancel.activeFocus, true)
+        copy.activate()
+        compare(copied.count, 0)
+        if (data.smooth) {
+            tryVerify(function() { return footer.cropProgress > 0 && footer.cropProgress < 1 })
+            verify(saves.visible && crops.visible)
+            verify(saves.y < 0 && crops.y > 0)
+        }
+        tryCompare(footer, "cropProgress", 1)
+        compare(saves.visible, false)
+        compare(crops.y, 0)
+        compare(scroll.height, viewportHeight)
+        keyClick(Qt.Key_Space)
+        compare(canceled.count, 1)
+        apply.forceActiveFocus()
+        keyClick(Qt.Key_Return)
+        compare(applied.count, 1)
+
+        editor.cropMode = false
+        compare(apply.enabled, false)
+        compare(apply.activeFocusOnTab, false)
+        compare(apply.Accessible.ignored, true)
+        compare(copy.activeFocus, true)
+        apply.activate()
+        compare(applied.count, 1)
+        if (data.smooth) {
+            tryVerify(function() { return footer.cropProgress > 0 && footer.cropProgress < 1 })
+            verify(saves.visible && crops.visible)
+        }
+        tryCompare(footer, "cropProgress", 0)
+        compare(crops.visible, false)
+        compare(saves.y, 0)
+        compare(scroll.height, viewportHeight)
+        keyClick(Qt.Key_Return)
+        compare(copied.count, 1)
+
+        // Reversing before a slide completes must leave only the current actions usable.
+        editor.cropMode = true
+        if (data.smooth)
+            tryVerify(function() { return footer.cropProgress > 0 && footer.cropProgress < 1 })
+        editor.cropMode = false
+        tryCompare(footer, "cropProgress", 0)
+        compare(crops.visible, false)
+        compare(copy.enabled, true)
+        editor.cropMode = true
+        tryCompare(footer, "cropProgress", 1)
+        editor.cropMode = false
+        if (data.smooth)
+            tryVerify(function() { return footer.cropProgress > 0 && footer.cropProgress < 1 })
+        editor.cropMode = true
+        tryCompare(footer, "cropProgress", 1)
+        compare(saves.visible, false)
+        compare(cancel.enabled, true)
+        editor.smoothMotionEnabled = false
+        editor.cropMode = false
+        compare(footer.cropProgress, 0)
+    }
+
     function test_exportDropdownHandlesKeyboardWithoutDismissingEditor() {
         const editor = createControl(editorSidePanelComponent)
         editor.smoothMotionEnabled = false

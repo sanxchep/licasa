@@ -1,19 +1,148 @@
 #!/usr/bin/env python3
 """Offline preparation must verify all inputs without a hidden network fallback."""
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from source_cache import fetch_archive
 from build_codecs import prepare_archive_source, prepare_git_source, git_output, selected_names
+
+
+class ArchiveDownloadTests(unittest.TestCase):
+    payload = b"checksum-pinned archive bytes"
+
+    def fetch(self, cache, *, url="https://example.invalid/source.tar.gz", **options):
+        return fetch_archive(cache, url, hashlib.sha256(self.payload).hexdigest(), **options)
+
+    def concurrent_downloads(self, distinct_names):
+        barrier = threading.Barrier(2)
+        payload = self.payload
+
+        class Response(io.BytesIO):
+            def __init__(self):
+                super().__init__(payload)
+                self.first_read = True
+
+            def read(self, size=-1):
+                if self.first_read:
+                    self.first_read = False
+                    barrier.wait(timeout=5)
+                return super().read(size)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            names = ["first.tar.gz", "second.tar.gz"] if distinct_names else ["source.tar.gz"] * 2
+            with patch("source_cache.urlopen", side_effect=lambda *a, **k: Response()):
+                with ThreadPoolExecutor(max_workers=2) as workers:
+                    futures = [workers.submit(self.fetch, cache, name=name) for name in names]
+                    paths = [future.result(timeout=10) for future in futures]
+            self.assertEqual({p.name for p in cache.iterdir()}, set(names))
+            for path in paths:
+                self.assertEqual(path.read_bytes(), self.payload)
+
+    def test_concurrent_downloads_of_same_archive(self):
+        self.concurrent_downloads(distinct_names=False)
+
+    def test_concurrent_downloads_of_distinct_archives(self):
+        self.concurrent_downloads(distinct_names=True)
+
+    def test_checksum_failure_is_not_published_and_can_be_retried(self):
+        for algorithm in ["sha256", "sha512"]:
+            with self.subTest(algorithm=algorithm), tempfile.TemporaryDirectory() as temporary:
+                cache = Path(temporary)
+                digest = hashlib.new(algorithm, self.payload).hexdigest()
+                with patch("source_cache.urlopen", side_effect=[io.BytesIO(b"bad"), io.BytesIO(self.payload)]):
+                    with self.assertRaisesRegex(RuntimeError, "Checksum mismatch"):
+                        fetch_archive(cache, "https://example.invalid/source.tar.gz", digest, algorithm=algorithm)
+                    self.assertEqual(list(cache.iterdir()), [])
+                    result = fetch_archive(cache, "https://example.invalid/source.tar.gz", digest, algorithm=algorithm)
+                self.assertEqual(result.read_bytes(), self.payload)
+                self.assertEqual(list(cache.iterdir()), [result])
+
+    def test_interrupted_download_leaves_no_cache_or_temporary(self):
+        class Interrupted(io.BytesIO):
+            def read(self, size=-1):
+                if self.tell():
+                    raise OSError("connection interrupted")
+                return super().read(size)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            with patch("source_cache.urlopen", return_value=Interrupted(self.payload)):
+                with self.assertRaisesRegex(OSError, "connection interrupted"):
+                    self.fetch(cache)
+            self.assertEqual(list(cache.iterdir()), [])
+
+    def test_download_bound_leaves_no_cache_or_temporary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            with patch("source_cache.urlopen", return_value=io.BytesIO(self.payload)):
+                with self.assertRaisesRegex(RuntimeError, "exceeded size bound"):
+                    self.fetch(cache, limit=len(self.payload) - 1)
+            self.assertEqual(list(cache.iterdir()), [])
+
+    def test_cached_archive_still_obeys_bound_without_network(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            archive = cache / "source.tar.gz"
+            archive.write_bytes(self.payload)
+            with patch("source_cache.urlopen", side_effect=AssertionError("network attempted")):
+                for offline in [False, True]:
+                    with self.subTest(offline=offline), self.assertRaisesRegex(RuntimeError, "exceeded size bound"):
+                        self.fetch(cache, offline=offline, limit=len(self.payload) - 1)
+            self.assertEqual(archive.read_bytes(), self.payload)
+
+    def test_bad_concurrent_download_cannot_corrupt_successful_writer(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        class DelayedBadResponse(io.BytesIO):
+            def read(self, size=-1):
+                started.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("valid writer did not finish")
+                return super().read(size)
+
+        def response(url, **options):
+            return DelayedBadResponse(b"bad") if url.endswith("/bad") else io.BytesIO(self.payload)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            with patch("source_cache.urlopen", side_effect=response):
+                with ThreadPoolExecutor(max_workers=1) as workers:
+                    failed = workers.submit(self.fetch, cache, url="https://example.invalid/bad", name="source.tar.gz")
+                    try:
+                        self.assertTrue(started.wait(timeout=5))
+                        result = self.fetch(cache, name="source.tar.gz")
+                    finally:
+                        release.set()
+                    with self.assertRaisesRegex(RuntimeError, "Checksum mismatch"):
+                        failed.result(timeout=10)
+            self.assertEqual(result.read_bytes(), self.payload)
+            self.assertEqual(list(cache.iterdir()), [result])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX archive permissions")
+    def test_download_preserves_callers_archive_permissions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            previous_mask = os.umask(0o027)
+            try:
+                with patch("source_cache.urlopen", return_value=io.BytesIO(self.payload)):
+                    result = self.fetch(cache)
+            finally:
+                os.umask(previous_mask)
+            self.assertEqual(result.stat().st_mode & 0o777, 0o640)
 
 
 class OfflineSourceTests(unittest.TestCase):

@@ -262,6 +262,10 @@ Item {
     onCropModeChanged: {
         if (cropMode)
             activateTool("crop")
+        if (cropMode && (saveButton.activeFocus || saveCopyButton.activeFocus))
+            cropCancelButton.forceActiveFocus()
+        else if (!cropMode && (cropCancelButton.activeFocus || cropApplyButton.activeFocus))
+            saveCopyButton.forceActiveFocus()
     }
 
     RoundIconButton {
@@ -651,6 +655,7 @@ Item {
                 EditorExportContent {
                     visible: root.activeTool === "export"
                     width: parent.width
+                    minimumHeight: flick.height
                     exportFormat: root.exportFormat
                     exportScale: root.exportScale
                     exportQuality: root.exportQuality
@@ -815,14 +820,27 @@ Item {
             opacity: revealProgress
             visible: revealProgress > .001
             anchors.bottomMargin: 20 - 60 * (1 - revealProgress)
-            height: root.cropMode ? 44 : 40
+            height: 40
+            clip: true
+            property real cropProgress: root.cropMode ? 1 : 0
+            Behavior on cropProgress {
+                NumberAnimation { duration: root.smoothMotionEnabled ? 180 : 0; easing.type: Easing.OutCubic }
+            }
 
             Row {
-                visible: root.cropMode
-                anchors.fill: parent
+                objectName: "editorCropActions"
+                visible: root.cropMode || footer.cropProgress > 0
+                enabled: root.cropMode
+                width: parent.width
+                height: parent.height
+                y: height * (1 - footer.cropProgress)
+                opacity: footer.cropProgress
                 spacing: 10
 
                 ActionChip {
+                    id: cropCancelButton
+                    objectName: "editorCancelCropButton"
+                    Accessible.ignored: !root.cropMode || !footer.enabled
                     width: (parent.width - parent.spacing) * 0.38
                     height: parent.height
                     text: "Cancel"
@@ -831,24 +849,32 @@ Item {
                 }
 
                 ActionChip {
+                    id: cropApplyButton
+                    objectName: "editorApplyCropButton"
+                    Accessible.ignored: !root.cropMode || !footer.enabled
                     width: (parent.width - parent.spacing) * 0.62
                     height: parent.height
                     text: "Apply crop"
-                    checked: true
-                    accent: "#48FFFFFF"
+                    affirmative: true
                     animationDuration: root.buttonMotionDuration
                     onClicked: root.cropApplied()
                 }
             }
 
             Row {
-                visible: !root.cropMode
-                anchors.fill: parent
+                objectName: "editorSaveActions"
+                visible: !root.cropMode || footer.cropProgress < 1
+                enabled: !root.cropMode
+                width: parent.width
+                height: parent.height
+                y: -height * footer.cropProgress
+                opacity: 1 - footer.cropProgress
                 spacing: 10
 
                 ActionChip {
                     id: saveButton
                     objectName: "editorSaveButton"
+                    Accessible.ignored: root.cropMode || !footer.enabled
                     width: (parent.width - parent.spacing) * 0.38
                     height: parent.height
                     text: root.saveBusy ? "Saving…" : "Save"
@@ -860,7 +886,9 @@ Item {
                 }
 
                 ActionChip {
+                    id: saveCopyButton
                     objectName: "editorSaveCopyButton"
+                    Accessible.ignored: root.cropMode || !footer.enabled
                     width: parent.width - x
                     height: parent.height
                     text: "Save as a copy"

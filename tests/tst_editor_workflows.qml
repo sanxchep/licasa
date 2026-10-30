@@ -64,6 +64,113 @@ Item {
             }
             return null
         }
+        function test_exportBottomAlignmentAndCropLayout_data() {
+            return [{tag:"roomy",height:1100},{tag:"compact",height:640}]
+        }
+        function test_exportBottomAlignmentAndCropLayout(data) {
+            const main = realWindow(testEditor.image("layout-" + data.tag + ".png", 997, 613))
+            main.height = data.height
+            const editor = findChild(main, "editorMenuButton").parent
+            const scroll = findChild(main, "editorScrollArea")
+            editor.activateTool("export")
+            const content = findChild(main, "editorExportContent")
+            const action = findChild(main, "editorExportButton")
+            wait(0)
+            if (data.height > 900) {
+                tryVerify(function() { return scroll.contentHeight <= scroll.height + 1 }, 1000,
+                    "Export should fit: content=" + scroll.contentHeight + ", viewport=" + scroll.height)
+                fuzzyCompare(action.mapToItem(scroll, 0, action.height).y, scroll.height, 1)
+            } else {
+                verify(scroll.contentHeight > scroll.height)
+                action.forceActiveFocus()
+                tryVerify(function() {
+                    const point = action.mapToItem(scroll, 0, 0)
+                    return point.y >= 0 && point.y + action.height <= scroll.height + 1
+                })
+            }
+            waitForRendering(action)
+            verify(testEditor.screenshot(main, data.tag + "-export-bottom"))
+            editor.activateTool("crop")
+            const grid = findChild(main, "editorCropRatioGrid")
+            verify(grid)
+            const start = findChild(main, "editorStartCropButton")
+            compare(start.subtitle, "")
+            compare(start.height, 44)
+            compare(findChild(main, "editorCropDimensions").color, Qt.color("#282828"))
+            let count = 0
+            for (let i = 0; i < grid.children.length; ++i) {
+                const tile = grid.children[i]
+                if (typeof tile.activate !== "function") continue
+                verify(tile.x >= 0 && tile.x + tile.width <= grid.width + 1)
+                compare(tile.height, 68)
+                verify(testEditor.accessible(tile).name.length > 0)
+                ++count
+            }
+            compare(count, 8)
+            const custom = findChild(main, "editorCustomAspectChip")
+            verify(testEditor.press(custom))
+            const fields = findChild(main, "editorCustomAspectFields")
+            tryCompare(fields, "visible", true)
+            compare(fields.color, Qt.color("#282828"))
+            const customApply = findChild(main, "editorApplyCustomAspectChip")
+            const customWidth = findChild(main, "customAspectWidthInput")
+            compare(customApply.textAlignment, Text.AlignHCenter)
+            fuzzyCompare(customApply.mapToItem(fields, 0, customApply.height / 2).y,
+                customWidth.mapToItem(fields, 0, customWidth.height / 2).y, 1)
+            for (const name of ["customAspectWidthInput","customAspectHeightInput","editorApplyCustomAspectChip"]) {
+                const field = findChild(main, name)
+                const point = field.mapToItem(fields, 0, 0)
+                verify(point.x >= 0 && point.x + field.width <= fields.width + 1)
+            }
+            scroll.contentY = 0
+            waitForRendering(grid)
+            verify(testEditor.screenshot(main, data.tag + "-crop-layout"))
+            verify(testEditor.press(findChild(main, "editorStartCropButton")))
+            compare(main.editorCropMode, true)
+            waitForRendering(grid)
+            verify(testEditor.screenshot(main, data.tag + "-crop-active"))
+        }
+        function test_cropFooterCommitsOrCancelsDraft_data() {
+            const rows = []
+            for (const key of [0, Qt.Key_Return, Qt.Key_Space])
+                for (const apply of [true, false])
+                    rows.push({tag:(apply ? "apply-" : "cancel-") + key, apply:apply, key:key})
+            return rows
+        }
+        function test_cropFooterCommitsOrCancelsDraft(data) {
+            const source = testEditor.image("crop-footer-" + data.tag + ".png")
+            const digest = testEditor.digest(source), main = realWindow(source)
+            const editor = findChild(main, "editorMenuButton").parent
+            editor.activateTool("crop")
+            main.smoothMenuMotionEnabled = true
+            verify(testEditor.press(findChild(main, "editorStartCropButton")))
+            compare(main.editorCropMode, true)
+            main.updateDraftCrop(.1, .2, .6, .5)
+            const footer = findChild(main, "editorFooter")
+            tryCompare(footer, "cropProgress", 1)
+            const button = findChild(main, data.apply ? "editorApplyCropButton" : "editorCancelCropButton")
+            if (data.key) {
+                button.forceActiveFocus()
+                compare(main.activeFocusItem, button)
+                testEditor.key(main, data.key)
+            } else {
+                verify(testEditor.press(button))
+            }
+            compare(main.editorCropMode, false)
+            tryCompare(footer, "cropProgress", 0)
+            fuzzyCompare(main.editorCropX, data.apply ? .1 : 0, .000001)
+            fuzzyCompare(main.editorCropY, data.apply ? .2 : 0, .000001)
+            fuzzyCompare(main.editorCropWidth, data.apply ? .6 : 1, .000001)
+            fuzzyCompare(main.editorCropHeight, data.apply ? .5 : 1, .000001)
+            compare(main.editorHasAdjustments, data.apply)
+            compare(findChild(main, "editorSaveCopyButton").enabled, true)
+            if (data.apply) {
+                main.undoEditorChange()
+                compare(main.editorCropWidth, 1)
+                compare(main.editorHasAdjustments, false)
+            }
+            compare(testEditor.digest(source), digest)
+        }
         function test_realCropPresetPixels_data() {
             const rows = []
             for (const turn of [0, 1]) for (const pair of [["1:1",1],["4:3",4/3],["3:2",3/2],["4:5",4/5],["16:9",16/9],["Original",0]])

@@ -11,6 +11,8 @@ Item {
     property bool destructive: false
     property bool affirmative: false
     property bool sectionStyle: false
+    property int textAlignment: sectionStyle ? Text.AlignLeft : Text.AlignHCenter
+    property color textColor: "white"
     property int animationDuration: 140
 
     signal clicked()
@@ -35,6 +37,13 @@ Item {
     Accessible.checked: checkable && checked
     Accessible.onPressAction: activate()
 
+    Keys.onShortcutOverride: function(event) {
+        // Focused buttons own their activation keys before viewer shortcuts run.
+        if (event.modifiers === Qt.NoModifier && (event.key === Qt.Key_Space
+                || event.key === Qt.Key_Return || event.key === Qt.Key_Enter))
+            event.accepted = true
+    }
+
     Keys.onPressed: function(event) {
         if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
                 && event.key !== Qt.Key_Enter) {
@@ -57,6 +66,7 @@ Item {
                 ? (root.destructive ? "#B32632" : root.affirmative ? "#247A48" : "#26FFFFFF")
                 : root.affirmative ? "#143C2A" : "transparent")
             : root.destructive ? "#B32632"
+                : root.affirmative ? (chipMouse.containsMouse ? "#247A48" : "#143C2A")
                 : root.checked ? root.accent : "#15FFFFFF"
         border.width: root.activeFocus ? 2 : 1
         border.color: root.activeFocus
@@ -84,9 +94,9 @@ Item {
             width: parent.width
             text: root.text
             color: root.sectionStyle && root.destructive && !chipMouse.containsMouse
-                ? "#FFADB5" : root.sectionStyle && root.affirmative && !chipMouse.containsMouse
-                    ? "#A1E5B8" : "white"
-            horizontalAlignment: root.sectionStyle ? Text.AlignLeft : Text.AlignHCenter
+                ? "#FFADB5" : root.affirmative && !chipMouse.containsMouse
+                    ? "#A1E5B8" : root.textColor
+            horizontalAlignment: root.textAlignment
             wrapMode: root.sectionStyle ? Text.Wrap : Text.NoWrap
             font.pixelSize: root.sectionStyle ? 14 : 12
             font.weight: Font.Medium

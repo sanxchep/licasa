@@ -73,38 +73,69 @@ Column {
 
     SectionCard {
         width: parent.width
-        title: root.cropMode ? "Crop active" : "Crop & frame"
-        subtitle: root.cropMode
-            ? "Drag inside to move; use corners or edges to resize"
-            : "Start a precise, non-destructive crop"
 
-        Text {
+        Rectangle {
+            objectName: "editorCropDimensions"
             width: parent.width
-            text: root.cropMode && root.cropOutputWidth > 0
-                ? root.cropOutputWidth + " × " + root.cropOutputHeight
-                    + " px selected"
-                    + (root.cropEstimatedFileSize.length > 0
-                        ? "  (" + root.cropEstimatedFileSize + ")"
-                        : "")
-                : "The photo stays fully visible while you frame it."
-            color: "#C7FFFFFF"
-            font.pixelSize: 11
-            wrapMode: Text.Wrap
-            renderType: Text.NativeRendering
+            height: 64
+            radius: 12
+            color: "#282828"
+            border.width: 1
+            border.color: "#32FFFFFF"
+            Column {
+                anchors.left: parent.left
+                anchors.right: sizeLabel.left
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.margins: 12
+                spacing: 4
+                Text {
+                    text: root.cropMode ? "Selected area" : "Image size"
+                    color: "#A8FFFFFF"
+                    font.pixelSize: 11
+                    renderType: Text.NativeRendering
+                }
+                Text {
+                    width: parent.width
+                    text: root.cropMode && root.cropOutputWidth > 0
+                        ? root.cropOutputWidth + " × " + root.cropOutputHeight
+                        : root.imageWidth > 0 ? Math.round(root.imageWidth) + " × " + Math.round(root.imageHeight) : "Ready to frame"
+                    color: "white"
+                    font.pixelSize: 18
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                    renderType: Text.NativeRendering
+                }
+            }
+            Text {
+                id: sizeLabel
+                anchors.right: parent.right
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.cropMode && root.cropEstimatedFileSize.length > 0 ? root.cropEstimatedFileSize : "px"
+                color: "#B3FFFFFF"
+                font.pixelSize: 11
+                renderType: Text.NativeRendering
+            }
         }
 
         ActionChip {
             visible: !root.cropMode
+            objectName: "editorStartCropButton"
+            width: parent.width
+            height: 44
             text: "Start crop"
-            checked: true
-            accent: "#48FFFFFF"
+            sectionStyle: true
+            affirmative: true
             animationDuration: root.buttonMotionDuration
             onClicked: root.cropStarted()
         }
 
         ActionChip {
             visible: root.cropMode
+            width: parent.width
             text: "Reset frame"
+            sectionStyle: true
+            height: 44
             animationDuration: root.buttonMotionDuration
             onClicked: root.cropPresetRequested("full")
         }
@@ -113,61 +144,61 @@ Column {
     SectionCard {
         width: parent.width
         title: "Aspect ratio"
-        subtitle: root.customAspectEditorOpen
-                && root.cropAspectPreset !== "custom"
-            ? "Enter horizontal and vertical proportions"
-            : root.cropAspectPreset === "free"
-                ? "Freeform resizing"
-                : "Ratio locked while dragging corners"
 
-        Flow {
+        Grid {
+            id: ratioGrid
+            objectName: "editorCropRatioGrid"
             width: parent.width
+            columns: 4
             spacing: 8
 
             Repeater {
                 model: [
-                    { "key": "free", "label": "Free" },
-                    { "key": "original", "label": "Original" },
-                    { "key": "square", "label": "1:1" },
-                    { "key": "4:3", "label": "4:3" },
-                    { "key": "3:2", "label": "3:2" },
-                    { "key": "4:5", "label": "4:5" },
-                    { "key": "16:9", "label": "16:9" }
+                    { "key": "free", "label": "Free", "ratio": 0 },
+                    { "key": "original", "label": "Original", "ratio": root.imageHeight > 0 ? root.imageWidth / root.imageHeight : 1.5 },
+                    { "key": "square", "label": "1:1", "ratio": 1 },
+                    { "key": "4:3", "label": "4:3", "ratio": 4 / 3 },
+                    { "key": "3:2", "label": "3:2", "ratio": 3 / 2 },
+                    { "key": "4:5", "label": "4:5", "ratio": 4 / 5 },
+                    { "key": "16:9", "label": "16:9", "ratio": 16 / 9 }
                 ]
 
-                ActionChip {
+                CropRatioButton {
                     required property var modelData
+                    objectName: "editorCropRatio_" + modelData.key
+                    width: (ratioGrid.width - 3 * ratioGrid.spacing) / 4
                     text: modelData.label
-                    checkable: true
-                    checked: root.cropAspectPreset === modelData.key
-                    accent: "#48FFFFFF"
+                    ratio: modelData.ratio
+                    checked: root.cropAspectPreset === modelData.key && !root.customAspectEditorOpen
                     animationDuration: root.buttonMotionDuration
                     onClicked: root.cropPresetRequested(modelData.key)
                 }
             }
 
-                ActionChip {
-                    objectName: "editorCustomAspectChip"
-                    text: "Custom"
-                checkable: true
+            CropRatioButton {
+                objectName: "editorCustomAspectChip"
+                width: (ratioGrid.width - 3 * ratioGrid.spacing) / 4
+                text: "Custom"
+                custom: true
                 checked: root.cropAspectPreset === "custom"
                     || root.customAspectEditorOpen
-                accent: "#48FFFFFF"
                 animationDuration: root.buttonMotionDuration
                 onClicked: root.openCustomAspectEditor()
             }
         }
 
         Rectangle {
+            objectName: "editorCustomAspectFields"
             visible: root.customAspectEditorOpen
             width: parent.width
             height: 76
-            radius: 16
-            color: "#151515"
+            radius: 12
+            color: "#282828"
             border.width: 1
-            border.color: "#24FFFFFF"
+            border.color: "#32FFFFFF"
 
             Row {
+                id: customFields
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
@@ -177,11 +208,11 @@ Column {
                 spacing: 8
 
                 Column {
-                    width: 76
+                    width: (customFields.width - 10 - customApply.width - 3 * customFields.spacing) / 2
                     spacing: 4
 
                     Text {
-                        text: "Horizontal"
+                        text: "Width"
                         color: "#99FFFFFF"
                         font.pixelSize: 10
                         renderType: Text.NativeRendering
@@ -229,7 +260,8 @@ Column {
                 }
 
                 Text {
-                    y: 28
+                    width: 10
+                    y: customWidthField.y + (customWidthField.height - height) / 2
                     text: ":"
                     color: "#C8FFFFFF"
                     font.pixelSize: 18
@@ -238,11 +270,11 @@ Column {
                 }
 
                 Column {
-                    width: 76
+                    width: (customFields.width - 10 - customApply.width - 3 * customFields.spacing) / 2
                     spacing: 4
 
                     Text {
-                        text: "Vertical"
+                        text: "Height"
                         color: "#99FFFFFF"
                         font.pixelSize: 10
                         renderType: Text.NativeRendering
@@ -289,15 +321,16 @@ Column {
                 }
 
                 ActionChip {
+                    id: customApply
                     objectName: "editorApplyCustomAspectChip"
-                    y: 20
-                    width: Math.max(68, parent.width - x)
+                    y: customWidthField.y
+                    width: 72
                     height: 38
                     text: "Apply"
-                    checkable: true
-                    checked: root.cropAspectPreset === "custom"
+                    sectionStyle: true
+                    textAlignment: Text.AlignHCenter
+                    affirmative: true
                     enabled: root.customAspectRatioIsValid()
-                    accent: "#48FFFFFF"
                     animationDuration: root.buttonMotionDuration
                     onClicked: root.applyCustomAspectRatio()
                 }
@@ -308,30 +341,43 @@ Column {
     SectionCard {
         width: parent.width
         title: "Rotate & mirror"
-        subtitle: root.cropMode
-            ? "Apply or cancel the frame before transforming"
-            : "Change orientation without losing quality"
 
-        Flow {
+        Grid {
+            id: orientationGrid
+            objectName: "editorCropOrientationGrid"
             width: parent.width
+            columns: 2
             spacing: 8
 
             ActionChip {
-                text: "↶  Left"
+                width: (orientationGrid.width - orientationGrid.spacing) / 2
+                height: 44
+                sectionStyle: true
+                text: "↶  Rotate left"
+                textColor: "#DDFFFFFF"
                 enabled: !root.cropMode
                 animationDuration: root.buttonMotionDuration
                 onClicked: root.rotateLeftRequested()
             }
 
             ActionChip {
-                text: "↷  Right"
+                width: (orientationGrid.width - orientationGrid.spacing) / 2
+                height: 44
+                sectionStyle: true
+                text: "↷  Rotate right"
+                textColor: "#DDFFFFFF"
                 enabled: !root.cropMode
                 animationDuration: root.buttonMotionDuration
                 onClicked: root.rotateRightRequested()
             }
 
             ActionChip {
-                text: "Mirror H"
+                width: (orientationGrid.width - orientationGrid.spacing) / 2
+                height: 44
+                sectionStyle: true
+                affirmative: root.flipHorizontal
+                text: "Flip horizontal"
+                textColor: "#DDFFFFFF"
                 enabled: !root.cropMode
                 checkable: true
                 checked: root.flipHorizontal
@@ -340,7 +386,12 @@ Column {
             }
 
             ActionChip {
-                text: "Mirror V"
+                width: (orientationGrid.width - orientationGrid.spacing) / 2
+                height: 44
+                sectionStyle: true
+                affirmative: root.flipVertical
+                text: "Flip vertical"
+                textColor: "#DDFFFFFF"
                 enabled: !root.cropMode
                 checkable: true
                 checked: root.flipVertical
@@ -348,15 +399,18 @@ Column {
                 onClicked: root.flipVerticalToggled()
             }
 
-            ActionChip {
-                visible: root.rotationQuarterTurns !== 0
-                enabled: !root.cropMode
-                text: "Reset " + (root.rotationQuarterTurns * 90) + "°"
-                checked: true
-                accent: "#48FFFFFF"
-                animationDuration: root.buttonMotionDuration
-                onClicked: root.rotationResetRequested()
-            }
+        }
+
+        ActionChip {
+            width: parent.width
+            height: 44
+            sectionStyle: true
+            visible: root.rotationQuarterTurns !== 0
+            enabled: !root.cropMode
+            text: "Reset " + (root.rotationQuarterTurns * 90) + "°"
+            textColor: "#DDFFFFFF"
+            animationDuration: root.buttonMotionDuration
+            onClicked: root.rotationResetRequested()
         }
     }
 }

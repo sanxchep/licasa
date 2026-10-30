@@ -32,9 +32,7 @@ LaunchOptions parseLaunchOptions(const QStringList& arguments)
         const QString argument = arguments.at(index);
         if (argument == QStringLiteral("--background")) {
             options.background = true;
-        } else if (argument == QStringLiteral("--quit")) {
-            options.quit = true;
-        } else if (options.initialUrl.isEmpty()) {
+        } else if (argument != QStringLiteral("--quit") && options.initialUrl.isEmpty()) {
             const QFileInfo fileInfo(argument);
             options.initialUrl = fileInfo.exists() && fileInfo.isFile()
                                      ? QUrl::fromLocalFile(fileInfo.absoluteFilePath())

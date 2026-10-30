@@ -658,6 +658,7 @@ function(licasa_add_qml target_name)
             qml/components/ExportNumber.qml
             qml/components/EditorNumber.qml
             qml/components/ActionChip.qml
+            qml/components/CropRatioButton.qml
             qml/components/SectionCard.qml
             qml/components/AdjustRow.qml
             qml/components/ToggleRow.qml
