@@ -810,7 +810,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                     $<TARGET_FILE:licasa_diagnostics>
                     --output ${CMAKE_CURRENT_BINARY_DIR}/raw-viewer-behavior.json)
             set_tests_properties(licasa_raw_viewer_behavior PROPERTIES
-                    TIMEOUT 150 LABELS "codec;raw;integration")
+                    # The 100/250 ms GUI heartbeat budgets measure this viewer,
+                    # not contention from unrelated codec/QML tests under ASan.
+                    TIMEOUT 150 RUN_SERIAL TRUE LABELS "codec;raw;integration")
+            add_test(NAME licasa_raw_viewer_scheduling
+                    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ctest_scheduling.py
+                    --build-dir ${CMAKE_CURRENT_BINARY_DIR} --ctest ${CMAKE_CTEST_COMMAND}
+                    --isolated-test licasa_raw_viewer_behavior)
+            set_tests_properties(licasa_raw_viewer_scheduling PROPERTIES
+                    TIMEOUT 20 LABELS "raw;packaging;fast")
         endif()
         set(LICASA_LIFECYCLE_OPTIONS)
         set(LICASA_LIFECYCLE_SAMPLE_COUNT 1) # core 8K JPEG

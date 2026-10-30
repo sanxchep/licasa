@@ -26,6 +26,8 @@ def main():
                      for name in ['apple-iphone-12-pro.dng', 'google-pixel-6-pro.dng',
                                   'google-pixel-8-pro-50mp.dng', 'samsung-s22.dng'])
     report = {}
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text('{}\n')
     for sample, limit, preview_available, fast_intermediate, develop in cases:
         with tempfile.TemporaryDirectory(prefix='licasa-raw-behavior-') as tmp:
             env = dict(os.environ, QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software',
@@ -46,6 +48,9 @@ def main():
                     f"RAW diagnostics produced invalid JSON for {sample.name}\n"
                     f"stdout:\n{run.stdout}\nstderr:\n{run.stderr}") from error
             report[sample.name] = result
+            # Keep the measured case even when a strict assertion below fails.
+            # CI uploads this file after failed CTest runs as well as passes.
+            args.output.write_text(json.dumps(report, indent=2) + '\n')
             assert 'error' not in result, (sample, result, run.stderr)
             assert 'Binding loop detected' not in run.stderr, run.stderr
             assert result['initial_preview_available'] == preview_available, result
@@ -70,8 +75,6 @@ def main():
             elif limit == 25:
                 assert result['full_detail_blocked_by_policy'], result
         print(f'RAW viewer behavior verified: {sample.name}', flush=True)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + '\n')
 
 
 if __name__ == '__main__':
