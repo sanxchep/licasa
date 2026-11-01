@@ -105,6 +105,34 @@
     </message>
 </context>
 <context>
+    <name>AtomicFileCopy</name>
+    <message>
+        <location filename="../src/io/atomic_file_copy.cpp" line="38"/>
+        <source>The source file changed during export.</source>
+        <translation>Källfilen ändrades under exporten.</translation>
+    </message>
+    <message>
+        <location filename="../src/io/atomic_file_copy.cpp" line="43"/>
+        <source>The export range no longer fits the source file.</source>
+        <translation>Exportintervallet ryms inte längre i källfilen.</translation>
+    </message>
+    <message>
+        <location filename="../src/io/atomic_file_copy.cpp" line="46"/>
+        <source>Choose a destination that is not an alias of the source file.</source>
+        <translation>Välj en målfil som inte är ett alias för källfilen.</translation>
+    </message>
+    <message>
+        <location filename="../src/io/atomic_file_copy.cpp" line="51"/>
+        <source>Unable to seek the export source.</source>
+        <translation>Det går inte att söka i exportkällan.</translation>
+    </message>
+    <message>
+        <location filename="../src/io/atomic_file_copy.cpp" line="72"/>
+        <source>Unable to write the export.</source>
+        <translation>Det gick inte att skriva exporten.</translation>
+    </message>
+</context>
+<context>
     <name>CropOverlay</name>
     <message>
         <location filename="../qml/CropOverlay.qml" line="47"/>

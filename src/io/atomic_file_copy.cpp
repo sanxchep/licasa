@@ -1,6 +1,7 @@
 #include "io/atomic_file_copy.h"
 
 #include <QDir>
+#include <QCoreApplication>
 #include <QFileInfo>
 #include <QSaveFile>
 
@@ -33,19 +34,21 @@ QString copyFileRangeAtomically(QFile& source, const ExternalFileIdentity& ident
         const auto current = externalFileIdentity(source);
         return current && *current == identity;
     };
-    const QString changedError = QStringLiteral("The source file changed during export.");
+    const QString changedError =
+        QCoreApplication::translate("AtomicFileCopy", "The source file changed during export.");
     if (!unchanged()) {
         return changedError;
     }
     if (!checkedByteRange(identity.size, range.offset, range.length)) {
-        return QStringLiteral("The export range no longer fits the source file.");
+        return QCoreApplication::translate("AtomicFileCopy", "The export range no longer fits the source file.");
     }
     if (destinationAliasesSource(destinationPath, source.fileName(), identity)) {
-        return QStringLiteral("Choose a destination that is not an alias of the source file.");
+        return QCoreApplication::translate(
+            "AtomicFileCopy", "Choose a destination that is not an alias of the source file.");
     }
     // A regular QFile's signed size and the range check bound this conversion.
     if (!source.seek(qint64(range.offset))) {
-        return QStringLiteral("Unable to seek the export source.");
+        return QCoreApplication::translate("AtomicFileCopy", "Unable to seek the export source.");
     }
 
     QSaveFile output(destinationPath);
@@ -65,7 +68,9 @@ QString copyFileRangeAtomically(QFile& source, const ExternalFileIdentity& ident
         if (output.write(buffer.data(), request) != request) {
             const QString error = output.errorString();
             output.cancelWriting();
-            return error.isEmpty() ? QStringLiteral("Unable to write the export.") : error;
+            return error.isEmpty()
+                       ? QCoreApplication::translate("AtomicFileCopy", "Unable to write the export.")
+                       : error;
         }
         remaining -= quint64(request);
     }
