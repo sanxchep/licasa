@@ -53,7 +53,7 @@ TextField {
     bottomPadding: 2
     inputMethodHints: Qt.ImhFormattedNumbersOnly | Qt.ImhNoPredictiveText
     Accessible.name: label
-    Accessible.description: minimum + " to " + maximum + suffix
+    Accessible.description: minimum + qsTr(" to ") + maximum + suffix
 
     onTextEdited: dirty = true
     onEditingFinished: finishEditing(true)

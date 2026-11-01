@@ -22,11 +22,11 @@ FileDialog {
         return DialogRuntime.open(dialog)
     }
 
-    title: "Export motion as"
+    title: qsTr("Export motion as")
     fileMode: FileDialog.SaveFile
     nameFilters: suggestedSuffix.toLowerCase() === "mov"
-        ? ["QuickTime movie (*.mov)"]
-        : ["MPEG-4 video (*.mp4)"]
+        ? [qsTr("QuickTime movie (*.mov)")]
+        : [qsTr("MPEG-4 video (*.mp4)")]
     defaultSuffix: suggestedSuffix.toLowerCase()
 
     Component.onCompleted: selectedFile = suggestedFile

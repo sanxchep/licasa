@@ -122,12 +122,12 @@ Item {
 
     function estimatedLargeImageMemoryText() {
         const gibibytes = maximumImageMemoryMiB / 1024.0
-        return "Estimated per-image budget: " + gibibytes.toFixed(2) + " GiB"
+        return qsTr("Estimated per-image budget: ") + gibibytes.toFixed(2) + qsTr(" GiB")
     }
 
     function currentImageMegapixelsText() {
         const decimals = currentImageMegapixels < 100.0 ? 1 : 0
-        return currentImageMegapixels.toFixed(decimals) + " MP"
+        return currentImageMegapixels.toFixed(decimals) + qsTr(" MP")
     }
 
     // Controls consume their own arrows first (sliders, fields and tool tabs).
@@ -200,7 +200,7 @@ Item {
             - (root.cornerControlMargin + width + 8) * hideProgress
         anchors.bottomMargin: root.cornerControlMargin
         iconName: "settings"
-        accessibleName: root.panelOpen ? "Close settings" : "Open settings"
+        accessibleName: root.panelOpen ? qsTr("Close settings") : qsTr("Open settings")
         checkable: true
         checked: root.panelOpen
         animationDuration: root.buttonMotionDuration
@@ -248,7 +248,7 @@ Item {
                 id: titleText
                 x: 0
                 anchors.verticalCenter: closeButton.verticalCenter
-                text: "Settings"
+                text: qsTr("Settings")
                 color: "white"
                 font.pixelSize: 22
                 font.weight: Font.DemiBold
@@ -262,7 +262,7 @@ Item {
                 anchors.top: parent.top
                 anchors.right: parent.right
                 iconName: "close"
-                accessibleName: "Close settings"
+                accessibleName: qsTr("Close settings")
                 baseColor: "#2B2B2B"
                 hoverColor: "#393939"
                 animationDuration: root.buttonMotionDuration
@@ -298,8 +298,8 @@ Item {
 
                     ToggleRow {
                         width: parent.width
-                        title: "Info overlay"
-                        subtitle: "Show file name and zoom details"
+                        title: qsTr("Info overlay")
+                        subtitle: qsTr("Show file name and zoom details")
                         checked: root.infoOverlayEnabled
                         buttonMotionDuration: root.buttonMotionDuration
                         switchMotionDuration: root.switchMotionDuration
@@ -311,8 +311,8 @@ Item {
 
                     ToggleRow {
                         width: parent.width
-                        title: "Smooth motion"
-                        subtitle: "Animate menu and switches"
+                        title: qsTr("Smooth motion")
+                        subtitle: qsTr("Animate menu and switches")
                         checked: root.smoothMotionEnabled
                         buttonMotionDuration: root.buttonMotionDuration
                         switchMotionDuration: root.switchMotionDuration
@@ -324,8 +324,8 @@ Item {
 
                     ToggleRow {
                         width: parent.width
-                        title: "Open in fullscreen"
-                        subtitle: "Use fullscreen when opening or showing images"
+                        title: qsTr("Open in fullscreen")
+                        subtitle: qsTr("Use fullscreen when opening or showing images")
                         checked: root.startInFullscreenEnabled
                         buttonMotionDuration: root.buttonMotionDuration
                         switchMotionDuration: root.switchMotionDuration
@@ -341,8 +341,8 @@ Item {
                         visible: root.backgroundModeManager
                             && root.backgroundModeManager.supported
                         width: parent.width
-                        title: "Background process"
-                        subtitle: "Keep a lightweight background process open. Starts at next login."
+                        title: qsTr("Background process")
+                        subtitle: qsTr("Keep a lightweight background process open. Starts at next login.")
                         checked: root.backgroundModeManager
                             ? root.backgroundModeManager.enabled : false
                         buttonMotionDuration: root.buttonMotionDuration
@@ -355,8 +355,8 @@ Item {
 
                     ValueRow {
                         width: parent.width
-                        title: "Background opacity"
-                        subtitle: "Dark backdrop behind the image in fullscreen"
+                        title: qsTr("Background opacity")
+                        subtitle: qsTr("Dark backdrop behind the image in fullscreen")
                         value: root.fullscreenBackgroundOpacity
                         step: 0.05
                         buttonMotionDuration: root.buttonMotionDuration
@@ -368,8 +368,8 @@ Item {
 
                     ToggleRow {
                         width: parent.width
-                        title: "Full screen transparency grid"
-                        subtitle: "Show a checkerboard behind transparent pixels in full screen"
+                        title: qsTr("Full screen transparency grid")
+                        subtitle: qsTr("Show a checkerboard behind transparent pixels in full screen")
                         checked: root.transparencyCheckerboardEnabled
                         buttonMotionDuration: root.buttonMotionDuration
                         switchMotionDuration: root.switchMotionDuration
@@ -381,10 +381,10 @@ Item {
 
                     ValueRow {
                         width: parent.width
-                        title: "Grid opacity"
+                        title: qsTr("Grid opacity")
                         subtitle: root.transparencyCheckerboardEnabled
-                            ? "Strength of the transparency checkerboard"
-                            : "Turn on the full screen grid to adjust"
+                            ? qsTr("Strength of the transparency checkerboard")
+                            : qsTr("Turn on the full screen grid to adjust")
                         value: root.transparencyCheckerboardOpacity
                         step: 0.05
                         enabled: root.transparencyCheckerboardEnabled
@@ -398,8 +398,8 @@ Item {
 
                     ToggleRow {
                         width: parent.width
-                        title: "Floating transparency grid"
-                        subtitle: "Show a checkerboard instead of solid backing in floating mode"
+                        title: qsTr("Floating transparency grid")
+                        subtitle: qsTr("Show a checkerboard instead of solid backing in floating mode")
                         checked: root.windowedTransparencyCheckerboardEnabled
                         buttonMotionDuration: root.buttonMotionDuration
                         switchMotionDuration: root.switchMotionDuration
@@ -411,10 +411,10 @@ Item {
 
                     ValueRow {
                         width: parent.width
-                        title: "Floating transparency opacity"
+                        title: qsTr("Floating transparency opacity")
                         subtitle: root.windowedTransparencyCheckerboardEnabled
-                            ? "Strength of the floating checkerboard"
-                            : "Strength of the solid backing for transparent pixels"
+                            ? qsTr("Strength of the floating checkerboard")
+                            : qsTr("Strength of the solid backing for transparent pixels")
                         value: root.windowedTransparencyOpacity
                         step: 0.05
                         buttonMotionDuration: root.buttonMotionDuration
@@ -434,8 +434,8 @@ Item {
                         objectName: "advancedSettingsButton"
                         width: parent.width
                         text: root.advancedOpen
-                            ? "Advanced settings  ▲"
-                            : "Advanced settings  ▼"
+                            ? qsTr("Advanced settings  ▲")
+                            : qsTr("Advanced settings  ▼")
                         checkable: true
                         checked: root.advancedOpen
                         accent: "#34FFFFFF"
@@ -446,12 +446,12 @@ Item {
                     SectionCard {
                         visible: root.advancedOpen
                         width: parent.width
-                        title: "Rendering quality"
+                        title: qsTr("Rendering quality")
 
                         ToggleRow {
                             width: parent.width
-                            title: "Smooth scaling"
-                            subtitle: "Filter pixels while zooming and fitting"
+                            title: qsTr("Smooth scaling")
+                            subtitle: qsTr("Filter pixels while zooming and fitting")
                             checked: root.smoothImageScalingEnabled
                             buttonMotionDuration: root.buttonMotionDuration
                             switchMotionDuration: root.switchMotionDuration
@@ -462,8 +462,8 @@ Item {
 
                         ToggleRow {
                             width: parent.width
-                            title: "Mipmap downscaling"
-                            subtitle: "Sharper text and detail when zoomed out"
+                            title: qsTr("Mipmap downscaling")
+                            subtitle: qsTr("Sharper text and detail when zoomed out")
                             checked: root.mipmapImageScalingEnabled
                             buttonMotionDuration: root.buttonMotionDuration
                             switchMotionDuration: root.switchMotionDuration
@@ -474,8 +474,8 @@ Item {
 
                         ToggleRow {
                             width: parent.width
-                            title: "Pixel-aligned placement"
-                            subtitle: "Avoid half-pixel blur at the image origin"
+                            title: qsTr("Pixel-aligned placement")
+                            subtitle: qsTr("Avoid half-pixel blur at the image origin")
                             checked: root.pixelAlignedRenderingEnabled
                             buttonMotionDuration: root.buttonMotionDuration
                             switchMotionDuration: root.switchMotionDuration
@@ -486,8 +486,8 @@ Item {
 
                         ToggleRow {
                             width: parent.width
-                            title: "Full-resolution rendering"
-                            subtitle: "Promote previews to the original resolution"
+                            title: qsTr("Full-resolution rendering")
+                            subtitle: qsTr("Promote previews to the original resolution")
                             checked: root.fullResolutionRenderingEnabled
                             buttonMotionDuration: root.buttonMotionDuration
                             switchMotionDuration: root.switchMotionDuration
@@ -498,8 +498,8 @@ Item {
 
                         ToggleRow {
                             width: parent.width
-                            title: "Color-managed rendering"
-                            subtitle: "Convert embedded profiles to display sRGB"
+                            title: qsTr("Color-managed rendering")
+                            subtitle: qsTr("Convert embedded profiles to display sRGB")
                             checked: root.colorManagedRenderingEnabled
                             buttonMotionDuration: root.buttonMotionDuration
                             switchMotionDuration: root.switchMotionDuration
@@ -513,17 +513,17 @@ Item {
                         visible: root.advancedOpen
                         objectName: "maximumImageMemoryControl"
                         width: parent.width
-                        title: "Maximum working memory per image"
+                        title: qsTr("Maximum working memory per image")
                         subtitle: root.estimatedLargeImageMemoryText()
-                            + "\nImages above this budget open in a bounded preview"
+                            + qsTr("\nImages above this budget open in a bounded preview")
                         from: root.minimumImageMemoryMiB
                         to: root.maximumImageMemoryLimitMiB
                         value: root.maximumImageMemoryMiB
                         step: 128
                         displayMultiplier: 1.0 / 1024.0
                         displayDecimals: 2
-                        displaySuffix: " GiB"
-                        accessibleUnit: "MiB"
+                        displaySuffix: qsTr(" GiB")
+                        accessibleUnit: qsTr("MiB")
                         buttonMotionDuration: root.buttonMotionDuration
                         onValueChangedByUser: function(value) {
                             root.maximumImageMemoryMiBRequested(
@@ -538,8 +538,8 @@ Item {
                     ValueRow {
                         visible: root.advancedOpen
                         width: parent.width
-                        title: "Crop shield opacity"
-                        subtitle: "Dim only the area outside the crop frame"
+                        title: qsTr("Crop shield opacity")
+                        subtitle: qsTr("Dim only the area outside the crop frame")
                         value: root.cropShieldOpacity
                         step: 0.05
                         buttonMotionDuration: root.buttonMotionDuration
@@ -551,11 +551,11 @@ Item {
                     SectionCard {
                         visible: root.advancedOpen
                         width: parent.width
-                        title: "Animated Playback Settings"
+                        title: qsTr("Animated Playback Settings")
 
                         ToggleRow {
                             width: parent.width
-                            title: "Play animated images"
+                            title: qsTr("Play animated images")
                             checked: root.animatedImagePlaybackEnabled
                             buttonMotionDuration: root.buttonMotionDuration
                             switchMotionDuration: root.switchMotionDuration
@@ -566,7 +566,7 @@ Item {
 
                         ValueRow {
                             width: parent.width
-                            title: "Playback speed"
+                            title: qsTr("Playback speed")
                             from: 0.25
                             to: 2.0
                             value: root.animationSpeed
@@ -586,40 +586,40 @@ Item {
                     ActionChip {
                         objectName: "quitLicasaButton"
                         width: parent.width
-                        text: "Fully Quit Licasa"
-                        subtitle: "Closes the viewer and all Licasa background processes."
+                        text: qsTr("Fully Quit Licasa")
+                        subtitle: qsTr("Closes the viewer and all Licasa background processes.")
                         sectionStyle: true
                         destructive: true
                         animationDuration: root.buttonMotionDuration
-                        Accessible.description: subtitle + " Shortcut Control Shift Q."
+                        Accessible.description: subtitle + qsTr(" Shortcut Control Shift Q.")
                         onClicked: root.quitRequested()
                     }
 
                     ActionChip {
                         objectName: "viewSourceButton"
                         width: parent.width
-                        text: "View Source"
+                        text: qsTr("View Source")
                         sectionStyle: true
                         animationDuration: root.buttonMotionDuration
-                        Accessible.description: "Open the Licasa source repository on GitHub."
+                        Accessible.description: qsTr("Open the Licasa source repository on GitHub.")
                         onClicked: root.externalUrlRequested(root.sourceRepositoryUrl)
                     }
 
                     ActionChip {
                         objectName: "reportIssueButton"
                         width: parent.width
-                        text: "Report a Bug / Fix / Suggestion"
+                        text: qsTr("Report a Bug / Fix / Suggestion")
                         sectionStyle: true
                         animationDuration: root.buttonMotionDuration
-                        Accessible.description: "Open a new GitHub issue for a bug, fix, or suggestion."
+                        Accessible.description: qsTr("Open a new GitHub issue for a bug, fix, or suggestion.")
                         onClicked: root.externalUrlRequested(root.issueReportUrl)
                     }
 
                     SectionCard {
                         objectName: "aboutSection"
                         width: parent.width
-                        title: "About Licasa"
-                        subtitle: "Version " + root.appVersion
+                        title: qsTr("About Licasa")
+                        subtitle: qsTr("Version ") + root.appVersion
                         contentTopSpacing: 4
                         color: "transparent"
                         radius: 12
@@ -630,7 +630,7 @@ Item {
                             objectName: "aboutReleaseDate"
                             visible: root.releaseDate.length > 0
                             width: parent.width
-                            text: "Released " + root.releaseDate
+                            text: qsTr("Released ") + root.releaseDate
                             color: "#B3FFFFFF"
                             font.pixelSize: 12
                         }
@@ -638,7 +638,7 @@ Item {
                         Text {
                             width: parent.width
                             visible: root.installedAsSnap
-                            text: "Fully quitting Licasa allows Snap updates. Open pictures and unsaved changes are kept until you finish them."
+                            text: qsTr("Fully quitting Licasa allows Snap updates. Open pictures and unsaved changes are kept until you finish them.")
                             color: "#B3FFFFFF"
                             font.pixelSize: 12
                             wrapMode: Text.Wrap

@@ -34,12 +34,12 @@ FileDialog {
         }
     }
 
-    title: "Save as a copy"
+    title: qsTr("Save as a copy")
     fileMode: FileDialog.SaveFile
     nameFilters: fileFormat.length > 0
         ? formatSupport.saveNameFilters.filter(function(filter) {
             return String(filter).indexOf("*." + FileUrls.parts(suggestedFile).suffix) >= 0
-                && String(filter).indexOf("All writable") < 0
+                && String(filter) !== formatSupport.allWritableNameFilter
         }) : formatSupport.saveNameFilters
     defaultSuffix: FileUrls.parts(suggestedFile).suffix || "png"
 

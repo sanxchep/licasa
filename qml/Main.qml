@@ -133,9 +133,9 @@ Window {
         }
         function onQuitBlocked(reason) {
             const message = reason === "unsaved-edits" || reason === "crop-draft"
-                ? "Save your changes, or export them and close the picture, then quit again."
-                : "Finish the current save, export or file dialog, then quit again."
-            notificationCenter.finish("quit", "error", "Licasa is still in use", message)
+                ? qsTr("Save your changes, or export them and close the picture, then quit again.")
+                : qsTr("Finish the current save, export or file dialog, then quit again.")
+            notificationCenter.finish("quit", "error", qsTr("Licasa is still in use"), message)
         }
     }
     property string currentFileName: ""
@@ -340,7 +340,7 @@ Window {
     function editorSourceIsCurrent() {
         if (editorSourceVersion.length > 0 && imageSaveService.sourceVersion(residentImageUrl) !== editorSourceVersion) {
             editorSourceChanged = true
-            editorSaveStatus = "The original image changed. Reopen it before saving."
+            editorSaveStatus = qsTr("The original image changed. Reopen it before saving.")
             return false
         }
         return !editorSourceChanged
@@ -355,12 +355,12 @@ Window {
         exportEstimateError = ""
         exportEstimateRevision += 1
         exportSizeTimer.stop()
-        if (editorSourceChanged) { exportEstimateText = "Source changed"; return }
+        if (editorSourceChanged) { exportEstimateText = qsTr("Source changed"); return }
         if (!editPanelOpen || editorSidePanel.activeTool !== "export" || editorCropMode) {
             exportEstimateText = ""
             return
         }
-        exportEstimateText = "Estimating…"
+        exportEstimateText = qsTr("Estimating…")
         exportSizeTimer.restart()
     }
 
@@ -1132,7 +1132,7 @@ Window {
             cropAspectPreset = "custom"
             cropAspectRatio = requestedRatio
         } else {
-            editorSaveStatus = "That crop ratio is too extreme for this image."
+            editorSaveStatus = qsTr("That crop ratio is too extreme for this image.")
         }
     }
 
@@ -1172,7 +1172,7 @@ Window {
         if (!Number.isFinite(byteCount) || byteCount <= 0)
             return ""
 
-        const units = ["B", "KiB", "MiB", "GiB"]
+        const units = ["B", "KiB", qsTr("MiB"), "GiB"]
         let value = byteCount
         let unitIndex = 0
         while (value >= 1024 && unitIndex < units.length - 1) {
@@ -1192,7 +1192,7 @@ Window {
             imageSaveService.cancelSizeEstimate(root)
             return
         }
-        cropEstimateText = "calculating…"
+        cropEstimateText = qsTr("calculating…")
         cropSizeEstimateTimer.restart()
     }
 
@@ -1477,10 +1477,10 @@ Window {
             const openingDurationMs = imageOpenStartedMs >= 0
                 ? Math.max(0, Date.now() - imageOpenStartedMs) : -1
             imageOpenStartedMs = -1
-            notificationCenter.finish("image", "success", "Preview ready",
+            notificationCenter.finish("image", "success", qsTr("Preview ready"),
                                       currentFileName + (openingDurationMs >= 0
                                           ? " · " + openingDurationMs + " ms" : "")
-                                          + " · Full resolution exceeds the image memory limit")
+                                          + qsTr(" · Full resolution exceeds the image memory limit"))
         }
 
         if (fitMode) {
@@ -1496,8 +1496,8 @@ Window {
             return
         if (!formatSupport.canOpen(u)) {
             notificationCenter.startSession()
-            notificationCenter.finish("image", "error", "Image could not be opened",
-                                      "Choose a supported local image file.")
+            notificationCenter.finish("image", "error", qsTr("Image could not be opened"),
+                                      qsTr("Choose a supported local image file."))
             if (!hasAssignedImage()) {
                 imageViewport.externalOpenFailed = true
                 if (root.pendingImageReveal)
@@ -1559,7 +1559,7 @@ Window {
         imageOpenStartedMs = Date.now()
         // If the previous photo is still showing its loading notice, update
         // that notice immediately so a second Next press has visible feedback.
-        notificationCenter.begin("image", "Opening image", FileUrls.fileName(u),
+        notificationCenter.begin("image", qsTr("Opening image"), FileUrls.fileName(u),
                                  replacingLoadingImage ? 0 : 300)
         if (!replaceCurrent)
             prepareForImageOpen()
@@ -1863,7 +1863,7 @@ Window {
     }
 
     function reportDialogFailure(message) {
-        notificationCenter.finish("dialog", "error", "File picker unavailable", message)
+        notificationCenter.finish("dialog", "error", qsTr("File picker unavailable"), message)
         restoreDialogFocus()
     }
 
@@ -1878,7 +1878,7 @@ Window {
     function resetFailedDialog(loader: Loader) {
         if (loader.status !== Loader.Error)
             return
-        reportDialogFailure("The file picker could not be loaded. Check the installation and try again.")
+        reportDialogFailure(qsTr("The file picker could not be loaded. Check the installation and try again."))
         failedDialogResetTimer.pendingLoaders = failedDialogResetTimer.pendingLoaders.concat([loader])
         failedDialogResetTimer.restart()
     }
@@ -2005,7 +2005,7 @@ Window {
         const intent = pendingCopyIntent
         pendingCopyIntent = null
         if (intent.source !== String(residentImageUrl) || intent.revision !== imageRevision) {
-            editorSaveStatus = "The open image changed. Start the export again."
+            editorSaveStatus = qsTr("The open image changed. Start the export again.")
             return
         }
         if (imageSaveService.busy || !editorSourceIsCurrent()) return
@@ -2050,7 +2050,7 @@ Window {
         const suggestion = FileUrls.suggestedEditedCopy(residentImageUrl, options.format,
             formatSupport.saveNameFilters)
         if (saveDialogLoader.dialog) {
-            saveDialogLoader.dialog.title = exporting ? "Export image" : "Save as a copy"
+            saveDialogLoader.dialog.title = exporting ? qsTr("Export image") : qsTr("Save as a copy")
             saveDialogLoader.dialog.fileFormat = exporting && options.format !== "original" ? options.format : ""
             saveDialogLoader.dialog.suggestedFile = suggestion
             saveDialogLoader.dialog.openSafely()
@@ -2064,7 +2064,7 @@ Window {
                     "formatSupport": root.formatSupport,
                     "suggestedFile": suggestion,
                     "fileFormat": exporting && options.format !== "original" ? options.format : "",
-                    "title": exporting ? "Export image" : "Save as a copy"
+                    "title": exporting ? qsTr("Export image") : qsTr("Save as a copy")
                 }
             )
             saveDialogLoader.active = true
@@ -2097,7 +2097,7 @@ Window {
             || shouldUsePreview()
         imageRevision += 1
         refreshEditedPreviewSource()
-        editorSaveStatus = "Saved " + currentFileName
+        editorSaveStatus = qsTr("Saved: ") + currentFileName
     }
 
     function hideToBackground() {
@@ -2348,7 +2348,7 @@ Window {
 
         function onErrorOccurred(message) {
             console.warn(message)
-            notificationCenter.finish("background", "error", "Background process error", message)
+            notificationCenter.finish("background", "error", qsTr("Background process error"), message)
         }
     }
 
@@ -2357,7 +2357,7 @@ Window {
 
         function onErrorOccurred(message) {
             console.warn(message)
-            notificationCenter.finish("settings", "error", "Settings could not be saved", message)
+            notificationCenter.finish("settings", "error", qsTr("Settings could not be saved"), message)
         }
 
         function onMaximumImageMegapixelsChanged() {
@@ -2393,8 +2393,8 @@ Window {
             if (!root.imageSaveService.busy || root.pendingSaveKind.length === 0)
                 return
             const frame = root.pendingSaveKind === "frame"
-            notificationCenter.begin("save", frame ? "Saving frame" : "Saving image",
-                                     frame ? "Writing a PNG copy…" : "Writing your changes…")
+            notificationCenter.begin("save", frame ? qsTr("Saving frame") : qsTr("Saving image"),
+                                     frame ? qsTr("Writing a PNG copy…") : qsTr("Writing your changes…"))
         }
 
         function onSizeEstimateReady(sourceUrl, requestId, byteCount, errorMessage, requestOwner) {
@@ -2403,7 +2403,7 @@ Window {
             if (requestId === -root.exportEstimateRevision - 1
                     && String(sourceUrl) === String(root.residentImageUrl)
                     && root.editPanelOpen && editorSidePanel.activeTool === "export") {
-                root.exportEstimateText = byteCount > 0 ? "~" + root.formatFileSize(byteCount) : "Size unavailable"
+                root.exportEstimateText = byteCount > 0 ? "~" + root.formatFileSize(byteCount) : qsTr("Size unavailable")
                 if (root.exportEstimateError.length > 0 && root.editorSaveStatus === root.exportEstimateError)
                     root.editorSaveStatus = ""
                 root.exportEstimateError = byteCount < 0 ? errorMessage : ""
@@ -2415,7 +2415,7 @@ Window {
                     || sourceUrl.toString() !== root.residentImageUrl.toString())
                 return
             root.cropEstimateText = byteCount > 0
-                ? root.formatFileSize(byteCount) : "size unavailable"
+                ? root.formatFileSize(byteCount) : qsTr("size unavailable")
         }
 
         function onSaveCompleted(sourceUrl, destinationUrl, requestOwner) {
@@ -2435,7 +2435,7 @@ Window {
                 root.finishSavedImage(sourceUrl, destinationUrl)
             else if (String(destinationUrl) === String(sourceUrl))
                 root.editorSourceIsCurrent()
-            notificationCenter.finish("save", "success", "Image saved",
+            notificationCenter.finish("save", "success", qsTr("Image saved"),
                                       FileUrls.fileName(destinationUrl))
         }
 
@@ -2446,7 +2446,7 @@ Window {
             if (FileUrls.isLocal(root.residentImageUrl)
                     && sourceUrl.toString() === root.residentImageUrl.toString()) {
                 root.editorSaveStatus = message
-                notificationCenter.finish("save", "error", "Image could not be saved", message)
+                notificationCenter.finish("save", "error", qsTr("Image could not be saved"), message)
             }
         }
 
@@ -2456,8 +2456,8 @@ Window {
             root.pendingSaveKind = ""
             if (FileUrls.isLocal(root.residentImageUrl)
                     && sourceUrl.toString() === root.residentImageUrl.toString()) {
-                console.info("Saved Motion Photo frame:", destinationUrl.toString())
-                notificationCenter.finish("save", "success", "Frame saved",
+                console.info(qsTr("Saved Motion Photo frame:"), destinationUrl.toString())
+                notificationCenter.finish("save", "success", qsTr("Frame saved"),
                                           FileUrls.fileName(destinationUrl))
             }
         }
@@ -2468,8 +2468,8 @@ Window {
             root.pendingSaveKind = ""
             if (FileUrls.isLocal(root.residentImageUrl)
                     && sourceUrl.toString() === root.residentImageUrl.toString()) {
-                console.warn("Motion Photo frame save failed:", message)
-                notificationCenter.finish("save", "error", "Frame could not be saved", message)
+                console.warn(qsTr("Motion Photo frame save failed:"), message)
+                notificationCenter.finish("save", "error", qsTr("Frame could not be saved"), message)
             }
         }
     }
@@ -2479,19 +2479,19 @@ Window {
 
         function onBusyChanged() {
             if (root.motionPhotoExportService.busy)
-                notificationCenter.begin("motion-export", "Exporting Motion Photo",
-                                         "Copying the video…")
+                notificationCenter.begin("motion-export", qsTr("Exporting Motion Photo"),
+                                         qsTr("Copying the video…"))
         }
 
         function onExportCompleted(sourceUrl, destinationUrl) {
             if (sourceUrl.toString() === String(root.residentImageUrl))
-                notificationCenter.finish("motion-export", "success", "Video exported",
+                notificationCenter.finish("motion-export", "success", qsTr("Video exported"),
                                           FileUrls.fileName(destinationUrl))
         }
 
         function onExportFailed(sourceUrl, message) {
             if (sourceUrl.toString() === String(root.residentImageUrl))
-                notificationCenter.finish("motion-export", "error", "Video export failed", message)
+                notificationCenter.finish("motion-export", "error", qsTr("Video export failed"), message)
         }
     }
 
@@ -2500,20 +2500,20 @@ Window {
 
         function onBusyChanged() {
             if (root.animationExportService.busy)
-                notificationCenter.begin("animation-export", "Exporting animation",
-                                         "Copying the animation…")
+                notificationCenter.begin("animation-export", qsTr("Exporting animation"),
+                                         qsTr("Copying the animation…"))
         }
 
         function onExportCompleted(sourceUrl, destinationUrl) {
             if (sourceUrl.toString() === String(root.residentImageUrl))
-                notificationCenter.finish("animation-export", "success", "Animation exported",
+                notificationCenter.finish("animation-export", "success", qsTr("Animation exported"),
                                           FileUrls.fileName(destinationUrl))
         }
 
         function onExportFailed(sourceUrl, message) {
             if (sourceUrl.toString() === String(root.residentImageUrl))
                 notificationCenter.finish("animation-export", "error",
-                                          "Animation export failed", message)
+                                          qsTr("Animation export failed"), message)
         }
     }
 
@@ -2989,8 +2989,8 @@ Window {
                     && root.previewPhase
                     && !root.imageLimitedToPreview
                     && !root.rawFullDetailRequested) {
-                notificationCenter.update("image", "Loading RAW preview",
-                                          "Trying a compatible preview…")
+                notificationCenter.update("image", qsTr("Loading RAW preview"),
+                                          qsTr("Trying a compatible preview…"))
                 root.requestRawFastFallback()
                 return
             }
@@ -3000,8 +3000,8 @@ Window {
                     && root.rawFastPhase
                     && !root.imageLimitedToPreview
                     && !root.rawFullDetailRequested) {
-                notificationCenter.update("image", "Loading RAW image",
-                                          "Developing the full image…")
+                notificationCenter.update("image", qsTr("Loading RAW image"),
+                                          qsTr("Developing the full image…"))
                 root.promoteFullRes()
                 return
             }
@@ -3019,12 +3019,12 @@ Window {
             root.imageOpenStartedMs = -1
             notificationCenter.finish("image", "error",
                                       openingImage
-                                          ? (previewAvailable ? "Full resolution could not load"
-                                                              : "Image could not be opened")
-                                          : "Image update failed",
+                                          ? (previewAvailable ? qsTr("Full resolution could not load")
+                                                              : qsTr("Image could not be opened"))
+                                          : qsTr("Image update failed"),
                                       previewAvailable
-                                          ? (openingImage ? "The preview is still available."
-                                                          : "The current image is still available.")
+                                          ? (openingImage ? qsTr("The preview is still available.")
+                                                          : qsTr("The current image is still available."))
                                           : root.currentFileName)
             if (root.pendingImageReveal)
                 root.revealLoadedImage()
@@ -3111,17 +3111,17 @@ Window {
                             && !root.imageLimitedToPreview
                             && !root.animatedPlaybackActive
                             && root.fullResolutionRenderingEnabled)) {
-                    notificationCenter.update("image", "Opening image",
-                                              root.currentFileName + " · Loading full resolution…")
+                    notificationCenter.update("image", qsTr("Opening image"),
+                                              root.currentFileName + qsTr(" · Loading full resolution…"))
                 } else {
                     const openingDurationMs = Math.max(0, Date.now() - root.imageOpenStartedMs)
                     root.imageOpenStartedMs = -1
                     const detail = root.currentFileName + " · " + openingDurationMs + " ms"
                         + (root.imageLimitedToPreview
-                            ? " · Full resolution exceeds the image memory limit" : "")
+                            ? qsTr(" · Full resolution exceeds the image memory limit") : "")
                     notificationCenter.finish("image", "success",
                                               root.imageLimitedToPreview
-                                                  ? "Preview ready" : "Image ready",
+                                                  ? qsTr("Preview ready") : qsTr("Image ready"),
                                               detail)
                 }
             }

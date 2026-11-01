@@ -34,6 +34,7 @@
 #include <QQmlApplicationEngine>
 #include <QThreadPool>
 #include <QTimer>
+#include <QTranslator>
 #include <QVariantMap>
 
 #include <memory>
@@ -73,6 +74,12 @@ int main(int argc, char* argv[])
     application.setDesktopFileName(QString::fromLatin1(Licasa::Constants::desktopFileName));
     application.setWindowIcon(QIcon(QStringLiteral(":/assets/licasa.png")));
 
+    QTranslator translator;
+    if (translator.load(QLocale::system(), QStringLiteral("licasa"), QStringLiteral("_"),
+                        QStringLiteral(":/i18n"))) {
+        application.installTranslator(&translator);
+    }
+
     const bool installedAsSnap = qEnvironmentVariableIsSet("SNAP_NAME");
     const QString snapVersion = installedAsSnap ? qEnvironmentVariable("SNAP_VERSION") : QString{};
     const QString installedVersion =
@@ -83,7 +90,7 @@ int main(int argc, char* argv[])
         {QStringLiteral("version"), installedVersion},
         {QStringLiteral("installedAsSnap"), installedAsSnap},
         {QStringLiteral("releaseDate"),
-         QLocale(QLocale::English).toString(releaseDate, QStringLiteral("d MMMM yyyy"))}};
+         QLocale().toString(releaseDate, QStringLiteral("d MMMM yyyy"))}};
 
     const Licasa::LaunchOptions options = Licasa::parseLaunchOptions(application.arguments());
     const QString endpoint = Licasa::lifecycleEndpointName();

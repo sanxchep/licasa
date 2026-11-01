@@ -22,9 +22,9 @@ FileDialog {
         return DialogRuntime.open(dialog)
     }
 
-    title: "Export animation as"
+    title: qsTr("Export animation as")
     fileMode: FileDialog.SaveFile
-    nameFilters: ["Animation copy (*." + suggestedSuffix.toLowerCase() + ")"]
+    nameFilters: [qsTr("Animation copy (*.") + suggestedSuffix.toLowerCase() + ")"]
     defaultSuffix: suggestedSuffix.toLowerCase()
 
     Component.onCompleted: selectedFile = suggestedFile

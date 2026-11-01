@@ -308,6 +308,21 @@ python3 tools/deploy_local.py --build-dir ./build --launch
 This installs **Licasa (Local)** into `~/.local` and launches it. It is separate
 from the downloaded packages.
 
+## Translations
+
+Licasa uses Qt Linguist catalogs in [`translations/`](translations/). To update
+the source strings or compile the catalogs, configure the project with Qt's
+LinguistTools package installed, then run:
+
+```sh
+cmake --build ./build --target update_translations
+cmake --build ./build --target release_translations
+```
+
+Edit the `.ts` catalog after updating it; the application loads the catalog that
+matches the system locale at startup. The first catalog is Swedish
+(`licasa_sv.ts`).
+
 ## License
 
 Licasa's first-party source is licensed under the [BSD 2-Clause License](LICENSE). Third-party components and test fixtures have their own licenses, which are retained with the distributed materials.

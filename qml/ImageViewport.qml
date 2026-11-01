@@ -149,11 +149,11 @@ Item {
         && rasterCellHeight * devicePixelRatio >= 24
     readonly property bool pixelGridVisible: pixelInspectionScaleReached
         && imageStatus === Image.Ready
-    readonly property string inspectedPixelKind: motionFrameReady ? "Video pixel"
-        : animatedFrameReady ? "Frame pixel"
+    readonly property string inspectedPixelKind: motionFrameReady ? qsTr("Video pixel")
+        : animatedFrameReady ? qsTr("Frame pixel")
             : activeRequestKey.indexOf("licasa_stage=preview") >= 0
                 || activeRequestKey.indexOf("licasa_stage=raw-fast") >= 0
-                ? "Preview pixel" : "Pixel"
+                ? qsTr("Preview pixel") : qsTr("Pixel")
     property int hoveredPixelX: -1
     property int hoveredPixelY: -1
     property real hoverViewportX: 0
@@ -1092,10 +1092,10 @@ Item {
                 renderType: Text.NativeRendering
                 horizontalAlignment: Text.AlignHCenter
                 text: root.imageStatus === Image.Loading
-                    ? "Opening image…"
+                    ? qsTr("Opening image…")
                     : root.imageStatus === Image.Error
-                        ? emptyState.compact ? "Open failed"
-                                             : "That image could not be opened"
+                        ? emptyState.compact ? qsTr("Open failed")
+                                             : qsTr("That image could not be opened")
                         : ""
             }
 
@@ -1105,7 +1105,7 @@ Item {
                 color: Qt.rgba(1, 1, 1, 0.68)
                 font.pixelSize: 12
                 renderType: Text.NativeRendering
-                text: "Choose another local image file"
+                text: qsTr("Choose another local image file")
             }
 
             Rectangle {
@@ -1122,10 +1122,10 @@ Item {
                 activeFocusOnTab: true
 
                 Accessible.role: Accessible.Button
-                Accessible.name: "Open image"
+                Accessible.name: qsTr("Open image")
                 Accessible.description: root.imageStatus === Image.Error
-                    ? "That image could not be opened. Choose another local image file. Shortcut: Ctrl+O."
-                    : "Choose an image file to view. Shortcut: Ctrl+O."
+                    ? qsTr("That image could not be opened. Choose another local image file. Shortcut: Ctrl+O.")
+                    : qsTr("Choose an image file to view. Shortcut: Ctrl+O.")
                 Accessible.focusable: visible
                 Accessible.focused: activeFocus
                 Accessible.onPressAction: {
@@ -1144,7 +1144,7 @@ Item {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "Open image"
+                    text: qsTr("Open image")
                     color: "white"
                     font.pixelSize: 13
                     font.weight: Font.DemiBold

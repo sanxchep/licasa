@@ -57,8 +57,8 @@ FocusScope {
         Accessible.role: Accessible.Slider
         Accessible.name: root.title
         Accessible.description: {
-            const unit = root.accessibleUnit === "%" ? "Value in percent"
-                : (root.accessibleUnit.length > 0 ? "Value in " + root.accessibleUnit : "")
+            const unit = root.accessibleUnit === "%" ? qsTr("Value in percent")
+                : (root.accessibleUnit.length > 0 ? qsTr("Value in ") + root.accessibleUnit : "")
             return root.subtitle.length > 0
                 ? root.subtitle + (unit.length > 0 ? ". " + unit : "") : unit
         }

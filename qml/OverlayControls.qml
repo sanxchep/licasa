@@ -30,7 +30,7 @@ Item {
         z: 100
         visible: root.appVisible && root.hasImage && root.fullScreenMode
         iconName: "exit-fullscreen"
-        accessibleName: "Exit fullscreen"
+        accessibleName: qsTr("Exit fullscreen")
         onClicked: root.toggleFullScreenRequested()
     }
 
@@ -51,7 +51,7 @@ Item {
         z: 110
         visible: root.appVisible
         iconName: "close"
-        accessibleName: root.hasImage ? "Close image" : "Close Licasa"
+        accessibleName: root.hasImage ? qsTr("Close image") : qsTr("Close Licasa")
         hoverColor: "#B93838"
         pressedColor: "#D73737"
         onClicked: root.closeRequested()

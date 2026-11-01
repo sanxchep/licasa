@@ -56,7 +56,7 @@ endif()
 
 include(cmake/LicasaRuntimeProfiles.cmake)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickDialogs2)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickDialogs2 LinguistTools)
 if(LICASA_ENABLE_MOTION_PLAYBACK)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Multimedia)
     # Bounded QIODevice playback requires the patched private plugin for the
@@ -681,6 +681,11 @@ function(licasa_add_qml target_name)
     )
 endfunction()
 licasa_add_qml(licasa)
+qt_add_translations(licasa
+        TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/translations/licasa_sv.ts"
+        RESOURCE_PREFIX "/i18n"
+        LUPDATE_TARGET update_translations
+        LRELEASE_TARGET release_translations)
 qt_add_resources(licasa "licasa_app_icon" PREFIX "/" FILES assets/licasa.png)
 configure_file(assets/licasa-4096x4096.png
         generated/default-image/licasa-4096x4096.png COPYONLY)

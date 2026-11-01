@@ -15,6 +15,7 @@ class FormatSupport final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QStringList nameFilters READ nameFilters CONSTANT)
     Q_PROPERTY(QStringList saveNameFilters READ saveNameFilters CONSTANT)
+    Q_PROPERTY(QString allWritableNameFilter READ allWritableNameFilter CONSTANT)
     Q_PROPERTY(QVariantList exportFormats READ exportFormats CONSTANT)
 
   public:
@@ -23,6 +24,7 @@ class FormatSupport final : public QObject {
 
     QStringList nameFilters() const;
     QStringList saveNameFilters() const;
+    QString allWritableNameFilter() const;
     QVariantList exportFormats() const;
     Q_INVOKABLE bool canOpen(const QUrl& url) const;
     Q_INVOKABLE void prepareDirectoryIndex(const QUrl& current);
@@ -44,6 +46,7 @@ class FormatSupport final : public QObject {
     QSet<QString> readableExtensions_;
     QStringList nameFilters_;
     QStringList saveNameFilters_;
+    QString allWritableNameFilter_;
     mutable QString indexedDirectory_;
     mutable QDateTime indexedDirectoryModified_;
     mutable QStringList indexedNames_;

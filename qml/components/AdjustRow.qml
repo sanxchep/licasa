@@ -58,7 +58,7 @@ FocusScope {
         readonly property real stepSize: root.keyboardStep * root.displayMultiplier
         Accessible.role: Accessible.Slider
         Accessible.name: root.label
-        Accessible.description: root.suffix === "%" ? "Value in percent" : "Value"
+        Accessible.description: root.suffix === "%" ? qsTr("Value in percent") : qsTr("Value")
         Accessible.focusable: activeFocusOnTab
         Accessible.focused: activeFocus
         Accessible.onIncreaseAction: root.commitValue(root.value + root.keyboardStep)
@@ -137,7 +137,7 @@ FocusScope {
             border.color: activeFocus ? "#E8FFFFFF" : "#20FFFFFF"
             activeFocusOnTab: enabled && visible
             Accessible.role: Accessible.Button
-            Accessible.name: "Reset " + root.label
+            Accessible.name: qsTr("Reset ") + root.label
             Accessible.focusable: activeFocusOnTab
             Accessible.focused: activeFocus
             Accessible.onPressAction: {

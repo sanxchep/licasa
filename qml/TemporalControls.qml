@@ -108,7 +108,7 @@ Item {
                 border.width: activeFocus ? 2 : 0
                 border.color: "#C8FFFFFF"
                 Accessible.role: Accessible.Button
-                Accessible.name: "Previous frame"
+                Accessible.name: qsTr("Previous frame")
                 Accessible.focusable: activeFocusOnTab
                 Accessible.focused: activeFocus
                 Accessible.onPressAction: root.stepRequested(-1)
@@ -149,7 +149,7 @@ Item {
                 radius: 19
                 activeFocusOnTab: root.enabled
                 Accessible.role: Accessible.Button
-                Accessible.name: root.playing ? "Pause" : "Play"
+                Accessible.name: root.playing ? qsTr("Pause") : qsTr("Play")
                 Accessible.focusable: activeFocusOnTab
                 Accessible.focused: activeFocus
                 Accessible.onPressAction: root.togglePlaybackRequested()
@@ -195,7 +195,7 @@ Item {
                 border.width: activeFocus ? 2 : 0
                 border.color: "#C8FFFFFF"
                 Accessible.role: Accessible.Button
-                Accessible.name: "Next frame"
+                Accessible.name: qsTr("Next frame")
                 Accessible.focusable: activeFocusOnTab
                 Accessible.focused: activeFocus
                 Accessible.onPressAction: root.stepRequested(1)
@@ -245,8 +245,8 @@ Item {
             Accessible.onIncreaseAction: root.seekRequested(Math.min(1, root.clampedPosition + 0.02))
             Accessible.onDecreaseAction: root.seekRequested(Math.max(0, root.clampedPosition - 0.02))
             Accessible.role: Accessible.Slider
-            Accessible.name: "Timeline"
-            Accessible.description: "Position in percent"
+            Accessible.name: qsTr("Timeline")
+            Accessible.description: qsTr("Position in percent")
             Accessible.focusable: activeFocusOnTab
             Accessible.focused: activeFocus
             Keys.onPressed: function(event) {
@@ -333,7 +333,7 @@ Item {
             visible: root.exportMotionVisible
             activeFocusOnTab: root.enabled && root.canExportMotion && visible
             Accessible.role: Accessible.Button
-            Accessible.name: "Export motion"
+            Accessible.name: qsTr("Export motion")
             Accessible.focusable: activeFocusOnTab
             Accessible.focused: activeFocus
             Accessible.onPressAction: root.exportMotionRequested()
@@ -350,7 +350,7 @@ Item {
 
             Text {
                 anchors.centerIn: parent
-                text: "Export"
+                text: qsTr("Export")
                 color: root.canExportMotion && root.enabled ? "#F4FFFFFF" : "#78FFFFFF"
                 font.pixelSize: 10
                 font.weight: Font.DemiBold
@@ -380,7 +380,7 @@ Item {
             visible: root.saveFrameVisible
             activeFocusOnTab: root.enabled && root.canSaveFrame && visible
             Accessible.role: Accessible.Button
-            Accessible.name: "Save frame"
+            Accessible.name: qsTr("Save frame")
             Accessible.focusable: activeFocusOnTab
             Accessible.focused: activeFocus
             Accessible.onPressAction: root.saveFrameRequested()
@@ -397,7 +397,7 @@ Item {
 
             Text {
                 anchors.centerIn: parent
-                text: "Save"
+                text: qsTr("Save")
                 color: root.canSaveFrame && root.enabled ? "#F4FFFFFF" : "#78FFFFFF"
                 font.pixelSize: 10
                 font.weight: Font.DemiBold
@@ -428,7 +428,7 @@ Item {
             visible: root.coverFrameVisible
             activeFocusOnTab: root.enabled && root.canSetCoverFrame && visible
             Accessible.role: Accessible.Button
-            Accessible.name: "Set cover frame"
+            Accessible.name: qsTr("Set cover frame")
             Accessible.focusable: activeFocusOnTab
             Accessible.focused: activeFocus
             Accessible.onPressAction: root.coverFrameRequested()
@@ -447,8 +447,8 @@ Item {
 
             Text {
                 anchors.centerIn: parent
-                text: root.currentIsPreferredCover ? "Cover ✓"
-                    : root.coverFramePreferred ? "Cover •" : "Cover"
+                text: root.currentIsPreferredCover ? qsTr("Cover ✓")
+                    : root.coverFramePreferred ? qsTr("Cover •") : qsTr("Cover")
                 color: root.canSetCoverFrame && root.enabled ? "#F4FFFFFF" : "#78FFFFFF"
                 font.pixelSize: 10
                 font.weight: Font.DemiBold

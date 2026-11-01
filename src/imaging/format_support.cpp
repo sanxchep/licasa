@@ -1,6 +1,7 @@
 #include "imaging/format_support.h"
 #include "export/image_export_contract.h"
 #include <QCollator>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QDirIterator>
@@ -117,9 +118,10 @@ FormatSupport::FormatSupport(QObject* parent) : QObject(parent)
               });
 
     if (!allPatterns.isEmpty()) {
-        nameFilters_ << QStringLiteral("Images (%1)").arg(allPatterns.join(' '));
+        nameFilters_ << QCoreApplication::translate("FormatSupport", "Images (%1)")
+                            .arg(allPatterns.join(' '));
     }
-    nameFilters_ << QStringLiteral("All Files (*)");
+    nameFilters_ << QCoreApplication::translate("FormatSupport", "All Files (*)");
 
     QSet<QString> writablePatterns;
     const QList<QByteArray> writableFormats = QImageWriter::supportedImageFormats();
@@ -143,8 +145,8 @@ FormatSupport::FormatSupport(QObject* parent) : QObject(parent)
         if (key == QStringLiteral("tiff")) {
             extensions += QStringLiteral(" *.tif");
         }
-        saveNameFilters_ << item.value(QStringLiteral("label")).toString() +
-                                QStringLiteral(" image (") + extensions + ')';
+        saveNameFilters_ << QCoreApplication::translate("FormatSupport", "%1 image (%2)")
+                                .arg(item.value(QStringLiteral("label")).toString(), extensions);
     }
 
     QStringList allWritablePatterns = writablePatterns.values();
@@ -153,8 +155,10 @@ FormatSupport::FormatSupport(QObject* parent) : QObject(parent)
                   return left.localeAwareCompare(right) < 0;
               });
     if (!allWritablePatterns.isEmpty()) {
-        saveNameFilters_
-            << QStringLiteral("All writable images (%1)").arg(allWritablePatterns.join(' '));
+        allWritableNameFilter_ =
+            QCoreApplication::translate("FormatSupport", "All writable images (%1)")
+                .arg(allWritablePatterns.join(' '));
+        saveNameFilters_ << allWritableNameFilter_;
     }
 }
 
@@ -170,6 +174,8 @@ QStringList FormatSupport::nameFilters() const { return nameFilters_; }
 QVariantList FormatSupport::exportFormats() const { return ImageExport::formats(); }
 
 QStringList FormatSupport::saveNameFilters() const { return saveNameFilters_; }
+
+QString FormatSupport::allWritableNameFilter() const { return allWritableNameFilter_; }
 
 bool FormatSupport::canOpen(const QUrl& url) const
 {

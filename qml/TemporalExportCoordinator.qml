@@ -22,7 +22,7 @@ Item {
     function resetFailedDialog(loader: Loader) {
         if (loader.status !== Loader.Error)
             return
-        dialogFailed("The export picker could not be loaded. Check the installation and try again.")
+        dialogFailed(qsTr("The export picker could not be loaded. Check the installation and try again."))
         failedDialogResetTimer.pendingLoaders = failedDialogResetTimer.pendingLoaders.concat([loader])
         failedDialogResetTimer.restart()
     }
@@ -165,14 +165,14 @@ Item {
         function onExportCompleted(sourceUrl, destinationUrl) {
             if (FileUrls.isLocal(coordinator.sourceUrl)
                     && sourceUrl.toString() === String(coordinator.sourceUrl)) {
-                console.info("Exported Motion Photo video:", destinationUrl.toString())
+                console.info(qsTr("Exported Motion Photo video:"), destinationUrl.toString())
             }
         }
 
         function onExportFailed(sourceUrl, message) {
             if (FileUrls.isLocal(coordinator.sourceUrl)
                     && sourceUrl.toString() === String(coordinator.sourceUrl)) {
-                console.warn("Motion Photo export failed:", message)
+                console.warn(qsTr("Motion Photo export failed:"), message)
             }
         }
     }
@@ -183,14 +183,14 @@ Item {
         function onExportCompleted(sourceUrl, destinationUrl) {
             if (FileUrls.isLocal(coordinator.sourceUrl)
                     && sourceUrl.toString() === String(coordinator.sourceUrl)) {
-                console.info("Exported animation copy:", destinationUrl.toString())
+                console.info(qsTr("Exported animation copy:"), destinationUrl.toString())
             }
         }
 
         function onExportFailed(sourceUrl, message) {
             if (FileUrls.isLocal(coordinator.sourceUrl)
                     && sourceUrl.toString() === String(coordinator.sourceUrl)) {
-                console.warn("Animation export failed:", message)
+                console.warn(qsTr("Animation export failed:"), message)
             }
         }
     }

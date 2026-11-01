@@ -22,7 +22,7 @@ FileDialog {
         return DialogRuntime.open(dialog)
     }
 
-    title: "Save current frame as"
+    title: qsTr("Save current frame as")
     fileMode: FileDialog.SaveFile
     nameFilters: formatSupport.saveNameFilters
     defaultSuffix: "png"
