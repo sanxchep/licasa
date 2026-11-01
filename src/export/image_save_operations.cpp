@@ -7,6 +7,7 @@
 #include "io/external_file_identity.h"
 #include "media/motion/motion_photo_frame.h"
 #include <QColorSpace>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QImageReader>
@@ -21,6 +22,11 @@
 
 namespace Licasa::ImageSaveOperations {
 namespace {
+QString userMessage(const char* source)
+{
+    return QCoreApplication::translate("ImageSaveOperations", source);
+}
+
 QByteArray normalizedWriterFormat(const QString& suffix)
 {
     const QByteArray requested = suffix.trimmed().toLower().toLatin1();
@@ -56,7 +62,7 @@ ImageDestination resolveImageDestination(QString destinationPath, const ImageExp
     }
     QByteArray requestedFormat = normalizedWriterFormat(QString::fromLatin1(options.format));
     if (!options.format.isEmpty() && requestedFormat.isEmpty()) {
-        return {{}, {}, QStringLiteral("This export format is unavailable in this installation.")};
+        return {{}, {}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "This export format is unavailable in this installation."))};
     }
 
     if (!requestedFormat.isEmpty()) {
@@ -70,9 +76,8 @@ ImageDestination resolveImageDestination(QString destinationPath, const ImageExp
             if (options.copyOnly) {
                 return {{},
                         {},
-                        QStringLiteral(
-                            "Use .%1 for this export format, then confirm the destination again.")
-                            .arg(extension)};
+                        userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "Use the %1 extension for this export format, then confirm the destination again."))
+                            .arg(QStringLiteral(".") + extension)};
             }
             destinationPath.chop(currentSuffix.size());
             destinationPath += extension;
@@ -87,14 +92,14 @@ ImageDestination resolveImageDestination(QString destinationPath, const ImageExp
 
     const QFileInfo destinationInfo(destinationPath);
     if (!destinationInfo.dir().exists()) {
-        return {{}, {}, QStringLiteral("The destination folder does not exist.")};
+        return {{}, {}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "The destination folder does not exist."))};
     }
 
     const QByteArray writerFormat = requestedFormat.isEmpty()
                                         ? normalizedWriterFormat(destinationInfo.suffix())
                                         : requestedFormat;
     if (writerFormat.isEmpty()) {
-        return {{}, {}, QStringLiteral("Choose an available export format.")};
+        return {{}, {}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "Choose an available export format."))};
     }
 
     return {destinationInfo.absoluteFilePath(), writerFormat, {}};
@@ -110,31 +115,31 @@ ImageSaveResult writeExportImage(QImage image, const ImageDestination& destinati
     const quint64 maximumPixels = ImageProcessing::pixelsForMegapixels(maximumMegapixels);
     const qreal scale = std::isfinite(options.scale) ? std::clamp(options.scale, 0.01, 2.0) : 1.0;
     if ((options.width > 0) != (options.height > 0) || options.width < 0 || options.height < 0) {
-        return {{}, QStringLiteral("Choose valid output dimensions.")};
+        return {{}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "Choose valid output dimensions."))};
     }
     const double w = options.width > 0 ? options.width : image.width() * static_cast<double>(scale);
     const double h =
         options.height > 0 ? options.height : image.height() * static_cast<double>(scale);
     if (!std::isfinite(w) || !std::isfinite(h) || w > std::numeric_limits<int>::max() ||
         h > std::numeric_limits<int>::max()) {
-        return {{}, QStringLiteral("That export resolution is too large.")};
+        return {{}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "That export resolution is too large."))};
     }
     const QSize size(std::max(1, int(std::lround(w))), std::max(1, int(std::lround(h))));
     if (!ImageDecodeContract::allows(size, maximumPixels)) {
-        return {{}, QStringLiteral("That export exceeds the configured working memory limit.")};
+        return {{}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "That export exceeds the configured working memory limit."))};
     }
     if (!ImageExport::isIcon(destination.format) && options.width > 0 &&
         (w < image.width() * .01 - 1 || h < image.height() * .01 - 1 ||
          w > image.width() * 2.0 + 1 || h > image.height() * 2.0 + 1)) {
         return {
             {},
-            QStringLiteral("Output dimensions must be between 1% and 200% of the edited image.")};
+            userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "Output dimensions must be between 1% and 200% of the edited image."))};
     }
     if (size != image.size() && !ImageExport::isIcon(destination.format)) {
         image = image.scaled(size, Qt::IgnoreAspectRatio,
                              options.nearest ? Qt::FastTransformation : Qt::SmoothTransformation);
         if (image.isNull()) {
-            return {{}, QStringLiteral("The scaled image could not be allocated.")};
+            return {{}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "The scaled image could not be allocated."))};
         }
     }
 
@@ -177,7 +182,7 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
     const quint64 maximumPixels = ImageProcessing::pixelsForMegapixels(maximumMegapixels);
     const QFileInfo sourceInfo(sourcePath);
     if (!sourceInfo.exists() || !sourceInfo.isFile()) {
-        return {{}, QStringLiteral("The original image no longer exists.")};
+        return {{}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "The original image no longer exists."))};
     }
 
     const ImageDestination destination =
@@ -196,7 +201,7 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
         return {{}, identityError};
     }
     if (expectedSource && *identity != *expectedSource) {
-        return {{}, QStringLiteral("The original image changed before export. Try again.")};
+        return {{}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "The original image changed before export. Try again."))};
     }
     bool aliasesSource =
         QFileInfo(destination.path).canonicalFilePath() == sourceInfo.canonicalFilePath();
@@ -208,7 +213,7 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
     }
 #endif
     if (options.copyOnly && aliasesSource) {
-        return {{}, QStringLiteral("Choose a copy destination different from the original image.")};
+        return {{}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "Choose a copy destination different from the original image."))};
     }
     QImageReader reader(&source);
     // Saving is an explicit full-pixel operation. RAW viewing's embedded
@@ -221,8 +226,7 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
     const QSize sourceSize = reader.size();
     if (!sourceSize.isValid()) {
         return {{},
-                QStringLiteral(
-                    "The decoder cannot report dimensions before full-resolution processing.")};
+                userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "The decoder cannot report dimensions before full-resolution processing."))};
     }
     if (!ImageDecodeContract::allows(sourceSize, maximumPixels)) {
         return {{}, ImageProcessing::imageLimitError(maximumMegapixels)};
@@ -236,7 +240,7 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
         return {{}, ImageProcessing::imageLimitError(maximumMegapixels)};
     }
     if (!applyImageEdits(image, parameters)) {
-        return {{}, QStringLiteral("The image could not be processed safely.")};
+        return {{}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "The image could not be processed safely."))};
     }
 
     return writeExportImage(
@@ -245,12 +249,12 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
             const auto after = externalFileIdentity(source, &identityError);
             QFile current(sourcePath);
             if (!current.open(QIODevice::ReadOnly)) {
-                return QStringLiteral("The source changed during export.");
+                return userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "The source changed during export."));
             }
             const auto currentIdentity = externalFileIdentity(current, &identityError);
             return after && currentIdentity && *after == *identity && *currentIdentity == *identity
                        ? QString()
-                       : QStringLiteral("The source changed during export. Try again.");
+                       : userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "The source changed during export. Try again."));
         },
         beforeCommit);
 }
@@ -272,7 +276,7 @@ ImageSaveResult writeFrameImage(const MotionPhotoFrameRaster& frame, QString des
     QImage image(reinterpret_cast<const uchar*>(frame.rgba8888.constData()), frame.size.width(),
                  frame.size.height(), frame.bytesPerLine, QImage::Format_RGBA8888);
     if (image.isNull()) {
-        return {{}, QStringLiteral("The selected video frame could not be reconstructed.")};
+        return {{}, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "The selected video frame could not be reconstructed."))};
     }
     if (!frame.iccProfile.isEmpty()) {
         const QColorSpace colorSpace = QColorSpace::fromIccProfile(frame.iccProfile);
@@ -290,7 +294,7 @@ SizeEstimateResult measureEditedImageSize(const QString& sourcePath,
 {
     QTemporaryDir directory;
     if (!directory.isValid()) {
-        return {-1, QStringLiteral("A temporary export file could not be created.")};
+        return {-1, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "A temporary export file could not be created."))};
     }
 
     // Use the production writer and the dialog's suggested extension so the
@@ -309,7 +313,7 @@ SizeEstimateResult measureEditedImageSize(const QString& sourcePath,
     }
     const qint64 byteCount = QFileInfo(result.destinationUrl.toLocalFile()).size();
     if (byteCount <= 0) {
-        return {-1, QStringLiteral("The export size could not be measured.")};
+        return {-1, userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations", "The export size could not be measured."))};
     }
     return {byteCount, {}};
 }

@@ -1193,6 +1193,104 @@ Bilder som överskrider den här budgeten öppnas i en begränsad förhandsvisni
     </message>
 </context>
 <context>
+    <name>ImageSaveOperations</name>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="65"/>
+        <source>This export format is unavailable in this installation.</source>
+        <translation>Det här exportformatet är inte tillgängligt i den här installationen.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="79"/>
+        <source>Use the %1 extension for this export format, then confirm the destination again.</source>
+        <translation>Använd filnamnstillägget %1 för det här exportformatet och bekräfta sedan målet igen.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="95"/>
+        <source>The destination folder does not exist.</source>
+        <translation>Målmappen finns inte.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="102"/>
+        <source>Choose an available export format.</source>
+        <translation>Välj ett tillgängligt exportformat.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="118"/>
+        <source>Choose valid output dimensions.</source>
+        <translation>Välj giltiga utdatadimensioner.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="125"/>
+        <source>That export resolution is too large.</source>
+        <translation>Exportupplösningen är för stor.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="129"/>
+        <source>That export exceeds the configured working memory limit.</source>
+        <translation>Exporten överskrider den inställda gränsen för arbetsminne.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="136"/>
+        <source>Output dimensions must be between 1% and 200% of the edited image.</source>
+        <translation>Utdatadimensionerna måste vara mellan 1 % och 200 % av den redigerade bilden.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="142"/>
+        <source>The scaled image could not be allocated.</source>
+        <translation>Det gick inte att allokera den skalade bilden.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="185"/>
+        <source>The original image no longer exists.</source>
+        <translation>Originalbilden finns inte längre.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="204"/>
+        <source>The original image changed before export. Try again.</source>
+        <translation>Originalbilden ändrades före exporten. Försök igen.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="216"/>
+        <source>Choose a copy destination different from the original image.</source>
+        <translation>Välj ett kopieringsmål som skiljer sig från originalbilden.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="229"/>
+        <source>The decoder cannot report dimensions before full-resolution processing.</source>
+        <translation>Avkodaren kan inte rapportera dimensioner före bearbetning i full upplösning.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="243"/>
+        <source>The image could not be processed safely.</source>
+        <translation>Bilden kunde inte bearbetas säkert.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="252"/>
+        <source>The source changed during export.</source>
+        <translation>Källan ändrades under exporten.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="257"/>
+        <source>The source changed during export. Try again.</source>
+        <translation>Källan ändrades under exporten. Försök igen.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="279"/>
+        <source>The selected video frame could not be reconstructed.</source>
+        <translation>Den valda videobildrutan kunde inte återskapas.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="297"/>
+        <source>A temporary export file could not be created.</source>
+        <translation>Det gick inte att skapa en temporär exportfil.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_operations.cpp" line="316"/>
+        <source>The export size could not be measured.</source>
+        <translation>Det gick inte att mäta exportens storlek.</translation>
+    </message>
+</context>
+<context>
     <name>ImageSaveService</name>
     <message>
         <location filename="../src/export/image_save_service.cpp" line="59"/>
