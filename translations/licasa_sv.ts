@@ -1273,6 +1273,49 @@ Bilder som överskrider den här budgeten öppnas i en begränsad förhandsvisni
     </message>
 </context>
 <context>
+    <name>ImageExport</name>
+    <message>
+        <location filename="../src/export/image_export_encoder.cpp" line="37"/>
+        <source>The PNG output could not be written.</source>
+        <translation>PNG-utdata kunde inte skrivas.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_export_encoder.cpp" line="235"/>
+        <source>Choose a valid background color and density (0–2400 DPI).</source>
+        <translation>Välj en giltig bakgrundsfärg och täthet (0–2400 DPI).</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_export_encoder.cpp" line="249"/>
+        <source>Choose a supported icon size.</source>
+        <translation>Välj en ikonstorlek som stöds.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_export_encoder.cpp" line="254"/>
+        <source>The cursor hotspot must be inside the image.</source>
+        <translation>Markörens aktiva punkt måste vara inne i bilden.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_export_encoder.cpp" line="260"/>
+        <source>The icon canvas could not be allocated.</source>
+        <translation>Det gick inte att allokera ikonytan.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_export_encoder.cpp" line="295"/>
+        <source>The export raster could not be allocated.</source>
+        <translation>Det gick inte att allokera rasterbilden för export.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_export_encoder.cpp" line="332"/>
+        <source>The output pixels could not be allocated.</source>
+        <translation>Det gick inte att allokera bildpunkterna för utdata.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_export_encoder.cpp" line="349"/>
+        <source>The cursor image could not be encoded.</source>
+        <translation>Markörbilden kunde inte kodas.</translation>
+    </message>
+</context>
+<context>
     <name>ImageProcessing</name>
     <message>
         <location filename="../src/imaging/image_processing.cpp" line="19"/>
