@@ -20,6 +20,60 @@
     </message>
 </context>
 <context>
+    <name>AnimationExport</name>
+    <message>
+        <location filename="../src/export/animation_export.cpp" line="26"/>
+        <source>Unable to seek the animation source.</source>
+        <translation>Det går inte att söka i animeringskällan.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/animation_export.cpp" line="41"/>
+        <source>The source is not a readable image.</source>
+        <translation>Källan är inte en läsbar bild.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/animation_export.cpp" line="49"/>
+        <source>The source is not an animated image.</source>
+        <translation>Källan är inte en animerad bild.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/animation_export.cpp" line="62"/>
+        <source>The animation source is not a local file.</source>
+        <translation>Animeringskällan är inte en lokal fil.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/animation_export.cpp" line="65"/>
+        <location filename="../src/export/animation_export.cpp" line="144"/>
+        <source>Choose a local destination file.</source>
+        <translation>Välj en lokal målfil.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/animation_export.cpp" line="73"/>
+        <source>The animation source has no exportable file extension.</source>
+        <translation>Animeringskällan saknar ett exporterbart filnamnstillägg.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/animation_export.cpp" line="76"/>
+        <source>Export this animation copy with the %1 extension.</source>
+        <translation>Exportera den här animerade kopian med filnamnstillägget %1.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/animation_export.cpp" line="99"/>
+        <source>The animation source changed during export validation.</source>
+        <translation>Animeringskällan ändrades vid exportvalideringen.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/animation_export.cpp" line="136"/>
+        <source>Another animation export is still running.</source>
+        <translation>En annan animeringsexport körs redan.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/animation_export.cpp" line="140"/>
+        <source>No local animation source is available.</source>
+        <translation>Det finns ingen lokal animeringskälla.</translation>
+    </message>
+</context>
+<context>
     <name>AnimationExportDialog</name>
     <message>
         <location filename="../qml/AnimationExportDialog.qml" line="25"/>
@@ -1139,6 +1193,42 @@ Bilder som överskrider den här budgeten öppnas i en begränsad förhandsvisni
     </message>
 </context>
 <context>
+    <name>ImageSaveService</name>
+    <message>
+        <location filename="../src/export/image_save_service.cpp" line="59"/>
+        <location filename="../src/export/image_save_service.cpp" line="210"/>
+        <source>Another image is still being saved.</source>
+        <translation>En annan bild sparas redan.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_service.cpp" line="64"/>
+        <location filename="../src/export/image_save_service.cpp" line="126"/>
+        <source>The original image is not a local file.</source>
+        <translation>Originalbilden är inte en lokal fil.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_service.cpp" line="69"/>
+        <location filename="../src/export/image_save_service.cpp" line="220"/>
+        <source>Choose a local destination file.</source>
+        <translation>Välj en lokal målfil.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_service.cpp" line="91"/>
+        <source>The original image changed. Reopen it before saving.</source>
+        <translation>Originalbilden har ändrats. Öppna den igen före sparning.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_service.cpp" line="215"/>
+        <source>The Motion Photo is not a local file.</source>
+        <translation>Motion Photo-bilden är inte en lokal fil.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/image_save_service.cpp" line="226"/>
+        <source>No decoded Motion Photo frame is available.</source>
+        <translation>Det finns ingen avkodad Motion Photo-bildruta.</translation>
+    </message>
+</context>
+<context>
     <name>ImageViewport</name>
     <message>
         <location filename="../qml/ImageViewport.qml" line="152"/>
@@ -1495,6 +1585,75 @@ Bilder som överskrider den här budgeten öppnas i en begränsad förhandsvisni
         <location filename="../qml/MotionExportDialog.qml" line="29"/>
         <source>MPEG-4 video (*.mp4)</source>
         <translation>MPEG-4-video (*.mp4)</translation>
+    </message>
+</context>
+<context>
+    <name>MotionPhotoExport</name>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="45"/>
+        <source>Export requires a validated local Motion Photo.</source>
+        <translation>Export kräver en validerad lokal Motion Photo-bild.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="56"/>
+        <source>Motion Photo export requires exactly one validated motion source.</source>
+        <translation>Motion Photo-export kräver exakt en validerad rörelsekälla.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="64"/>
+        <source>The Motion Photo video type is not exportable.</source>
+        <translation>Motion Photo-videotypen kan inte exporteras.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="79"/>
+        <source>The paired Live Photo movie no longer has a validated file identity.</source>
+        <translation>Den parkopplade Live Photo-filmen har inte längre en validerad filidentitet.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="103"/>
+        <location filename="../src/export/motion_photo_export.cpp" line="229"/>
+        <source>Choose a local destination file.</source>
+        <translation>Välj en lokal målfil.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="109"/>
+        <source>Export this motion component with the %1 extension.</source>
+        <translation>Exportera den här rörelsekomponenten med filnamnstillägget %1.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="126"/>
+        <source>The paired Live Photo movie changed after validation. Reopen the photo and try again.</source>
+        <translation>Den parkopplade Live Photo-filmen ändrades efter valideringen. Öppna bilden igen och försök på nytt.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="131"/>
+        <source>The validated motion range no longer fits the source file.</source>
+        <translation>Det validerade rörelseområdet ryms inte längre i källfilen.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="138"/>
+        <source>The Motion Photo still source is no longer readable.</source>
+        <translation>Motion Photo-stillbildens källa går inte längre att läsa.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="147"/>
+        <source>Choose a destination that is not an alias of the still source.</source>
+        <translation>Välj en målfil som inte är ett alias för stillbildskällan.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="220"/>
+        <source>Another motion export is still running.</source>
+        <translation>En annan rörelseexport körs redan.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="225"/>
+        <source>No exportable motion component is available.</source>
+        <translation>Det finns ingen exporterbar rörelsekomponent.</translation>
+    </message>
+    <message>
+        <location filename="../src/export/motion_photo_export.cpp" line="247"/>
+        <source>The motion component is no longer available.</source>
+        <translation>Rörelsekomponenten är inte längre tillgänglig.</translation>
     </message>
 </context>
 <context>

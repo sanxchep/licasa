@@ -4,6 +4,7 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QCoreApplication>
 #include <QMetaObject>
 #include <QThreadPool>
 
@@ -41,7 +42,7 @@ std::optional<MotionCopySource> copySourceForAsset(const PhotoAssetInfo& asset, 
     if (asset.kind != PhotoAssetKind::MotionPhoto || !asset.motion ||
         !asset.sourceUrl.isLocalFile()) {
         if (error) {
-            *error = QStringLiteral("Export requires a validated local Motion Photo.");
+            *error = QCoreApplication::translate("MotionPhotoExport", "Export requires a validated local Motion Photo.");
         }
         return std::nullopt;
     }
@@ -52,7 +53,7 @@ std::optional<MotionCopySource> copySourceForAsset(const PhotoAssetInfo& asset, 
     if (embedded == external) {
         if (error) {
             *error =
-                QStringLiteral("Motion Photo export requires exactly one validated motion source.");
+                QCoreApplication::translate("MotionPhotoExport", "Motion Photo export requires exactly one validated motion source.");
         }
         return std::nullopt;
     }
@@ -60,7 +61,7 @@ std::optional<MotionCopySource> copySourceForAsset(const PhotoAssetInfo& asset, 
     const QString suffix = suffixForMimeType(motion.mimeType);
     if (suffix.isEmpty()) {
         if (error) {
-            *error = QStringLiteral("The Motion Photo video type is not exportable.");
+            *error = QCoreApplication::translate("MotionPhotoExport", "The Motion Photo video type is not exportable.");
         }
         return std::nullopt;
     }
@@ -75,8 +76,8 @@ std::optional<MotionCopySource> copySourceForAsset(const PhotoAssetInfo& asset, 
 
     if (!motion.externalVideoIdentity || motion.externalVideoIdentity->size == 0) {
         if (error) {
-            *error = QStringLiteral(
-                "The paired Live Photo movie no longer has a validated file identity.");
+            *error = QCoreApplication::translate(
+                "MotionPhotoExport", "The paired Live Photo movie no longer has a validated file identity.");
         }
         return std::nullopt;
     }
@@ -99,13 +100,15 @@ MotionPhotoExportResult copyMotionPhotoComponent(const PhotoAssetInfo& asset,
     }
 
     if (!destinationUrl.isValid() || !destinationUrl.isLocalFile()) {
-        return failure(QStringLiteral("Choose a local destination file."));
+        return failure(QCoreApplication::translate("MotionPhotoExport", "Choose a local destination file."));
     }
 
     const QString destinationPath = destinationUrl.toLocalFile();
     const QString destinationSuffix = QFileInfo(destinationPath).suffix().toLower();
     if (destinationSuffix != source->suffix) {
-        return failure(QStringLiteral("Export this motion component as .%1.").arg(source->suffix));
+        return failure(QCoreApplication::translate(
+            "MotionPhotoExport", "Export this motion component with the %1 extension.")
+                           .arg(QStringLiteral(".") + source->suffix));
     }
 
     QFile sourceFile(source->path);
@@ -120,20 +123,19 @@ MotionPhotoExportResult copyMotionPhotoComponent(const PhotoAssetInfo& asset,
     }
 
     if (source->expectedIdentity && *sourceIdentity != *source->expectedIdentity) {
-        return failure(QStringLiteral("The paired Live Photo movie changed after validation. "
-                                      "Reopen the photo and try again."));
+        return failure(QCoreApplication::translate("MotionPhotoExport", "The paired Live Photo movie changed after validation. Reopen the photo and try again."));
     }
 
     if (!checkedByteRange(sourceIdentity->size, source->range.offset, source->range.length)) {
         return failure(
-            QStringLiteral("The validated motion range no longer fits the source file."));
+            QCoreApplication::translate("MotionPhotoExport", "The validated motion range no longer fits the source file."));
     }
 
     const QString primaryPath = asset.sourceUrl.toLocalFile();
     if (asset.motion->hasExternalVideo()) {
         QFile primaryFile(primaryPath);
         if (!primaryFile.open(QIODevice::ReadOnly | QIODevice::Unbuffered)) {
-            return failure(QStringLiteral("The Motion Photo still source is no longer readable."));
+            return failure(QCoreApplication::translate("MotionPhotoExport", "The Motion Photo still source is no longer readable."));
         }
         QString primaryIdentityError;
         const auto primaryIdentity = externalFileIdentity(primaryFile, &primaryIdentityError);
@@ -142,7 +144,7 @@ MotionPhotoExportResult copyMotionPhotoComponent(const PhotoAssetInfo& asset,
         }
         if (destinationAliasesSource(destinationPath, primaryPath, *primaryIdentity)) {
             return failure(
-                QStringLiteral("Choose a destination that is not an alias of the still source."));
+                QCoreApplication::translate("MotionPhotoExport", "Choose a destination that is not an alias of the still source."));
         }
     }
 
@@ -215,16 +217,16 @@ void MotionPhotoExportService::clearAsset()
 bool MotionPhotoExportService::exportCopy(const QUrl& destinationUrl)
 {
     if (busy_) {
-        emit exportFailed(sourceUrl_, QStringLiteral("Another motion export is still running."));
+        emit exportFailed(sourceUrl_, QCoreApplication::translate("MotionPhotoExport", "Another motion export is still running."));
         return false;
     }
     if (!available_ || !sourceUrl_.isValid() || !sourceUrl_.isLocalFile()) {
         emit exportFailed(sourceUrl_,
-                          QStringLiteral("No exportable motion component is available."));
+                          QCoreApplication::translate("MotionPhotoExport", "No exportable motion component is available."));
         return false;
     }
     if (!destinationUrl.isValid() || !destinationUrl.isLocalFile()) {
-        emit exportFailed(sourceUrl_, QStringLiteral("Choose a local destination file."));
+        emit exportFailed(sourceUrl_, QCoreApplication::translate("MotionPhotoExport", "Choose a local destination file."));
         return false;
     }
 
@@ -242,7 +244,7 @@ bool MotionPhotoExportService::exportCopy(const QUrl& destinationUrl)
         MotionPhotoExportResult result;
         if (!copySourceForAsset(current, &validationError)) {
             result = failure(validationError.isEmpty()
-                                 ? QStringLiteral("The motion component is no longer available.")
+                                 ? QCoreApplication::translate("MotionPhotoExport", "The motion component is no longer available.")
                                  : validationError);
         } else {
             result = copyMotionPhotoComponent(current, destinationUrl);
