@@ -2007,6 +2007,54 @@ Bilder som överskrider den här budgeten öppnas i en begränsad förhandsvisni
     </message>
 </context>
 <context>
+    <name>RawHandler</name>
+    <message>
+        <location filename="../src/plugins/raw_handler.cpp" line="146"/>
+        <source>There is not enough memory to read this RAW image.</source>
+        <translation>Det finns inte tillräckligt med minne för att läsa den här RAW-bilden.</translation>
+    </message>
+    <message>
+        <location filename="../src/plugins/raw_handler.cpp" line="148"/>
+        <source>The RAW image is damaged or reading was cancelled.</source>
+        <translation>RAW-bilden är skadad eller läsningen avbröts.</translation>
+    </message>
+    <message>
+        <location filename="../src/plugins/raw_handler.cpp" line="162"/>
+        <source>There is not enough memory to prepare the interactive RAW raster.</source>
+        <translation>Det finns inte tillräckligt med minne för att förbereda den interaktiva RAW-rasterbilden.</translation>
+    </message>
+    <message>
+        <location filename="../src/plugins/raw_handler.cpp" line="208"/>
+        <source>The RAW image exceeds the selected image limit.</source>
+        <translation>RAW-bilden överskrider den valda bildgränsen.</translation>
+    </message>
+    <message>
+        <location filename="../src/plugins/raw_handler.cpp" line="213"/>
+        <source>RAW reading was cancelled.</source>
+        <translation>RAW-läsningen avbröts.</translation>
+    </message>
+    <message>
+        <location filename="../src/plugins/raw_handler.cpp" line="217"/>
+        <source>The RAW image exceeds the bounded metadata or input allowance.</source>
+        <translation>RAW-bilden överskrider den tillåtna mängden metadata eller indata.</translation>
+    </message>
+    <message>
+        <location filename="../src/plugins/raw_handler.cpp" line="219"/>
+        <source>The RAW image could not be read: %1.</source>
+        <translation>RAW-bilden kunde inte läsas: %1.</translation>
+    </message>
+    <message>
+        <location filename="../src/plugins/raw_handler.cpp" line="328"/>
+        <source>The RAW decoder cannot report valid image dimensions.</source>
+        <translation>RAW-avkodaren kan inte rapportera giltiga bilddimensioner.</translation>
+    </message>
+    <message>
+        <location filename="../src/plugins/raw_handler.cpp" line="400"/>
+        <source>The RAW metadata is damaged or reading was cancelled.</source>
+        <translation>RAW-metadata är skadad eller läsningen avbröts.</translation>
+    </message>
+</context>
+<context>
     <name>SaveDialog</name>
     <message>
         <location filename="../qml/SaveDialog.qml" line="37"/>

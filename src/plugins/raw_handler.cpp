@@ -4,6 +4,7 @@
 
 #include <QBuffer>
 #include <QColorSpace>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QFile>
@@ -142,9 +143,9 @@ class RawHandler final : public QImageIOHandler {
                 image = preview();
             }
         } catch (const std::bad_alloc&) {
-            fail(QStringLiteral("There is not enough memory to read this RAW image."));
+            fail(QCoreApplication::translate("RawHandler", "There is not enough memory to read this RAW image."));
         } catch (...) {
-            fail(QStringLiteral("The RAW image is damaged or reading was cancelled."));
+            fail(QCoreApplication::translate("RawHandler", "The RAW image is damaged or reading was cancelled."));
         }
         native_.reset();
         if (image.isNull() || Contract::cancelled(device())) {
@@ -158,8 +159,8 @@ class RawHandler final : public QImageIOHandler {
             convertTimer.start();
             QImage converted = Licasa::parallelRgbToArgb(image);
             if (converted.isNull()) {
-                return fail(QStringLiteral(
-                    "There is not enough memory to prepare the interactive RAW raster."));
+                return fail(QCoreApplication::translate(
+                    "RawHandler", "There is not enough memory to prepare the interactive RAW raster."));
             }
             image = std::move(converted);
             if (traceRawDevelopment()) {
@@ -204,18 +205,18 @@ class RawHandler final : public QImageIOHandler {
     }
     bool limitFailure()
     {
-        return fail(QStringLiteral("The RAW image exceeds the selected image limit."));
+        return fail(QCoreApplication::translate("RawHandler", "The RAW image exceeds the selected image limit."));
     }
     bool nativeFailure(int code)
     {
         if (Contract::cancelled(device())) {
-            return fail(QStringLiteral("RAW reading was cancelled."));
+            return fail(QCoreApplication::translate("RawHandler", "RAW reading was cancelled."));
         }
         if (native_ && native_->stream.limitReached()) {
             return fail(
-                QStringLiteral("The RAW image exceeds the bounded metadata or input allowance."));
+                QCoreApplication::translate("RawHandler", "The RAW image exceeds the bounded metadata or input allowance."));
         }
-        return fail(QStringLiteral("The RAW image could not be read: %1.")
+        return fail(QCoreApplication::translate("RawHandler", "The RAW image could not be read: %1.")
                         .arg(QString::fromLatin1(libraw_strerror(code))));
     }
     bool openNative(bool preferMappedInput = false)
@@ -324,7 +325,7 @@ class RawHandler final : public QImageIOHandler {
             if (w <= 0 || h <= 0 || !sensorSize_.isValid() || !raw.imgdata.idata.raw_count) {
                 native_.reset();
                 return fail(
-                    QStringLiteral("The RAW decoder cannot report valid image dimensions."));
+                    QCoreApplication::translate("RawHandler", "The RAW decoder cannot report valid image dimensions."));
             }
             size_ = QSize(w, h); // LibRaw reports and produces oriented pixels.
             device()->setProperty(Contract::previewFirstProperty, true);
@@ -396,7 +397,7 @@ class RawHandler final : public QImageIOHandler {
             return true;
         } catch (...) {
             native_.reset();
-            return fail(QStringLiteral("The RAW metadata is damaged or reading was cancelled."));
+            return fail(QCoreApplication::translate("RawHandler", "The RAW metadata is damaged or reading was cancelled."));
         }
     }
     bool admissible(const libraw_thumbnail_item_t& thumb) const
