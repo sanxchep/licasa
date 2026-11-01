@@ -5,7 +5,10 @@
 #include "imaging/codec_plugins.h"
 #include "imaging/image_animation.h"
 #include "imaging/image_resource_policy.h"
+#include <QAnimationDriver>
 #include <QColor>
+#include <QCoreApplication>
+#include <QEvent>
 #include <QMutexLocker>
 #include <QPointer>
 #include <QQmlContext>
@@ -16,6 +19,53 @@
 #include <QtQuickTest/quicktest.h>
 #include <atomic>
 #include <memory>
+
+// Animation assertions must inspect a known frame, independent of host scheduling.
+// This driver is installed only by tests that explicitly control animation time.
+class TestAnimationClock final : public QAnimationDriver {
+    Q_OBJECT
+  public:
+    ~TestAnimationClock() override { endControl(); }
+    Q_INVOKABLE void beginControl()
+    {
+        if (!controlled_) {
+            elapsed_ = 0;
+            install();
+            controlled_ = true;
+        }
+    }
+    Q_INVOKABLE void endControl()
+    {
+        if (controlled_) {
+            uninstall();
+            controlled_ = false;
+        }
+    }
+    Q_INVOKABLE void advanceMilliseconds(int milliseconds)
+    {
+        if (controlled_ && milliseconds >= 0) {
+            // QML registers animation jobs, then the unified timer starts them
+            // through a second queued invocation. Flush both before stepping.
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+            elapsed_ += milliseconds;
+            advanceAnimation();
+        }
+    }
+    void advance() override { advanceAnimation(); }
+    qint64 elapsed() const override { return elapsed_; }
+
+  protected:
+    void start() override
+    {
+        elapsed_ = 0;
+        QAnimationDriver::start();
+    }
+
+  private:
+    qint64 elapsed_ = 0;
+    bool controlled_ = false;
+};
 
 struct PreviewRequestState {
     struct Request {
@@ -178,6 +228,7 @@ class LicasaQuickSetup final : public QObject {
         engine->rootContext()->setContextProperty("testPreviewRequests", &previewRequests_);
         engine->rootContext()->setContextProperty("testEditor", &editorSupport_);
         engine->rootContext()->setContextProperty("testImageSaveService", saveService_.get());
+        engine->rootContext()->setContextProperty("testAnimationClock", &animationClock_);
     }
 
   private:
@@ -186,6 +237,7 @@ class LicasaQuickSetup final : public QObject {
     std::unique_ptr<Licasa::ImageAnimationService> animations_;
     PreviewRequestController previewRequests_;
     EditorTestSupport editorSupport_;
+    TestAnimationClock animationClock_;
     std::unique_ptr<Licasa::ImageSaveService> saveService_;
 };
 
