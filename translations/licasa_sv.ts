@@ -133,6 +133,82 @@
     </message>
 </context>
 <context>
+    <name>ByteRangeDevice</name>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="46"/>
+        <source>Byte range is already open</source>
+        <translation>Byteintervallet är redan öppet</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="50"/>
+        <location filename="../src/io/byte_range_device.cpp" line="190"/>
+        <source>Byte range is read-only</source>
+        <translation>Byteintervallet är skrivskyddat</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="54"/>
+        <location filename="../src/io/byte_range_device.cpp" line="111"/>
+        <location filename="../src/io/byte_range_device.cpp" line="150"/>
+        <source>Byte-range operation cancelled</source>
+        <translation>Byteintervallåtgärden avbröts</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="59"/>
+        <source>Byte range exceeds seekable file limits</source>
+        <translation>Byteintervallet överskrider gränserna för sökbara filer</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="69"/>
+        <source>Byte range lies outside the source file</source>
+        <translation>Byteintervallet ligger utanför källfilen</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="116"/>
+        <source>Seek lies outside the byte range</source>
+        <translation>Sökpositionen ligger utanför byteintervallet</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="125"/>
+        <source>Unable to seek within byte range</source>
+        <translation>Det går inte att söka inom byteintervallet</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="134"/>
+        <source>Invalid byte-range read</source>
+        <translation>Ogiltig läsning av byteintervall</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="139"/>
+        <source>Byte-range position is invalid</source>
+        <translation>Byteintervallpositionen är ogiltig</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="146"/>
+        <source>Invalid byte-range read buffer</source>
+        <translation>Ogiltig läsbuffert för byteintervall</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="167"/>
+        <source>Byte-range offset overflow</source>
+        <translation>Förskjutningen för byteintervallet blev för stor</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="181"/>
+        <source>Source file changed during byte-range read</source>
+        <translation>Källfilen ändrades under läsning av byteintervallet</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="203"/>
+        <source>Source file is not readable</source>
+        <translation>Källfilen går inte att läsa</translation>
+    </message>
+    <message>
+        <location filename="../src/io/byte_range_device.cpp" line="213"/>
+        <source>Source file was truncated below the byte range</source>
+        <translation>Källfilen kortades av före byteintervallets slut</translation>
+    </message>
+</context>
+<context>
     <name>CropOverlay</name>
     <message>
         <location filename="../qml/CropOverlay.qml" line="47"/>
