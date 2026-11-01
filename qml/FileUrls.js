@@ -51,8 +51,16 @@ function parts(value) {
     }
 }
 
-function previewFirstFullResolution(value) {
-    return ["png", "pnm", "ppm", "pgm", "pbm"].indexOf(parts(value).suffix) >= 0
+function previewFirstFullResolution(value, sourcePixels, reusableWebpBase) {
+    const suffix = parts(value).suffix
+    if (["png", "pnm", "ppm", "pgm", "pbm"].indexOf(suffix) >= 0)
+        return true
+    // The simple WebP decoder can hand one admitted full raster to promotion.
+    if (suffix === "webp")
+        return reusableWebpBase === true && sourcePixels >= 25000000 && sourcePixels <= 400 * 1024 * 1024 / 4
+    // Match the provider's admitted 25 MP / 512 MiB four-byte base handoff.
+    return (suffix === "svg" || suffix === "svgz" || suffix === "xpm")
+        && sourcePixels >= 25000000 && sourcePixels <= 512 * 1024 * 1024 / 4
 }
 
 function queryValue(value, name) {

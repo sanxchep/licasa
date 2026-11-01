@@ -6,9 +6,12 @@
 #include <atomic>
 
 namespace Licasa {
+// Header-only eligibility check; actual decode still validates the bitstream.
+bool fastWebpBaseEligible(const QString& path);
 // Decode a bounded preview for simple, static WebP files. For costly large
 // files, optionally retain the full raster so promotion avoids a second decode.
-// Extended files keep Qt's reader for metadata and animation.
+// ICC and animated files keep Qt's reader. Callers must preserve Qt's
+// orientation handling when an EXIF transform is present.
 QImage readFastWebpPreview(const QString& path, const QSize& target, quint64 maximumPixels,
                            qsizetype maximumPreviewBytes, const std::atomic_bool* cancelled,
                            QImage* retainedFullBase = nullptr, qsizetype maximumRetainedBytes = 0);

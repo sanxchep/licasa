@@ -5,10 +5,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Licasa
-        VERSION 0.9.5
+        VERSION 0.9.6
         LANGUAGES CXX
 )
-set(LICASA_RELEASE_DATE "2026-10-29")
+set(LICASA_RELEASE_DATE "2026-11-01")
 
 # Qt 6 requires C++17 or newer.
 set(CMAKE_CXX_STANDARD 17)
@@ -407,11 +407,25 @@ add_library(licasa_image_services STATIC
         src/imaging/preview_decode_support.h
         src/imaging/fast_pnm_preview.cpp
         src/imaging/fast_pnm_preview.h
+        src/imaging/fast_xpm_decode.cpp
+        src/imaging/fast_xpm_decode.h
         src/imaging/image_processing.cpp
         src/imaging/image_processing.h)
 target_include_directories(licasa_image_services PUBLIC src)
 target_link_libraries(licasa_image_services PUBLIC Qt6::Quick licasa_lifecycle_platform)
 find_package(PkgConfig QUIET)
+option(LICASA_ENABLE_FAST_SVGZ_INPUT "Use optional bounded SVGZ decompression" ON)
+if(PkgConfig_FOUND AND LICASA_ENABLE_FAST_SVGZ_INPUT)
+    pkg_check_modules(LICASA_DEFLATE QUIET IMPORTED_TARGET libdeflate>=1.8)
+endif()
+if(LICASA_DEFLATE_FOUND AND LICASA_ENABLE_FAST_SVGZ_INPUT)
+    set(LICASA_HAVE_FAST_SVGZ_INPUT TRUE)
+    target_sources(licasa_image_services PRIVATE
+            src/imaging/fast_svgz_input.cpp
+            src/imaging/fast_svgz_input.h)
+    target_link_libraries(licasa_image_services PUBLIC PkgConfig::LICASA_DEFLATE)
+    target_compile_definitions(licasa_image_services PRIVATE LICASA_HAVE_FAST_SVGZ_INPUT=1)
+endif()
 if(PkgConfig_FOUND)
     pkg_check_modules(LICASA_WEBP QUIET IMPORTED_TARGET libwebp)
 endif()
@@ -639,7 +653,9 @@ function(licasa_add_qml target_name)
             qml/AnimationExportDialog.qml
             qml/TemporalExportCoordinator.qml
             qml/FullscreenSideMenu.qml
+            qml/FullscreenSettingsContent.qml
             qml/EditorSidePanel.qml
+            qml/EditorPanelContent.qml
             qml/EditorAdjustContent.qml
             qml/EditorCropContent.qml
             qml/EditorExportContent.qml

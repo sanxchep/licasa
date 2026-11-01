@@ -25,11 +25,12 @@ quint32 bigEndian32(const uchar* bytes)
            quint32(bytes[3]);
 }
 
-QSize eligibleSize(QFile& file, quint64 maximumPixels)
+QSize eligibleSize(QFile& file, quint64 maximumPixels, quint64 maximumFullBaseBytes)
 {
 #if Q_BYTE_ORDER != Q_LITTLE_ENDIAN
     Q_UNUSED(file);
     Q_UNUSED(maximumPixels);
+    Q_UNUSED(maximumFullBaseBytes);
     return {};
 #else
     // The second chunk must be IDAT. Color profiles, gamma, animation, and
@@ -48,7 +49,8 @@ QSize eligibleSize(QFile& file, quint64 maximumPixels)
     const quint32 width = bigEndian32(header + 16);
     const quint32 height = bigEndian32(header + 20);
     if (width == 0 || height == 0 || width > kMaximumDimension || height > kMaximumDimension ||
-        !ImageDecodeContract::boundedPngFullBase(QSize(int(width), int(height)), maximumPixels)) {
+        !ImageDecodeContract::boundedRasterFullBase(QSize(int(width), int(height)), maximumPixels,
+                                                    maximumFullBaseBytes)) {
         return {};
     }
     return QSize(int(width), int(height));
@@ -84,18 +86,20 @@ void ignorePngWarning(png_structp, png_const_charp) {}
 void ignorePngError(png_structp png, png_const_charp) { longjmp(png_jmpbuf(png), 1); }
 } // namespace
 
-bool fastPngBaseEligible(const QString& path, quint64 maximumPixels)
+bool fastPngBaseEligible(const QString& path, quint64 maximumPixels, quint64 maximumFullBaseBytes)
 {
     if (qEnvironmentVariableIsSet("LICASA_DISABLE_FAST_PNG_PREVIEW")) {
         return false;
     }
     QFile file(path);
-    return file.open(QIODevice::ReadOnly) && eligibleSize(file, maximumPixels).isValid();
+    return file.open(QIODevice::ReadOnly) &&
+           eligibleSize(file, maximumPixels, maximumFullBaseBytes).isValid();
 }
 
 static FastPngPreview readFastPng(const QString& path, const QSize& previewSize,
                                   quint64 maximumPixels, qsizetype maximumPreviewBytes,
-                                  const std::atomic_bool* cancelled, bool retainFullBase)
+                                  const std::atomic_bool* cancelled, bool retainFullBase,
+                                  quint64 maximumFullBaseBytes)
 {
     if (maximumPreviewBytes <= 0 || !previewSize.isValid() || previewSize.isEmpty() ||
         (cancelled && cancelled->load(std::memory_order_relaxed))) {
@@ -105,7 +109,7 @@ static FastPngPreview readFastPng(const QString& path, const QSize& previewSize,
     if (!file.open(QIODevice::ReadOnly)) {
         return {};
     }
-    const QSize sourceSize = eligibleSize(file, maximumPixels);
+    const QSize sourceSize = eligibleSize(file, maximumPixels, maximumFullBaseBytes);
     if (!sourceSize.isValid() ||
         quint64(previewSize.width()) * quint64(previewSize.height()) >
             quint64(maximumPreviewBytes) / 4 ||
@@ -170,8 +174,8 @@ static FastPngPreview readFastPng(const QString& path, const QSize& previewSize,
     state->result.preview = QImage(previewSize, imageFormat);
     if ((retainFullBase && state->result.fullBase.isNull()) ||
         (!retainFullBase && state->row.isNull()) || state->result.preview.isNull() ||
-        state->result.fullBase.sizeInBytes() >
-            qsizetype(ImageDecodeContract::maximumDecodedBaseCacheBytes) ||
+        quint64(state->result.fullBase.sizeInBytes()) >
+            std::min(maximumFullBaseBytes, ImageDecodeContract::maximumFullBaseHandoffBytes) ||
         state->result.preview.sizeInBytes() > maximumPreviewBytes) {
         return {};
     }
@@ -225,16 +229,18 @@ static FastPngPreview readFastPng(const QString& path, const QSize& previewSize,
 
 FastPngPreview readFastPngPreview(const QString& path, const QSize& previewSize,
                                   quint64 maximumPixels, qsizetype maximumPreviewBytes,
-                                  const std::atomic_bool* cancelled)
+                                  const std::atomic_bool* cancelled, quint64 maximumFullBaseBytes)
 {
-    return readFastPng(path, previewSize, maximumPixels, maximumPreviewBytes, cancelled, true);
+    return readFastPng(path, previewSize, maximumPixels, maximumPreviewBytes, cancelled, true,
+                       maximumFullBaseBytes);
 }
 
 QImage readFastPngNearbyPreview(const QString& path, const QSize& previewSize,
                                 quint64 maximumPixels, qsizetype maximumPreviewBytes,
                                 const std::atomic_bool* cancelled)
 {
-    return readFastPng(path, previewSize, maximumPixels, maximumPreviewBytes, cancelled, false)
+    return readFastPng(path, previewSize, maximumPixels, maximumPreviewBytes, cancelled, false,
+                       ImageDecodeContract::maximumDecodedBaseCacheBytes)
         .preview;
 }
 

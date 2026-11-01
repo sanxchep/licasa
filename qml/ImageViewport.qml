@@ -51,6 +51,7 @@ Item {
     // Keep this eligibility stable when previewPhase turns false: the preloaded
     // ordinary full request must retain the same key for slot-C promotion.
     property bool previewFirstPreloadEnabled: false
+    property bool fullBaseHandoffEnabled: false
     property bool rapidBrowseMode: false
     required property int previewSourceWidth
     required property int previewSourceHeight
@@ -346,6 +347,7 @@ Item {
             + "licasa_stage=" + stage
             + "&licasa_width=" + (boundedStage ? previewWidth : 0)
             + "&licasa_height=" + (boundedStage ? previewHeight : 0)
+            + (root.fullBaseHandoffEnabled ? "&licasa_handoff=1" : "")
             + (parallelStage.length > 0 ? "&licasa_parallel=" + parallelStage : "")
             + (parallelStage.length > 0
                 ? "&licasa_pair=" + root.parallelPairId
@@ -561,7 +563,6 @@ Item {
             imageRequestTimer.restart()
             return
         }
-        const failedKey = pendingRequestKey
         pendingImageSlot = -1
         pendingRequestKey = ""
         imageLoadFailed = false
@@ -569,7 +570,11 @@ Item {
         // The owner can switch to a RAW fallback or an already-running full
         // request in the failure callback. Keep the loading state for that
         // request instead of briefly showing the failed preview's error card.
-        imageLoadFailed = activeImageSlot < 0 && requestKey() === failedKey
+        // Revealing the window can change the requested preview dimensions
+        // without starting a replacement. Only actual queued/pending work
+        // justifies keeping the loading card after the callback returns.
+        imageLoadFailed = activeImageSlot < 0 && pendingImageSlot < 0
+            && !imageRequestTimer.running
     }
 
     onProviderSourceChanged: {
@@ -579,6 +584,7 @@ Item {
     onSourceOverrideChanged: imageRequestTimer.restart()
     onSourceOverrideSizeChanged: imageRequestTimer.restart()
     onPreviewPhaseChanged: imageRequestTimer.restart()
+    onFullBaseHandoffEnabledChanged: imageRequestTimer.restart()
     onRawFastPhaseChanged: imageRequestTimer.restart()
     onParallelFullResolutionEnabledChanged: {
         if (!parallelFullResolutionEnabled && !previewFirstPreloadEnabled && previewPhase &&

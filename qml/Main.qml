@@ -241,6 +241,7 @@ Window {
     property url rawMetadataProbeUrl: ""
     property real rawMetadataProbeDurationMs: 0.0
     property bool reusablePngBase: false
+    property bool reusableWebpBase: false
     property bool decodedFullBaseReady: false
     readonly property real previewOverscanFactor: 1.20
     readonly property real previewTriggerRatio: 1.15
@@ -681,7 +682,8 @@ Window {
     }
 
     function parallelOpeningWorthwhile() {
-        if (FileUrls.previewFirstFullResolution(residentImageUrl))
+        if (FileUrls.previewFirstFullResolution(residentImageUrl,
+                naturalImageSize.width * naturalImageSize.height, reusableWebpBase))
             return false
         const name = FileUrls.fileName(residentImageUrl).toLowerCase()
         const dot = name.lastIndexOf(".")
@@ -694,7 +696,8 @@ Window {
         // large enough for the current viewport.
         if (extension === "avif" || extension === "avifs"
                 || extension === "heic" || extension === "heif"
-                || extension === "hif" || extension === "jxl")
+                || extension === "hif" || extension === "heics"
+                || extension === "heifs" || extension === "jxl")
             return rawEmbeddedPreviewSize.width >= previewSourceWidth()
                 && rawEmbeddedPreviewSize.height >= previewSourceHeight()
         if (extension === "tif" || extension === "tiff")
@@ -727,6 +730,7 @@ Window {
         const rawInfo = imageProbe.inspect(residentImageUrl)
         rawEmbeddedPreviewSize = rawInfo.previewSize || Qt.size(0, 0)
         reusablePngBase = rawInfo.reusablePngBase === true
+        reusableWebpBase = rawInfo.reusableWebpBase === true
         const limited = rawInfo.withinBudget !== true
         if (limited === imageLimitedToPreview)
             return
@@ -1328,6 +1332,7 @@ Window {
         rawMetadataProbeUrl = ""
         rawMetadataProbeDurationMs = 0.0
         reusablePngBase = false
+        reusableWebpBase = false
         decodedFullBaseReady = false
         rawMetadataProbeTimer.stop()
         imageViewport.releaseStaticImages()
@@ -1442,6 +1447,7 @@ Window {
         const info = imageProbe.inspect(url)
         naturalImageSize = info.size || Qt.size(0, 0)
         reusablePngBase = info.reusablePngBase === true
+        reusableWebpBase = info.reusableWebpBase === true
         rawPreviewFirst = info.previewFirst === true || (preserveRawStage && rawPreviewFirst)
         rawEmbeddedPreviewSize = info.previewSize || Qt.size(0, 0)
         if (!preserveRawStage) {
@@ -2889,6 +2895,9 @@ Window {
 
         providerSource: root.renderedProviderSource
         previewPhase: root.previewPhase
+        fullBaseHandoffEnabled: root.fullResolutionRenderingEnabled
+            && !root.imageLimitedToPreview && !root.currentImageAnimated
+            && !root.browseBurstActive && !root.browseAwaitingFrame
         rawFastPhase: root.rawFastPhase
         rawPreviewFirst: root.rawPreviewFirst
         parallelFullResolutionEnabled: root.previewPhase && !root.browseBurstActive
@@ -2900,7 +2909,8 @@ Window {
         previewFirstPreloadEnabled: !root.browseBurstActive && !root.browseAwaitingFrame
             && !root.imageLimitedToPreview && !root.currentImageAnimated
             && root.fullResolutionRenderingEnabled
-            && FileUrls.previewFirstFullResolution(root.residentImageUrl)
+            && FileUrls.previewFirstFullResolution(root.residentImageUrl,
+                root.naturalImageSize.width * root.naturalImageSize.height, root.reusableWebpBase)
         previewSourceWidth: root.browseAwaitingFrame || root.browseBurstActive
             ? root.burstPreviewSize().width : root.previewSourceWidth()
         previewSourceHeight: root.browseAwaitingFrame || root.browseBurstActive

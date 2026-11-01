@@ -472,7 +472,8 @@ if(LICASA_ENABLE_HEIF)
     list(APPEND LICASA_TEST_TARGETS licasa_heif_tests)
     add_test(NAME licasa_heif_tests COMMAND licasa_heif_tests -platform offscreen)
     add_test(NAME licasa_heif_hostile_environment COMMAND licasa_heif_tests -platform offscreen
-            oversizedGridUsesSmallTiles embeddedPreviewAvoidsPrimaryRaster malformedInputs)
+            oversizedGridUsesSmallTiles embeddedPreviewAvoidsPrimaryRaster malformedInputs
+            rejectedCompressedUnitReportsItsActualError)
     set_tests_properties(licasa_heif_hostile_environment PROPERTIES
             ENVIRONMENT "LIBHEIF_SECURITY_LIMITS=off;QT_IMAGEIO_MAXALLOC=0")
     set_tests_properties(licasa_heif_tests PROPERTIES TIMEOUT 90 LABELS "codec;heif;fast")
@@ -560,6 +561,10 @@ set_tests_properties(licasa_qml_tests PROPERTIES
 )
 add_executable(licasa_async_image_provider_tests tests/tst_async_image_provider.cpp)
 target_link_libraries(licasa_async_image_provider_tests PRIVATE licasa_image_services Qt6::Test)
+if(LICASA_HAVE_FAST_SVGZ_INPUT)
+    target_compile_definitions(licasa_async_image_provider_tests PRIVATE
+            LICASA_HAVE_FAST_SVGZ_INPUT=1)
+endif()
 if(LICASA_HAVE_FAST_TIFF_PREVIEW)
     target_compile_definitions(licasa_async_image_provider_tests PRIVATE
             LICASA_HAVE_FAST_TIFF_PREVIEW=1)
@@ -579,6 +584,19 @@ add_test(NAME licasa_async_image_provider_tests
         COMMAND licasa_async_image_provider_tests -platform offscreen)
 set_tests_properties(licasa_async_image_provider_tests PROPERTIES
         TIMEOUT 15 LABELS "core;async;lifecycle;fast")
+
+# Large-raster handoff checks have their own deadline; keep the provider's
+# existing fast/ownership suite and its 15-second budget unchanged.
+if(LICASA_HAVE_FAST_PNG_PREVIEW)
+    add_executable(licasa_preview_handoff_tests tests/tst_preview_handoff.cpp)
+    target_link_libraries(licasa_preview_handoff_tests PRIVATE licasa_image_services Qt6::Test)
+    licasa_enable_warnings(licasa_preview_handoff_tests)
+    list(APPEND LICASA_TEST_TARGETS licasa_preview_handoff_tests)
+    list(APPEND LICASA_CORE_TEST_TARGETS licasa_preview_handoff_tests)
+    add_test(NAME licasa_preview_handoff_tests COMMAND licasa_preview_handoff_tests -platform offscreen)
+    set_tests_properties(licasa_preview_handoff_tests PROPERTIES
+            TIMEOUT 30 LABELS "core;codec;preview;lifecycle")
+endif()
 
 add_executable(licasa_fast_pnm_preview_tests tests/tst_fast_pnm_preview.cpp
         src/imaging/fast_pnm_preview.cpp src/imaging/fast_pnm_preview.h)

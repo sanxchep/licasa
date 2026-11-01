@@ -527,6 +527,37 @@ Item {
         fuzzyCompare(spy.signalArguments[1][0], 1.125, 0.03)
     }
 
+    function test_drawerContentsAreDeferredUntilFirstOpen_data() {
+        return [{ tag: "settings", editor: false }, { tag: "editor", editor: true }]
+    }
+
+    function test_drawerContentsAreDeferredUntilFirstOpen(data) {
+        const drawer = createControl(data.editor ? editorSidePanelComponent : settingsMenuComponent)
+        const loader = findChild(drawer, data.editor ? "editorContent" : "settingsContent")
+        verify(loader)
+        compare(loader.item, null)
+        const name = data.editor ? "editorExposureControl" : "maximumImageMemoryControl"
+        compare(findChild(drawer, name), null)
+        if (data.editor) drawer.exposure = 0.75
+        else drawer.maximumImageMemoryMiB = 4096
+        drawer.panelOpen = true
+        const control = findChild(drawer, name)
+        verify(control)
+        compare(control.value, data.editor ? 0.75 : 4096)
+        const content = loader.item
+        drawer.panelOpen = false
+        if (data.editor) drawer.exposure = -0.25
+        else drawer.maximumImageMemoryMiB = 2048
+        drawer.panelOpen = true
+        compare(loader.item, content)
+        compare(control.value, data.editor ? -0.25 : 2048)
+        const spy = createSpy(drawer, data.editor ? "exposureRequested" : "maximumImageMemoryMiBRequested")
+        if (data.editor) control.commitValue(0.5)
+        else control.valueChangedByUser(3072)
+        compare(spy.count, 1)
+        compare(spy.signalArguments[0][0], data.editor ? 0.5 : 3072)
+    }
+
     function test_largeImageSettingUsesMemoryStepsAndGuidance() {
         const menu = createControl(settingsMenuComponent)
         menu.panelOpen = true
@@ -555,6 +586,7 @@ Item {
 
     function test_backgroundModeCanBeEnabledInSettings() {
         const menu = createControl(settingsMenuComponent)
+        menu.panelOpen = true
         const row = findChild(menu, "backgroundServiceRow")
         verify(row)
         verify(!row.visible)
@@ -573,6 +605,7 @@ Item {
 
     function test_aboutSectionShowsInstalledBuild() {
         const menu = createControl(settingsMenuComponent)
+        menu.panelOpen = true
         const about = findChild(menu, "aboutSection")
         const releaseDate = findChild(menu, "aboutReleaseDate")
         verify(about)
@@ -587,6 +620,7 @@ Item {
 
     function test_settingsFooterActionsUseSourceAndIssueLinks() {
         const menu = createControl(settingsMenuComponent)
+        menu.panelOpen = true
         const about = findChild(menu, "aboutSection")
         const quit = findChild(menu, "quitLicasaButton")
         const source = findChild(menu, "viewSourceButton")
@@ -2173,6 +2207,26 @@ Item {
         compare(viewport.pendingImageSlot, -1)
         compare(viewport.imageStatus, Image.Loading)
         tryCompare(viewport, "imageStatus", Image.Ready, 5000)
+    }
+
+    function test_failedPreviewGeometryChangeEndsLoading() {
+        const viewport = createTemporaryObject(imageViewportComponent, visualRoot, {
+            "providerSource": "",
+            "previewPhase": true
+        })
+        verify(viewport)
+        wait(0)
+        const failureSpy = createSpy(viewport, "imageRequestFailed")
+        // Revealing a failed opening can change its viewport geometry without
+        // scheduling another image. A changed key alone is not replacement work.
+        viewport.imageRequestFailed.connect(function() {
+            viewport.previewSourceWidth += 1
+        })
+        viewport.providerSource = "file:///no-such-licasa-preview-geometry.png"
+        tryCompare(failureSpy, "count", 1, 5000)
+        compare(viewport.pendingImageSlot, -1)
+        compare(viewport.decodePending, false)
+        compare(viewport.imageStatus, Image.Error)
     }
 
     function test_parallelFullImageWaitsForPreviewThenPromotes() {

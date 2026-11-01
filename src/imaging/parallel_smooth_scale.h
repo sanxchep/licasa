@@ -23,8 +23,11 @@ inline QImage parallelSmoothScale(const QImage& source, const QSize& target)
     const quint64 targetPixels = quint64(target.width()) * target.height();
     const int groups = std::gcd(source.height(), target.height());
     const int workers = std::min({8, QThread::idealThreadCount(), groups, target.height() / 64});
-    if (source.format() != QImage::Format_RGBA8888 || sourcePixels < 16'000'000 ||
-        targetPixels > 2'000'000 || source.height() < target.height() * 4 || workers < 4) {
+    const bool packed32 = source.format() == QImage::Format_RGBA8888 ||
+                          source.format() == QImage::Format_ARGB32_Premultiplied ||
+                          source.format() == QImage::Format_RGB32;
+    if (!packed32 || sourcePixels < 16'000'000 || targetPixels > 2'000'000 ||
+        source.height() < target.height() * 4 || workers < 4) {
         return source.scaled(target, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     }
 

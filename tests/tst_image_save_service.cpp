@@ -1216,6 +1216,45 @@ class ImageSaveServiceTest final : public QObject {
         QVERIFY(!service.busy());
     }
 
+    void svgViewportMetadataMatchesInstalledReader_data()
+    {
+        QTest::addColumn<QByteArray>("attributes");
+        QTest::newRow("explicit-integers") << QByteArray("width='10000' height='10000'");
+        QTest::newRow("viewport-and-viewbox")
+            << QByteArray("width='400' height='300' viewBox='10 20 800 800'");
+        QTest::newRow("physical-units") << QByteArray("width='2cm' height='1cm'");
+        QTest::newRow("fractional") << QByteArray("width='123.75' height='66.25'");
+        QTest::newRow("percentage")
+            << QByteArray("width='100%' height='100%' viewBox='0 0 400 300'");
+        QTest::newRow("viewbox-only") << QByteArray("viewBox='0 0 400 300'");
+        QTest::newRow("styled-root") << QByteArray("width='400' height='300' style='fill: red'");
+    }
+
+    void svgViewportMetadataMatchesInstalledReader()
+    {
+        QFETCH(QByteArray, attributes);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("viewport.svg"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        const QByteArray document = "<svg xmlns='http://www.w3.org/2000/svg' " + attributes +
+                                    "><rect width='40' height='30' fill='red'/></svg>";
+        QCOMPARE(file.write(document), document.size());
+        file.close();
+        QImageReader reference(path);
+        if (!reference.canRead()) {
+            QSKIP("The Qt SVG image plugin is unavailable.");
+        }
+        const QSize expected = reference.size();
+        Licasa::ImageProbe probe(*resourcePolicy_);
+        const auto result = probe.inspect(QUrl::fromLocalFile(path));
+        QCOMPARE(result.value("size").toSize(), expected);
+        QCOMPARE(result.value("withinBudget").toBool(), resourcePolicy_->allows(expected));
+        QCOMPARE(result.value("animated").toBool(), reference.supportsAnimation());
+        QCOMPARE(probe.inspect(QUrl::fromLocalFile(path)), result);
+    }
+
     void rejectsOversizedImageBeforeRasterAllocation()
     {
         QTemporaryDir directory;
