@@ -87,6 +87,24 @@
     </message>
 </context>
 <context>
+    <name>AsyncImageProvider</name>
+    <message>
+        <location filename="../src/imaging/async_image_provider.cpp" line="420"/>
+        <source>File not found: %1</source>
+        <translation>Filen hittades inte: %1</translation>
+    </message>
+    <message>
+        <location filename="../src/imaging/async_image_provider.cpp" line="496"/>
+        <source>Parallel decoding exceeds the image memory budget.</source>
+        <translation>Parallell avkodning överskrider bildens minnesbudget.</translation>
+    </message>
+    <message>
+        <location filename="../src/imaging/async_image_provider.cpp" line="697"/>
+        <source>The image could not be processed safely.</source>
+        <translation>Bilden kunde inte bearbetas säkert.</translation>
+    </message>
+</context>
+<context>
     <name>CropOverlay</name>
     <message>
         <location filename="../qml/CropOverlay.qml" line="47"/>
@@ -1190,6 +1208,53 @@ Bilder som överskrider den här budgeten öppnas i en begränsad förhandsvisni
         <location filename="../qml/FullscreenSideMenu.qml" line="641"/>
         <source>Fully quitting Licasa allows Snap updates. Open pictures and unsaved changes are kept until you finish them.</source>
         <translation>Genom att avsluta Licasa helt kan Snap uppdateras. Öppna bilder och osparade ändringar behålls tills du är klar.</translation>
+    </message>
+</context>
+<context>
+    <name>ImageAnimation</name>
+    <message>
+        <location filename="../src/imaging/image_animation.cpp" line="102"/>
+        <source>The animated image is no longer available.</source>
+        <translation>Den animerade bilden är inte längre tillgänglig.</translation>
+    </message>
+    <message>
+        <location filename="../src/imaging/image_animation.cpp" line="124"/>
+        <source>The animated image could not be read.</source>
+        <translation>Den animerade bilden kunde inte läsas.</translation>
+    </message>
+    <message>
+        <location filename="../src/imaging/image_animation.cpp" line="131"/>
+        <source>This file does not contain a readable animation.</source>
+        <translation>Filen innehåller ingen läsbar animering.</translation>
+    </message>
+    <message>
+        <location filename="../src/imaging/image_animation.cpp" line="135"/>
+        <location filename="../src/imaging/image_animation.cpp" line="158"/>
+        <source>The animation exceeds the selected image limit.</source>
+        <translation>Animeringen överskrider den valda bildgränsen.</translation>
+    </message>
+    <message>
+        <location filename="../src/imaging/image_animation.cpp" line="142"/>
+        <source>That animation frame is unavailable.</source>
+        <translation>Den animerade bildrutan är inte tillgänglig.</translation>
+    </message>
+    <message>
+        <location filename="../src/imaging/image_animation.cpp" line="322"/>
+        <source>Only local animated images can be opened.</source>
+        <translation>Endast lokala animerade bilder kan öppnas.</translation>
+    </message>
+</context>
+<context>
+    <name>ImageProcessing</name>
+    <message>
+        <location filename="../src/imaging/image_processing.cpp" line="19"/>
+        <source>The image exceeds the effective %1 MP full-resolution limit of the per-image memory budget. Increase Maximum working memory per image in Advanced Settings to process it at full detail.</source>
+        <translation>Bilden överskrider den faktiska gränsen på %1 MP i full upplösning för minnesbudgeten per bild. Öka Maximalt arbetsminne per bild i Avancerade inställningar för att bearbeta den med full detaljrikedom.</translation>
+    </message>
+    <message>
+        <location filename="../src/imaging/image_processing.cpp" line="38"/>
+        <source>The image could not be decoded.</source>
+        <translation>Bilden kunde inte avkodas.</translation>
     </message>
 </context>
 <context>

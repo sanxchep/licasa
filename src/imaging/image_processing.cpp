@@ -1,6 +1,7 @@
 #include "imaging/image_processing.h"
 #include "app/app_constants.h"
 #include "imaging/image_decode_contract.h"
+#include <QCoreApplication>
 #include <QImageReader>
 #include <algorithm>
 
@@ -15,7 +16,8 @@ quint64 pixelsForMegapixels(int megapixels)
 
 QString imageLimitError(int maximumMegapixels)
 {
-    return QStringLiteral(
+    return QCoreApplication::translate(
+               "ImageProcessing",
                "The image exceeds the effective %1 MP full-resolution limit of the per-image "
                "memory budget. Increase Maximum working memory per image in Advanced Settings "
                "to process it at full detail.")
@@ -32,7 +34,9 @@ QString readerErrorOrFallback(const QImageReader& reader)
         }
     }
     const QString error = reader.errorString().trimmed();
-    return error.isEmpty() ? QStringLiteral("The image could not be decoded.") : error;
+    return error.isEmpty()
+               ? QCoreApplication::translate("ImageProcessing", "The image could not be decoded.")
+               : error;
 }
 
 } // namespace ImageProcessing

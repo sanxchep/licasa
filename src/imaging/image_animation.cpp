@@ -5,6 +5,7 @@
 
 #include <QColorSpace>
 #include <QElapsedTimer>
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
@@ -98,7 +99,7 @@ struct AnimationWork {
         elapsed.start();
         if (!file) {
             if (!QFileInfo(path).isFile()) {
-                result.error = QStringLiteral("The animated image is no longer available.");
+                result.error = QCoreApplication::translate("ImageAnimation", "The animated image is no longer available.");
                 return result;
             }
             file = std::make_unique<QFile>(path);
@@ -120,25 +121,25 @@ struct AnimationWork {
             reader.reset();
             pixels = admitted;
             if (!file->seek(0)) {
-                result.error = QStringLiteral("The animated image could not be read.");
+                result.error = QCoreApplication::translate("ImageAnimation", "The animated image could not be read.");
                 return result;
             }
             reader = std::make_unique<QImageReader>(file.get());
             ImageDecodeContract::configure(*reader, pixels, &cancelled);
             reader->setAutoTransform(true);
             if (!reader->canRead() || !reader->supportsAnimation()) {
-                result.error = QStringLiteral("This file does not contain a readable animation.");
+                result.error = QCoreApplication::translate("ImageAnimation", "This file does not contain a readable animation.");
                 return result;
             }
             if (!ImageDecodeContract::allows(reader->size(), pixels)) {
-                result.error = QStringLiteral("The animation exceeds the selected image limit.");
+                result.error = QCoreApplication::translate("ImageAnimation", "The animation exceeds the selected image limit.");
                 return result;
             }
             if (nextFrame > 0 && !reader->jumpToImage(nextFrame)) {
                 for (int index = 0; index < nextFrame && !cancelled.load(); ++index) {
                     if (!ImageDecodeContract::allows(reader->size(), pixels) ||
                         !ImageDecodeContract::allows(reader->read().size(), pixels)) {
-                        result.error = QStringLiteral("That animation frame is unavailable.");
+                        result.error = QCoreApplication::translate("ImageAnimation", "That animation frame is unavailable.");
                         return result;
                     }
                 }
@@ -154,7 +155,7 @@ struct AnimationWork {
         // Check again for handlers whose current frame size differs from the
         // canvas. Allocation policy remains synchronized for the whole read.
         if (!ImageDecodeContract::allows(reader->size(), pixels)) {
-            result.error = QStringLiteral("The animation exceeds the selected image limit.");
+            result.error = QCoreApplication::translate("ImageAnimation", "The animation exceeds the selected image limit.");
             return result;
         }
         result.image = reader->read();
@@ -318,7 +319,7 @@ void ImageAnimation::start(int frame)
         return;
     }
     if (!source_.isValid() || !source_.isLocalFile()) {
-        error_ = QStringLiteral("Only local animated images can be opened.");
+        error_ = QCoreApplication::translate("ImageAnimation", "Only local animated images can be opened.");
         emit errorChanged();
         return;
     }
