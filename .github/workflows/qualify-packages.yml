@@ -57,7 +57,7 @@ jobs:
   ubuntu_packages:
     needs: source_checks
     runs-on: ${{ format('ubuntu-{0}', matrix.ubuntu) }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -97,7 +97,9 @@ jobs:
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir packages \
             --pattern "licasa_${VERSION}_amd64.snap*"
           (cd packages && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
-          sudo snap install --dangerous "packages/licasa_${VERSION}_amd64.snap"
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/1.json -- sudo snap install --dangerous "packages/licasa_${VERSION}_amd64.snap"
           python3 tools/verify_snap_install.py --version "$VERSION" --output reports/snap-install.json
       - name: Check the selected Ubuntu version
         env:
@@ -141,11 +143,19 @@ jobs:
           retention-days: 90
           compression-level: 0
           if-no-files-found: error
+      - name: Retain Snap Store retry diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snap-store-retries-qualify-packages-ubuntu_packages-${{ matrix.ubuntu }}
+          path: build/snap-store-retries/
+          if-no-files-found: ignore
+          retention-days: 7
 
   snap_desktops:
     needs: source_checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -169,7 +179,9 @@ jobs:
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir packages \
             --pattern "licasa_${VERSION}_amd64.snap*"
           (cd packages && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
-          sudo snap install --dangerous "packages/licasa_${VERSION}_amd64.snap"
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/1.json -- sudo snap install --dangerous "packages/licasa_${VERSION}_amd64.snap"
           python3 tools/verify_snap_install.py --version "$VERSION" --output reports/snap-install.json
       - name: Install the desktop test environment
         env:
@@ -205,3 +217,11 @@ jobs:
           retention-days: 90
           compression-level: 0
           if-no-files-found: error
+      - name: Retain Snap Store retry diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snap-store-retries-qualify-packages-snap_desktops-${{ matrix.desktop }}
+          path: build/snap-store-retries/
+          if-no-files-found: ignore
+          retention-days: 7

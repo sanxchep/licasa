@@ -354,7 +354,9 @@ if(LICASA_ENABLE_RAW)
     add_test(NAME licasa_raw_hostile_environment COMMAND licasa_raw_tests -platform offscreen
             oversizedSensorKeepsPreview malformedPreviewsAndMetadata boundedStreamArithmetic)
     set_tests_properties(licasa_raw_hostile_environment PROPERTIES ENVIRONMENT "QT_IMAGEIO_MAXALLOC=0")
-    set_tests_properties(licasa_raw_tests PROPERTIES TIMEOUT 120 LABELS "codec;raw;fast")
+    # The cancellation deadline measures this decoder, not competition from
+    # unrelated multithreaded codec/QML tests on a small sanitizer runner.
+    set_tests_properties(licasa_raw_tests PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE LABELS "codec;raw;fast")
     set_tests_properties(licasa_raw_hostile_environment PROPERTIES
             TIMEOUT 120 LABELS "codec;raw;security")
 endif()
@@ -434,7 +436,7 @@ if(LICASA_ENABLE_JXL)
     add_test(NAME licasa_jxl_hostile_environment COMMAND licasa_jxl_tests -platform offscreen
             metadataAndOversizedAdmission embeddedPreviewSkipsPrimary malformedAndAllocationFailures)
     set_tests_properties(licasa_jxl_hostile_environment PROPERTIES ENVIRONMENT "QT_IMAGEIO_MAXALLOC=0")
-    set_tests_properties(licasa_jxl_tests PROPERTIES TIMEOUT 150 LABELS "codec;jxl;fast")
+    set_tests_properties(licasa_jxl_tests PROPERTIES TIMEOUT 150 RUN_SERIAL TRUE LABELS "codec;jxl;fast")
     set_tests_properties(licasa_jxl_hostile_environment PROPERTIES
             TIMEOUT 150 LABELS "codec;jxl;security")
     add_executable(licasa_animation_tests
@@ -583,7 +585,22 @@ list(APPEND LICASA_CORE_TEST_TARGETS licasa_async_image_provider_tests)
 add_test(NAME licasa_async_image_provider_tests
         COMMAND licasa_async_image_provider_tests -platform offscreen)
 set_tests_properties(licasa_async_image_provider_tests PROPERTIES
-        TIMEOUT 15 LABELS "core;async;lifecycle;fast")
+        TIMEOUT 15 RUN_SERIAL TRUE LABELS "core;async;lifecycle;fast")
+
+# Preserve the original deadlines and assertions while guarding actual CTest
+# isolation. The rest of the registry continues to use parallel scheduling.
+set(LICASA_DECODE_ISOLATION_ARGUMENTS --isolated-test licasa_async_image_provider_tests)
+foreach(test_name licasa_raw_tests licasa_jxl_tests)
+    if(TEST ${test_name})
+        list(APPEND LICASA_DECODE_ISOLATION_ARGUMENTS --isolated-test ${test_name})
+    endif()
+endforeach()
+add_test(NAME licasa_decode_test_scheduling
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ctest_scheduling.py
+        --build-dir ${CMAKE_CURRENT_BINARY_DIR} --ctest ${CMAKE_CTEST_COMMAND}
+        ${LICASA_DECODE_ISOLATION_ARGUMENTS})
+set_tests_properties(licasa_decode_test_scheduling PROPERTIES
+        TIMEOUT 20 LABELS "core;packaging;scheduling;fast")
 
 # Large-raster handoff checks have their own deadline; keep the provider's
 # existing fast/ownership suite and its 15-second budget unchanged.

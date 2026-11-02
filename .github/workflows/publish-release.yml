@@ -115,7 +115,7 @@ jobs:
   verify_artifacts:
     needs: preflight
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     outputs:
       revision: ${{ steps.edge.outputs.revision }}
     steps:
@@ -208,7 +208,9 @@ jobs:
           SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
         run: |
           sudo snap set system experimental.user-daemons=false
-          sudo snap install --channel=edge licasa
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/1.json -- sudo snap install --channel=edge licasa
           python3 tools/verify_snap_install.py --version "$VERSION" \
             --source-sha "$SOURCE_SHA" \
             --output build/qualification/snap-edge-publish-smoke.json
@@ -218,13 +220,21 @@ jobs:
           actual="$(sudo sha256sum "/var/lib/snapd/snaps/licasa_${revision}.snap" | cut -d' ' -f1)"
           test "$actual" = "$expected"
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - name: Retain Snap Store retry diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snap-store-retries-publish-release-verify_artifacts
+          path: build/snap-store-retries/
+          if-no-files-found: ignore
+          retention-days: 7
 
   publish_snap:
     needs: [preflight, verify_artifacts]
     runs-on: ubuntu-24.04
     # Retain the existing credential and approval environment.
     environment: snap-beta
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
@@ -239,8 +249,12 @@ jobs:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
           REVISION: ${{ needs.verify_artifacts.outputs.revision }}
         run: |
-          sudo snap install snapcraft --classic
-          snapcraft release licasa "$REVISION" stable
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/1.json -- sudo snap install snapcraft --classic
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/2.json -- snapcraft release licasa "$REVISION" stable
       - name: Install and verify stable
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -248,13 +262,17 @@ jobs:
           SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
         run: |
           sudo snap set system experimental.user-daemons=false
-          sudo snap install --channel=stable licasa
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/3.json -- sudo snap install --channel=stable licasa
           for ((attempt = 1; attempt <= 10; attempt++)); do
             if [ "$(snap list licasa | awk 'NR == 2 {print $3}')" = "$REVISION" ]; then
               break
             fi
             sleep 20
-            sudo snap refresh --channel=stable licasa
+            python3 tools/retry_snap_store.py \
+              --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+              --report build/snap-store-retries/4-${attempt}.json -- sudo snap refresh --channel=stable licasa
           done
           test "$(snap list licasa | awk 'NR == 2 {print $3}')" = "$REVISION"
           python3 tools/verify_snap_install.py --version "$VERSION" \
@@ -265,6 +283,14 @@ jobs:
           name: licasa-stable-snap-smoke
           path: build/qualification/snap-stable-smoke.json
           if-no-files-found: error
+          retention-days: 7
+      - name: Retain Snap Store retry diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snap-store-retries-publish-release-publish_snap
+          path: build/snap-store-retries/
+          if-no-files-found: ignore
           retention-days: 7
 
   finalize_github_release:

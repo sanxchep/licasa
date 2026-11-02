@@ -25,7 +25,7 @@ concurrency:
 jobs:
   qualify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 210
     steps:
       - name: Require an ephemeral hosted VM
         run: test "$RUNNER_ENVIRONMENT" = github-hosted
@@ -53,7 +53,7 @@ jobs:
           PY
       - name: Build the complete standalone Snap source recipe
         id: snapcraft
-        uses: snapcore/action-build@v1
+        run: python3 tools/build_snap_ci.py
       - name: Install archive inspection tools in the hosted VM
         run: |
           sudo apt-get update
@@ -67,7 +67,9 @@ jobs:
           source_sha="$(cat build/snap-qualification/source-commit.txt)"
           test "$(unsquashfs -cat "$SNAP_FILE" usr/share/licasa/source-commit)" = "$source_sha"
           sudo snap set system experimental.user-daemons=false
-          sudo snap install --dangerous "$SNAP_FILE"
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/1.json -- sudo snap install --dangerous "$SNAP_FILE"
           python3 tools/verify_snap_install.py --version "$VERSION" \
             --source-sha "$source_sha" --output build/snap-qualification/install-smoke.json
           cp "$SNAP_FILE" "build/snap-qualification/licasa_${VERSION}_amd64.snap"
@@ -80,3 +82,11 @@ jobs:
           retention-days: 7
           compression-level: 0
           path: build/snap-qualification/
+      - name: Retain Snap Store retry diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snap-store-retries-snap-qualify-qualify
+          path: build/snap-store-retries/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -19,9 +19,9 @@ Licasa is an image viewer and editor for the Linux desktop inspired by Google's 
 >
 > **Arch users: do this before starting `pacman`.** Follow the [upgrade checklist](#before-updating-an-existing-installation) below.
 
-## Try Licasa
+## Download Licasa
 
-**[Download published releases](https://github.com/sanxchep/licasa/releases)** · [0.9.5 release notes](packaging/release-notes/v0.9.5.md)
+**[Download published releases](https://github.com/sanxchep/licasa/releases)** · [0.9.5 release notes](packaging/release-notes/v0.9.5.md) · [0.9.6 release notes](packaging/release-notes/v0.9.6.md)
 
 - View photos fullscreen or in a floating window, then crop, adjust, and export them.
 - Open JPEG, PNG, TIFF, WebP, HEIC/HEIF, JPEG XL, AVIF, JPEG 2000, and RAW previews.
