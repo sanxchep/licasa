@@ -34,8 +34,8 @@ class PngOutput final : public QIODevice {
         if (writeError_.isEmpty() && destination_.write(data, size) != size) {
             writeError_ = destination_.errorString();
             if (writeError_.isEmpty()) {
-                writeError_ = QCoreApplication::translate(
-                    "ImageExport", "The PNG output could not be written.");
+                writeError_ = QCoreApplication::translate("ImageExport",
+                                                          "The PNG output could not be written.");
             }
         }
         return size;
@@ -251,14 +251,14 @@ QString encode(QIODevice* output, QImage image, const QByteArray& format,
         if (format == "cur" &&
             (options.hotspotX < 0 || options.hotspotY < 0 ||
              options.hotspotX >= targetSize.width() || options.hotspotY >= targetSize.height())) {
-            return QCoreApplication::translate(
-                "ImageExport", "The cursor hotspot must be inside the image.");
+            return QCoreApplication::translate("ImageExport",
+                                               "The cursor hotspot must be inside the image.");
         }
         if (options.iconSize != 0) {
             QImage canvas(targetSize, QImage::Format_ARGB32);
             if (canvas.isNull()) {
-                return QCoreApplication::translate(
-                    "ImageExport", "The icon canvas could not be allocated.");
+                return QCoreApplication::translate("ImageExport",
+                                                   "The icon canvas could not be allocated.");
             }
             canvas.fill(Qt::transparent);
             const QImage scaled = image.scaled(
@@ -292,8 +292,8 @@ QString encode(QIODevice* output, QImage image, const QByteArray& format,
     if (!alpha) {
         QImage flattened(image.size(), QImage::Format_RGB32);
         if (flattened.isNull()) {
-            return QCoreApplication::translate(
-                "ImageExport", "The export raster could not be allocated.");
+            return QCoreApplication::translate("ImageExport",
+                                               "The export raster could not be allocated.");
         }
         flattened.fill(QColor(options.matte));
         QPainter painter(&flattened);
@@ -329,7 +329,8 @@ QString encode(QIODevice* output, QImage image, const QByteArray& format,
         image = indexed(image, options, alpha);
     }
     if (image.isNull()) {
-        return QCoreApplication::translate("ImageExport", "The output pixels could not be allocated.");
+        return QCoreApplication::translate("ImageExport",
+                                           "The output pixels could not be allocated.");
     }
     image.setDotsPerMeterX(dpmX);
     image.setDotsPerMeterY(dpmY);
@@ -346,7 +347,8 @@ QString encode(QIODevice* output, QImage image, const QByteArray& format,
             return writer.errorString();
         }
         if (data.size() < 22) {
-            return QCoreApplication::translate("ImageExport", "The cursor image could not be encoded.");
+            return QCoreApplication::translate("ImageExport",
+                                               "The cursor image could not be encoded.");
         }
         qToLittleEndian<quint16>(2, data.data() + 2);
         qToLittleEndian<quint16>(quint16(options.hotspotX), data.data() + 10);

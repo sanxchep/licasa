@@ -1,6 +1,8 @@
 #include "imaging/image_decode_contract.h"
+#include "imaging/planar_rgb_pack.h"
 
 #include <QColorSpace>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QIODevice>
 #include <QImage>
@@ -296,7 +298,13 @@ class Jp2Handler final : public QImageIOHandler {
         // A compact nearby codestream decodes quickly with one worker and
         // avoids competing with the selected image. Larger compressed inputs
         // still need parallel decode to finish before the next navigation.
-        const int decodeThreads = scaledBudgetValue.isValid() && file->size() < 1024 * 1024 ? 1 : 8;
+        const bool largeFullDecode =
+            !scaledSize_.isValid() &&
+            quint64(sourceSize.width()) * sourceSize.height() >= 25'000'000;
+        const int decodeThreads = scaledBudgetValue.isValid() && file->size() < 1024 * 1024 ? 1
+                                  : largeFullDecode
+                                      ? std::min(16, std::max(1, QThread::idealThreadCount()))
+                                      : 8;
         if (!Licasa::ImageDecodeContract::allows(sourceSize, budget)) {
             return false;
         }
@@ -309,6 +317,25 @@ class Jp2Handler final : public QImageIOHandler {
                (sourceSize.width() >> (reduce + 1)) >= target.width() &&
                (sourceSize.height() >> (reduce + 1)) >= target.height()) {
             ++reduce;
+        }
+        // A larger full decode pool must not crowd out its reduced preview.
+        // The pair owns this marker through the read. A failed/cancelled preview
+        // also releases it; the timeout keeps standalone callers bounded.
+        const auto flag = device()
+                              ->property(Licasa::ImageDecodeContract::previewPresentedProperty)
+                              .value<quintptr>();
+        const auto* previewPresented = reinterpret_cast<const std::atomic_bool*>(flag);
+        if (largeFullDecode && decodeThreads > 8 && previewPresented) {
+            QElapsedTimer previewWait;
+            previewWait.start();
+            while (!previewPresented->load(std::memory_order_acquire) &&
+                   !Licasa::ImageDecodeContract::cancelled(device()) &&
+                   previewWait.elapsed() < 500) {
+                QThread::msleep(1);
+            }
+            if (Licasa::ImageDecodeContract::cancelled(device())) {
+                return false;
+            }
         }
         std::unique_ptr<Decoder> decoder;
         for (int attempt = reduce; attempt >= 0; --attempt) {
@@ -385,30 +412,40 @@ class Jp2Handler final : public QImageIOHandler {
                 }
                 auto* row = reinterpret_cast<QRgb*>(imageBits + qsizetype(y) * stride);
                 const size_t sourceRow = size_t(y) * size_t(width);
-                for (int x = 0; x < width; ++x) {
-                    int r, g, b, a;
-                    if (directEightBit) {
-                        const size_t index = sourceRow + size_t(x);
-                        r = std::clamp(source.comps[0].data[index], 0, 255);
-                        g = source.numcomps == 1 ? r
-                                                 : std::clamp(source.comps[1].data[index], 0, 255);
-                        b = source.numcomps == 1 ? r
-                                                 : std::clamp(source.comps[2].data[index], 0, 255);
-                        a = alpha ? std::clamp(source.comps[3].data[index], 0, 255) : 255;
-                    } else {
-                        r = toByte(source.comps[0], x, y, width, height);
-                        g = source.numcomps == 1 ? r : toByte(source.comps[1], x, y, width, height);
-                        b = source.numcomps == 1 ? r : toByte(source.comps[2], x, y, width, height);
-                        if (source.color_space == OPJ_CLRSPC_SYCC && source.numcomps >= 3) {
-                            const int cb = g - 128;
-                            const int cr = b - 128;
-                            g = std::clamp(r - ((88 * cb + 183 * cr) >> 8), 0, 255);
-                            b = std::clamp(r + ((454 * cb) >> 8), 0, 255);
-                            r = std::clamp(r + ((359 * cr) >> 8), 0, 255);
+                if (directEightBit && source.numcomps == 3) {
+                    Licasa::packRgb8Row(source.comps[0].data + sourceRow,
+                                        source.comps[1].data + sourceRow,
+                                        source.comps[2].data + sourceRow, row, width);
+                } else {
+                    for (int x = 0; x < width; ++x) {
+                        int r, g, b, a;
+                        if (directEightBit) {
+                            const size_t index = sourceRow + size_t(x);
+                            r = std::clamp(source.comps[0].data[index], 0, 255);
+                            g = source.numcomps == 1
+                                    ? r
+                                    : std::clamp(source.comps[1].data[index], 0, 255);
+                            b = source.numcomps == 1
+                                    ? r
+                                    : std::clamp(source.comps[2].data[index], 0, 255);
+                            a = alpha ? std::clamp(source.comps[3].data[index], 0, 255) : 255;
+                        } else {
+                            r = toByte(source.comps[0], x, y, width, height);
+                            g = source.numcomps == 1 ? r
+                                                     : toByte(source.comps[1], x, y, width, height);
+                            b = source.numcomps == 1 ? r
+                                                     : toByte(source.comps[2], x, y, width, height);
+                            if (source.color_space == OPJ_CLRSPC_SYCC && source.numcomps >= 3) {
+                                const int cb = g - 128;
+                                const int cr = b - 128;
+                                g = std::clamp(r - ((88 * cb + 183 * cr) >> 8), 0, 255);
+                                b = std::clamp(r + ((454 * cb) >> 8), 0, 255);
+                                r = std::clamp(r + ((359 * cr) >> 8), 0, 255);
+                            }
+                            a = alpha ? toByte(source.comps[3], x, y, width, height) : 255;
                         }
-                        a = alpha ? toByte(source.comps[3], x, y, width, height) : 255;
+                        row[x] = qRgba(r, g, b, a);
                     }
-                    row[x] = qRgba(r, g, b, a);
                 }
 #if defined(__linux__)
                 if (pageSize > 0 && ((y - first + 1) % 128 == 0 || y + 1 == last)) {

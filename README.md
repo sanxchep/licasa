@@ -19,9 +19,9 @@ Licasa is an image viewer and editor for the Linux desktop inspired by Google's 
 >
 > **Arch users: do this before starting `pacman`.** Follow the [upgrade checklist](#before-updating-an-existing-installation) below.
 
-## Try Licasa
+## Download Licasa
 
-**[Download published releases](https://github.com/sanxchep/licasa/releases)** · [0.9.5 release notes](packaging/release-notes/v0.9.5.md)
+**[Download published releases](https://github.com/sanxchep/licasa/releases)** · [0.9.5 release notes](packaging/release-notes/v0.9.5.md) · [0.9.6 release notes](packaging/release-notes/v0.9.6.md)
 
 - View photos fullscreen or in a floating window, then crop, adjust, and export them.
 - Open JPEG, PNG, TIFF, WebP, HEIC/HEIF, JPEG XL, AVIF, JPEG 2000, and RAW previews.
@@ -319,9 +319,14 @@ cmake --build ./build --target update_translations
 cmake --build ./build --target release_translations
 ```
 
-Edit the `.ts` catalog after updating it; the application loads the catalog that
-matches the system locale at startup. The first catalog is Swedish
-(`licasa_sv.ts`).
+Edit the `.ts` catalog after updating it. In Settings, **Language** offers
+**System default**, **English**, and **Svenska**. The choice is saved and applies
+immediately to open windows. System default follows the computer's UI language,
+with English as the fallback. Native file-dialog controls follow the desktop's
+language; reopen an existing dialog to use updated application labels and filters.
+
+The Swedish catalog (`licasa_sv.ts`) builds on
+[yeager's contribution in PR #7](https://github.com/sanxchep/licasa/pull/7).
 
 ## License
 

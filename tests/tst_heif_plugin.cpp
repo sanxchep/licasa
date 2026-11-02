@@ -21,6 +21,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QtEndian>
 #include <algorithm>
 #include <atomic>
 #include <libheif/heif.h>
@@ -140,6 +141,67 @@ QImage referenceDecode(const QString& path, bool icc = false)
 class HeifPluginTest final : public QObject {
     Q_OBJECT
   private slots:
+    void rejectedCompressedUnitReportsItsActualError_data()
+    {
+        QTest::addColumn<quint32>("nalSize");
+        QTest::addColumn<QString>("expectedError");
+        QTest::newRow("empty") << quint32(0) << QStringLiteral("invalid argument");
+        QTest::newRow("signed-input-overflow")
+            << quint32(0x80000000) << QStringLiteral("decoder input size limit");
+        QTest::newRow("maximum-unsigned-length")
+            << quint32(0xffffffff) << QStringLiteral("decoder input size limit");
+    }
+
+    void rejectedCompressedUnitReportsItsActualError()
+    {
+        QFETCH(quint32, nalSize);
+        QFETCH(QString, expectedError);
+        QByteArray bytes = contents(fixture("with-alpha-512x512.heic"));
+        QVERIFY(!bytes.isEmpty());
+        qsizetype payload = -1;
+        for (qsizetype offset = 0; offset <= bytes.size() - 8;) {
+            const quint32 length = qFromBigEndian<quint32>(bytes.constData() + offset);
+            QVERIFY(length >= 8 && quint64(length) <= quint64(bytes.size() - offset));
+            if (bytes.mid(offset + 4, 4) == "mdat") {
+                payload = offset + 8;
+                break;
+            }
+            offset += length;
+        }
+        QVERIFY(payload >= 0 && payload <= bytes.size() - 4);
+        const quint32 originalLength = qFromBigEndian<quint32>(bytes.constData() + payload);
+        QVERIFY(originalLength >= 2 &&
+                quint64(originalLength) <= quint64(bytes.size() - payload - 4));
+        // Keep a valid container but reject its encoded NAL at input. The
+        // native input rejection must survive the libheif/plugin boundary.
+        qToBigEndian<quint32>(nalSize, bytes.data() + payload);
+        QBuffer buffer(&bytes);
+        QVERIFY(buffer.open(QIODevice::ReadOnly));
+        QImageReader reader(&buffer, "heic");
+        Contract::configure(reader, policy_->maximumImagePixels());
+        QVERIFY(reader.canRead());
+        QVERIFY(reader.read().isNull());
+        QVERIFY2(codecError(reader).contains(expectedError, Qt::CaseInsensitive),
+                 qPrintable(codecError(reader)));
+    }
+
+    void previewHandoffHonorsItsByteLimit()
+    {
+        QImageReader reader(fixture("grid-48mp.heic"));
+        Contract::configure(reader, 100'000'000);
+        reader.device()->setProperty(Contract::retainFullBaseProperty, true);
+        reader.device()->setProperty(Contract::fullBaseByteLimitProperty,
+                                     QVariant::fromValue(quint64(1024)));
+        reader.setScaledSize(QSize(640, 480));
+        const QImage preview = reader.read();
+        QVERIFY2(!preview.isNull(), qPrintable(codecError(reader)));
+        QVERIFY(!reader.device()->property(Contract::decodedFullBaseProperty).isValid());
+        QImageReader reference(fixture("grid-48mp.heic"));
+        Contract::configure(reference, 100'000'000);
+        reference.setScaledSize(QSize(640, 480));
+        QCOMPARE(preview, reference.read());
+    }
+
     void initTestCase()
     {
         QVERIFY(settings_.isValid());
@@ -473,6 +535,32 @@ class HeifPluginTest final : public QObject {
                  QSize(1600, 1200));
         QCOMPARE(reader.device()->property("_licasaNativeRasterPixels").toULongLong(),
                  quint64(1600 * 1200));
+        QVERIFY(!reader.device()->property(Contract::decodedFullBaseProperty).isValid());
+    }
+
+    void nearSizeThumbnailHasBoundedExpansion_data()
+    {
+        QTest::addColumn<QSize>("target");
+        QTest::addColumn<bool>("usesThumbnail");
+        QTest::newRow("near-viewport") << QSize(1608, 1206) << true;
+        QTest::newRow("one-percent-boundary") << QSize(1616, 1212) << true;
+        QTest::newRow("outside-expansion-budget") << QSize(1617, 1213) << false;
+    }
+
+    void nearSizeThumbnailHasBoundedExpansion()
+    {
+        QFETCH(QSize, target);
+        QFETCH(bool, usesThumbnail);
+        QImageReader reader(fixture("grid-48mp-preview.heic"));
+        Contract::configure(reader, 2'000'000);
+        reader.device()->setProperty(Contract::retainFullBaseProperty, true);
+        reader.setScaledSize(target);
+        const auto image = reader.read();
+        QVERIFY2(!image.isNull(), qPrintable(codecError(reader)));
+        QCOMPARE(image.size(), target);
+        QCOMPARE(reader.text("PreviewPath").contains("embedded thumbnail"), usesThumbnail);
+        QCOMPARE(reader.device()->property("_licasaNativeRasterPixels").toULongLong(),
+                 usesThumbnail ? quint64(1600 * 1200) : quint64(512 * 512));
         QVERIFY(!reader.device()->property(Contract::decodedFullBaseProperty).isValid());
     }
 

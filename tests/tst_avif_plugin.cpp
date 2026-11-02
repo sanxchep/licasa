@@ -145,6 +145,23 @@ QImage decodeBytes(QByteArray data, quint64 pixelLimit, QString* error = nullptr
 class AvifPluginTest final : public QObject {
     Q_OBJECT
   private slots:
+    void previewHandoffHonorsItsByteLimit()
+    {
+        QImageReader reader(fixture("uhd-4k-3840x2160.avif"));
+        Contract::configure(reader, 100'000'000);
+        reader.device()->setProperty(Contract::retainFullBaseProperty, true);
+        reader.device()->setProperty(Contract::fullBaseByteLimitProperty,
+                                     QVariant::fromValue(quint64(1024)));
+        reader.setScaledSize(QSize(640, 480));
+        const QImage preview = reader.read();
+        QVERIFY2(!preview.isNull(), qPrintable(codecError(reader)));
+        QVERIFY(!reader.device()->property(Contract::decodedFullBaseProperty).isValid());
+        QImageReader reference(fixture("uhd-4k-3840x2160.avif"));
+        Contract::configure(reference, 100'000'000);
+        reference.setScaledSize(QSize(640, 480));
+        QCOMPARE(preview, reference.read());
+    }
+
     void initTestCase()
     {
         QVERIFY(settings_.isValid());

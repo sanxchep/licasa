@@ -41,6 +41,21 @@ class CTestSchedulingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing"):
             require_isolated_tests({"tests": []}, ["raw-heartbeat"])
 
+    def test_each_enabled_decoder_must_be_isolated(self):
+        names = ["licasa_raw_tests", "licasa_jxl_tests", "licasa_async_image_provider_tests"]
+        manifest = {"tests": [{"name": name, "properties": [{"name": "RUN_SERIAL", "value": True}]}
+                              for name in names]}
+        require_isolated_tests(manifest, names)
+        for test in manifest["tests"]:
+            properties = test.pop("properties")
+            with self.subTest(test=test["name"]), self.assertRaisesRegex(ValueError, test["name"]):
+                require_isolated_tests(manifest, names)
+            test["properties"] = properties
+
+    def test_disabled_optional_codecs_are_not_required(self):
+        require_isolated_tests({"tests": [{"name": "async", "properties": [
+            {"name": "RUN_SERIAL", "value": True}]}]}, ["async"])
+
     def test_graph_inspection_preserves_the_active_ctest_log(self):
         with tempfile.TemporaryDirectory() as temporary:
             build = Path(temporary)

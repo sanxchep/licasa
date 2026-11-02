@@ -546,7 +546,7 @@ class AvifHandler final : public QImageIOHandler {
             if (!sequencePresent_ && device() &&
                 device()->property(Contract::retainFullBaseProperty).toBool() &&
                 image.sizeInBytes() > 0 &&
-                quint64(image.sizeInBytes()) <= Contract::maximumDecodedBaseCacheBytes) {
+                quint64(image.sizeInBytes()) <= Contract::fullBaseByteLimit(device())) {
                 // AVIF has already decoded the complete RGB raster for this
                 // preview. Share it with the provider's full-detail cache.
                 device()->setProperty(Contract::decodedFullBaseProperty,

@@ -1,4 +1,7 @@
 #include "../src/imaging/image_decode_contract.h"
+#include "../src/imaging/parallel_smooth_scale.h"
+#include "../src/imaging/planar_rgb_pack.h"
+#include <limits>
 
 #include <QDir>
 #include <QFile>
@@ -19,6 +22,61 @@ class ExtraImageReadersTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void rgbPackingPreservesSaturationAndOddWidth()
+    {
+        const int32_t red[] = {
+            std::numeric_limits<int32_t>::min(), -1, 0, 1, 127, 128, 254, 255, 256,
+            std::numeric_limits<int32_t>::max(), 42};
+        const int32_t green[] = {255, 254, 128, 127, 1, 0, -1, 256, 42, 12, 90};
+        const int32_t blue[] = {12, 34, 56, 78, 90, 123, 145, 167, 189, 210, 255};
+        QRgb actual[11];
+        Licasa::packRgb8Row(red, green, blue, actual, 11);
+        for (int i = 0; i < 11; ++i) {
+            QCOMPARE(
+                QColor::fromRgb(actual[i]),
+                QColor(qBound(0, red[i], 255), qBound(0, green[i], 255), qBound(0, blue[i], 255)));
+        }
+    }
+
+    void parallelNativePreviewPreservesColorAndTransparency_data()
+    {
+        QTest::addColumn<QImage::Format>("format");
+        QTest::newRow("rgb32") << QImage::Format_RGB32;
+        QTest::newRow("argb32") << QImage::Format_ARGB32;
+        QTest::newRow("premultiplied") << QImage::Format_ARGB32_Premultiplied;
+    }
+
+    void parallelNativePreviewPreservesColorAndTransparency()
+    {
+        QFETCH(QImage::Format, format);
+        QImage source(4096, 4096, QImage::Format_ARGB32);
+        QVERIFY(!source.isNull());
+        for (int y = 0; y < source.height(); ++y) {
+            auto* row = reinterpret_cast<QRgb*>(source.scanLine(y));
+            for (int x = 0; x < source.width(); ++x) {
+                row[x] = qRgba(x % 256, y % 256, (x + y) % 256, (x / 7 + y / 9) % 256);
+            }
+        }
+        source = source.convertToFormat(format);
+        source.setColorSpace(QColorSpace::SRgb);
+        const QSize target(512, 512);
+        const QImage expected =
+            source.scaled(target, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        const QImage actual = Licasa::parallelSmoothScale(source, target);
+        QCOMPARE(actual.size(), expected.size());
+        QCOMPARE(actual.format(), expected.format());
+        QCOMPARE(actual.colorSpace(), source.colorSpace());
+        for (int y = 0; y < target.height(); ++y) {
+            for (int x = 0; x < target.width(); ++x) {
+                const QRgb a = actual.pixel(x, y), b = expected.pixel(x, y);
+                QVERIFY(qAbs(qRed(a) - qRed(b)) <= 1);
+                QVERIFY(qAbs(qGreen(a) - qGreen(b)) <= 1);
+                QVERIFY(qAbs(qBlue(a) - qBlue(b)) <= 1);
+                QVERIFY(qAbs(qAlpha(a) - qAlpha(b)) <= 1);
+            }
+        }
+    }
+
     void oversizedJp2SourceIsRejectedBeforeDecode()
     {
 #ifdef LICASA_TEST_JP2

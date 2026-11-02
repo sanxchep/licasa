@@ -56,18 +56,24 @@ bool ImageSaveService::save(const QUrl& sourceUrl, const QUrl& destinationUrl,
                             QObject* requestOwner, const QString& expectedSourceVersion)
 {
     if (busy_) {
-        emit saveFailed(sourceUrl, QCoreApplication::translate("ImageSaveService", "Another image is still being saved."),
-                        requestOwner);
+        emit saveFailed(
+            sourceUrl,
+            QCoreApplication::translate("ImageSaveService", "Another image is still being saved."),
+            requestOwner);
         return false;
     }
     if (!sourceUrl.isValid() || !sourceUrl.isLocalFile()) {
-        emit saveFailed(sourceUrl, QCoreApplication::translate("ImageSaveService", "The original image is not a local file."),
+        emit saveFailed(sourceUrl,
+                        QCoreApplication::translate("ImageSaveService",
+                                                    "The original image is not a local file."),
                         requestOwner);
         return false;
     }
     if (!destinationUrl.isValid() || !destinationUrl.isLocalFile()) {
-        emit saveFailed(sourceUrl, QCoreApplication::translate("ImageSaveService", "Choose a local destination file."),
-                        requestOwner);
+        emit saveFailed(
+            sourceUrl,
+            QCoreApplication::translate("ImageSaveService", "Choose a local destination file."),
+            requestOwner);
         return false;
     }
 
@@ -87,9 +93,11 @@ bool ImageSaveService::save(const QUrl& sourceUrl, const QUrl& destinationUrl,
     }
     if (!expectedSourceVersion.isEmpty() &&
         versionToken(*sourceIdentity) != expectedSourceVersion) {
-        emit saveFailed(sourceUrl,
-                        QCoreApplication::translate("ImageSaveService", "The original image changed. Reopen it before saving."),
-                        requestOwner);
+        emit saveFailed(
+            sourceUrl,
+            QCoreApplication::translate("ImageSaveService",
+                                        "The original image changed. Reopen it before saving."),
+            requestOwner);
         return false;
     }
 
@@ -123,7 +131,8 @@ void ImageSaveService::estimateSize(const QUrl& sourceUrl, int requestId,
 {
     if (!sourceUrl.isValid() || !sourceUrl.isLocalFile()) {
         emit sizeEstimateReady(sourceUrl, requestId, -1,
-                               QCoreApplication::translate("ImageSaveService", "The original image is not a local file."),
+                               QCoreApplication::translate(
+                                   "ImageSaveService", "The original image is not a local file."),
                                requestOwner);
         return;
     }
@@ -207,23 +216,31 @@ bool ImageSaveService::saveFrameCopy(const QUrl& sourceUrl, const QUrl& destinat
                                      QObject* requestOwner)
 {
     if (busy_) {
-        emit frameSaveFailed(sourceUrl, QCoreApplication::translate("ImageSaveService", "Another image is still being saved."),
-                             requestOwner);
+        emit frameSaveFailed(
+            sourceUrl,
+            QCoreApplication::translate("ImageSaveService", "Another image is still being saved."),
+            requestOwner);
         return false;
     }
     if (!sourceUrl.isValid() || !sourceUrl.isLocalFile()) {
-        emit frameSaveFailed(sourceUrl, QCoreApplication::translate("ImageSaveService", "The Motion Photo is not a local file."),
+        emit frameSaveFailed(sourceUrl,
+                             QCoreApplication::translate("ImageSaveService",
+                                                         "The Motion Photo is not a local file."),
                              requestOwner);
         return false;
     }
     if (!destinationUrl.isValid() || !destinationUrl.isLocalFile()) {
-        emit frameSaveFailed(sourceUrl, QCoreApplication::translate("ImageSaveService", "Choose a local destination file."),
-                             requestOwner);
+        emit frameSaveFailed(
+            sourceUrl,
+            QCoreApplication::translate("ImageSaveService", "Choose a local destination file."),
+            requestOwner);
         return false;
     }
     if (!frame.isValid()) {
-        emit frameSaveFailed(
-            sourceUrl, QCoreApplication::translate("ImageSaveService", "No decoded Motion Photo frame is available."), requestOwner);
+        emit frameSaveFailed(sourceUrl,
+                             QCoreApplication::translate(
+                                 "ImageSaveService", "No decoded Motion Photo frame is available."),
+                             requestOwner);
         return false;
     }
 

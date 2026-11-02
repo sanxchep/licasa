@@ -117,11 +117,7 @@ FormatSupport::FormatSupport(QObject* parent) : QObject(parent)
                   return left.localeAwareCompare(right) < 0;
               });
 
-    if (!allPatterns.isEmpty()) {
-        nameFilters_ << QCoreApplication::translate("FormatSupport", "Images (%1)")
-                            .arg(allPatterns.join(' '));
-    }
-    nameFilters_ << QCoreApplication::translate("FormatSupport", "All Files (*)");
+    readablePatterns_ = allPatterns.join(' ');
 
     QSet<QString> writablePatterns;
     const QList<QByteArray> writableFormats = QImageWriter::supportedImageFormats();
@@ -135,6 +131,25 @@ FormatSupport::FormatSupport(QObject* parent) : QObject(parent)
         }
     }
 
+    QStringList allWritablePatterns = writablePatterns.values();
+    std::sort(allWritablePatterns.begin(), allWritablePatterns.end(),
+              [](const QString& left, const QString& right) {
+                  return left.localeAwareCompare(right) < 0;
+              });
+    writablePatterns_ = allWritablePatterns.join(' ');
+    retranslate();
+}
+
+void FormatSupport::retranslate()
+{
+    nameFilters_.clear();
+    saveNameFilters_.clear();
+    allWritableNameFilter_.clear();
+    if (!readablePatterns_.isEmpty()) {
+        nameFilters_
+            << QCoreApplication::translate("FormatSupport", "Images (%1)").arg(readablePatterns_);
+    }
+    nameFilters_ << QCoreApplication::translate("FormatSupport", "All Files (*)");
     for (const auto& entry : ImageExport::formats()) {
         const auto item = entry.toMap();
         const QString key = item.value(QStringLiteral("key")).toString();
@@ -149,17 +164,13 @@ FormatSupport::FormatSupport(QObject* parent) : QObject(parent)
                                 .arg(item.value(QStringLiteral("label")).toString(), extensions);
     }
 
-    QStringList allWritablePatterns = writablePatterns.values();
-    std::sort(allWritablePatterns.begin(), allWritablePatterns.end(),
-              [](const QString& left, const QString& right) {
-                  return left.localeAwareCompare(right) < 0;
-              });
-    if (!allWritablePatterns.isEmpty()) {
+    if (!writablePatterns_.isEmpty()) {
         allWritableNameFilter_ =
             QCoreApplication::translate("FormatSupport", "All writable images (%1)")
-                .arg(allWritablePatterns.join(' '));
+                .arg(writablePatterns_);
         saveNameFilters_ << allWritableNameFilter_;
     }
+    emit filtersChanged();
 }
 
 FormatSupport::~FormatSupport()

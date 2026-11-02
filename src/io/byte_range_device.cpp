@@ -56,7 +56,8 @@ bool ByteRangeDevice::open(OpenMode mode)
     }
     if (declaredOffset_ > quint64(std::numeric_limits<qint64>::max()) ||
         declaredLength_ > quint64(std::numeric_limits<qint64>::max())) {
-        fail(QCoreApplication::translate("ByteRangeDevice", "Byte range exceeds seekable file limits"));
+        fail(QCoreApplication::translate("ByteRangeDevice",
+                                         "Byte range exceeds seekable file limits"));
         return false;
     }
     if (!source_.open(QIODevice::ReadOnly)) {
@@ -66,7 +67,8 @@ bool ByteRangeDevice::open(OpenMode mode)
     const qint64 signedSize = source_.size();
     if (signedSize < 0 ||
         !checkedByteRange(quint64(signedSize), declaredOffset_, declaredLength_)) {
-        fail(QCoreApplication::translate("ByteRangeDevice", "Byte range lies outside the source file"));
+        fail(QCoreApplication::translate("ByteRangeDevice",
+                                         "Byte range lies outside the source file"));
         source_.close();
         return false;
     }
@@ -178,7 +180,8 @@ qint64 ByteRangeDevice::readData(char* data, qint64 maximumSize)
     const qint64 received = source_.read(data, requested);
     if (received != requested) {
         fail(received < 0 ? source_.errorString()
-                          : QCoreApplication::translate("ByteRangeDevice", "Source file changed during byte-range read"));
+                          : QCoreApplication::translate(
+                                "ByteRangeDevice", "Source file changed during byte-range read"));
         return -1;
     }
 
@@ -210,8 +213,8 @@ bool ByteRangeDevice::validateCurrentSource(QString* reason) const
     };
     const auto truncated = [reason]() {
         if (reason) {
-            *reason = QCoreApplication::translate(
-                "ByteRangeDevice", "Source file was truncated below the byte range");
+            *reason = QCoreApplication::translate("ByteRangeDevice",
+                                                  "Source file was truncated below the byte range");
         }
         return false;
     };

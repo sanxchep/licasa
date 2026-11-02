@@ -156,7 +156,7 @@ jobs:
     needs: [preflight, stage_candidate]
     runs-on: ubuntu-24.04
     environment: snap-beta
-    timeout-minutes: 45
+    timeout-minutes: 75
     outputs:
       revision: ${{ steps.verify.outputs.revision }}
     steps:
@@ -180,15 +180,21 @@ jobs:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          sudo snap install snapcraft --classic
-          snapcraft upload "dist/snap/licasa_${VERSION}_amd64.snap" --release=edge
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/1.json -- sudo snap install snapcraft --classic
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/2.json -- snapcraft upload "dist/snap/licasa_${VERSION}_amd64.snap" --release=edge
       - name: Verify the Store's edge revision
         id: verify
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           sudo snap set system experimental.user-daemons=false
-          sudo snap install --channel=edge licasa
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/3.json -- sudo snap install --channel=edge licasa
           for ((attempt = 1; attempt <= 10; attempt++)); do
             installed_version="$(snap list licasa | awk 'NR == 2 {print $2}')"
             source_file=/snap/licasa/current/usr/share/licasa/source-commit
@@ -198,7 +204,9 @@ jobs:
               break
             fi
             sleep 20
-            sudo snap refresh --channel=edge licasa
+            python3 tools/retry_snap_store.py \
+              --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+              --report build/snap-store-retries/4-${attempt}.json -- sudo snap refresh --channel=edge licasa
           done
           python3 tools/verify_snap_install.py --version "$VERSION" \
             --source-sha "$GITHUB_SHA" \
@@ -214,6 +222,14 @@ jobs:
           name: licasa-store-snap-smoke
           path: build/qualification/snap-edge-smoke.json
           if-no-files-found: error
+      - name: Retain Snap Store retry diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snap-store-retries-snapcraft-build-upload_snap_edge
+          path: build/snap-store-retries/
+          if-no-files-found: ignore
+          retention-days: 7
 
   github_prerelease:
     needs: [preflight, stage_candidate, upload_snap_edge]

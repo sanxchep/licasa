@@ -420,8 +420,13 @@ class HeifHandler final : public QImageIOHandler {
         // budget is intentionally tiny. Keep that parse bounded independently;
         // read() still rejects an over-budget target before libheif decodes pixels.
         const quint64 workBudget = std::max<quint64>(metadataBudget, rasterWorkBudget);
-        limits.max_total_memory = std::min<uint64_t>(limits.max_total_memory, workBudget);
-        limits.max_memory_block_size = std::min<uint64_t>(limits.max_memory_block_size, workBudget);
+        // libheif represents an unlimited setting with zero. The viewer's
+        // explicit budget must remain finite even in a hostile environment.
+        const auto boundedMemory = [workBudget](uint64_t current) {
+            return current == 0 ? workBudget : std::min<uint64_t>(current, workBudget);
+        };
+        limits.max_total_memory = boundedMemory(limits.max_total_memory);
+        limits.max_memory_block_size = boundedMemory(limits.max_memory_block_size);
         limits.max_sequence_frames =
             std::min<uint32_t>(limits.max_sequence_frames, maximumSequenceFrames);
         auto error = heif_context_set_security_limits(context_.get(), &limits);
@@ -676,6 +681,7 @@ class HeifHandler final : public QImageIOHandler {
         heif_item_id ids[64]{};
         const int count = heif_image_handle_get_list_of_thumbnail_IDs(handle_.get(), ids, 64);
         quint64 chosenPixels = std::numeric_limits<quint64>::max();
+        bool chosenMeetsTarget = false;
         for (int index = 0; index < count && index < 64; ++index) {
             heif_image_handle* pointer = nullptr;
             const auto error = heif_image_handle_get_thumbnail(handle_.get(), ids[index], &pointer);
@@ -685,8 +691,13 @@ class HeifHandler final : public QImageIOHandler {
             }
             const QSize size(heif_image_handle_get_width(item.get()),
                              heif_image_handle_get_height(item.get()));
-            if (!Contract::allows(size, pixelBudget_) || size.width() < target.width() ||
-                size.height() < target.height()) {
+            // A viewport request can exceed a standard thumbnail by only a
+            // few pixels (1032 vs 1024). Permit at most 1% temporary expansion
+            // on either axis rather than decoding the whole primary again.
+            // Prefer a thumbnail meeting the target when one is available.
+            if (!Contract::allows(size, pixelBudget_) ||
+                qint64(target.width()) * 100 > qint64(size.width()) * 101 ||
+                qint64(target.height()) * 100 > qint64(size.height()) * 101) {
                 continue;
             }
             // Do not stretch a thumbnail with a different crop/aspect ratio.
@@ -696,8 +707,12 @@ class HeifHandler final : public QImageIOHandler {
                 continue;
             }
             const quint64 pixels = quint64(size.width()) * size.height();
-            if (pixels < chosenPixels) {
+            const bool meetsTarget =
+                size.width() >= target.width() && size.height() >= target.height();
+            if (!chosen || (meetsTarget && !chosenMeetsTarget) ||
+                (meetsTarget == chosenMeetsTarget && pixels < chosenPixels)) {
                 chosenPixels = pixels;
+                chosenMeetsTarget = meetsTarget;
                 chosen = std::move(item);
             }
         }
@@ -783,7 +798,8 @@ class HeifHandler final : public QImageIOHandler {
         }
         if (target != native && handle == handle_.get() && device() &&
             device()->property(Contract::retainFullBaseProperty).toBool() &&
-            image.sizeInBytes() > 0 && image.sizeInBytes() <= 256 * 1024 * 1024) {
+            image.sizeInBytes() > 0 &&
+            quint64(image.sizeInBytes()) <= Contract::fullBaseByteLimit(device())) {
             // libde265 has already produced the full raster. Share it with the
             // provider before scaling the preview so full-detail promotion
             // does not decode the same HEIF a second time.

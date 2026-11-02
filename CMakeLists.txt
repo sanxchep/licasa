@@ -5,10 +5,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Licasa
-        VERSION 0.9.5
+        VERSION 0.9.6
         LANGUAGES CXX
 )
-set(LICASA_RELEASE_DATE "2026-10-29")
+set(LICASA_RELEASE_DATE "2026-11-01")
 
 # Qt 6 requires C++17 or newer.
 set(CMAKE_CXX_STANDARD 17)
@@ -355,7 +355,7 @@ endif()
 # A working-source receipt complements the exact executable generation hash.
 # Include package and test inputs; documentation and build caches are separate.
 file(GLOB_RECURSE LICASA_RECEIPT_INPUTS CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
-        src/* qml/* cmake/* packaging/* snap/* tools/* tests/* .github/*)
+        src/* qml/* translations/* cmake/* packaging/* snap/* tools/* tests/* .github/*)
 list(APPEND LICASA_RECEIPT_INPUTS CMakeLists.txt CMakePresets.json)
 list(SORT LICASA_RECEIPT_INPUTS)
 set(LICASA_RECEIPT_CONTENT "")
@@ -380,6 +380,8 @@ licasa_enable_warnings(licasa_lifecycle_platform)
 install(PROGRAMS tools/lifecycle_update.py DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/licasa")
 
 add_library(licasa_image_services STATIC
+        src/app/language_manager.cpp
+        src/app/language_manager.h
         src/app/application_settings.cpp
         src/app/application_settings.h
         src/imaging/image_edit_pipeline.cpp
@@ -407,11 +409,25 @@ add_library(licasa_image_services STATIC
         src/imaging/preview_decode_support.h
         src/imaging/fast_pnm_preview.cpp
         src/imaging/fast_pnm_preview.h
+        src/imaging/fast_xpm_decode.cpp
+        src/imaging/fast_xpm_decode.h
         src/imaging/image_processing.cpp
         src/imaging/image_processing.h)
 target_include_directories(licasa_image_services PUBLIC src)
 target_link_libraries(licasa_image_services PUBLIC Qt6::Quick licasa_lifecycle_platform)
 find_package(PkgConfig QUIET)
+option(LICASA_ENABLE_FAST_SVGZ_INPUT "Use optional bounded SVGZ decompression" ON)
+if(PkgConfig_FOUND AND LICASA_ENABLE_FAST_SVGZ_INPUT)
+    pkg_check_modules(LICASA_DEFLATE QUIET IMPORTED_TARGET libdeflate>=1.8)
+endif()
+if(LICASA_DEFLATE_FOUND AND LICASA_ENABLE_FAST_SVGZ_INPUT)
+    set(LICASA_HAVE_FAST_SVGZ_INPUT TRUE)
+    target_sources(licasa_image_services PRIVATE
+            src/imaging/fast_svgz_input.cpp
+            src/imaging/fast_svgz_input.h)
+    target_link_libraries(licasa_image_services PUBLIC PkgConfig::LICASA_DEFLATE)
+    target_compile_definitions(licasa_image_services PRIVATE LICASA_HAVE_FAST_SVGZ_INPUT=1)
+endif()
 if(PkgConfig_FOUND)
     pkg_check_modules(LICASA_WEBP QUIET IMPORTED_TARGET libwebp)
 endif()
@@ -639,7 +655,9 @@ function(licasa_add_qml target_name)
             qml/AnimationExportDialog.qml
             qml/TemporalExportCoordinator.qml
             qml/FullscreenSideMenu.qml
+            qml/FullscreenSettingsContent.qml
             qml/EditorSidePanel.qml
+            qml/EditorPanelContent.qml
             qml/EditorAdjustContent.qml
             qml/EditorCropContent.qml
             qml/EditorExportContent.qml
@@ -681,11 +699,22 @@ function(licasa_add_qml target_name)
     )
 endfunction()
 licasa_add_qml(licasa)
-qt_add_translations(licasa
+# Explicit source collection and the separate Linguist commands also work on
+# Qt 6.4, including strings in services and the lazily loaded QML contents.
+file(GLOB_RECURSE LICASA_TRANSLATION_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.qml" "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.js")
+qt_add_lupdate(licasa_image_services
         TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/translations/licasa_sv.ts"
-        RESOURCE_PREFIX "/i18n"
-        LUPDATE_TARGET update_translations
-        LRELEASE_TARGET release_translations)
+        SOURCES ${LICASA_TRANSLATION_SOURCES}
+        OPTIONS -no-obsolete -locations relative)
+qt_add_lrelease(licasa_image_services
+        TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/translations/licasa_sv.ts"
+        QM_FILES_OUTPUT_VARIABLE LICASA_TRANSLATION_CATALOGS
+        OPTIONS -nounfinished)
+qt_add_resources(licasa_image_services "licasa_translations"
+        PREFIX "/i18n" BASE "${CMAKE_CURRENT_BINARY_DIR}"
+        FILES ${LICASA_TRANSLATION_CATALOGS})
 qt_add_resources(licasa "licasa_app_icon" PREFIX "/" FILES assets/licasa.png)
 configure_file(assets/licasa-4096x4096.png
         generated/default-image/licasa-4096x4096.png COPYONLY)

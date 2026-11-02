@@ -14,6 +14,21 @@ set(LICASA_AVIF_TEST_TARGETS)
 set(LICASA_APNG_TEST_TARGETS)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+add_test(NAME licasa_translation_catalog
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_translations.py
+        --lupdate $<TARGET_FILE:Qt6::lupdate>)
+set_tests_properties(licasa_translation_catalog PROPERTIES TIMEOUT 75 LABELS "core;localization;packaging")
+
+add_executable(licasa_language_tests tests/tst_language_manager.cpp)
+target_compile_definitions(licasa_language_tests PRIVATE LICASA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(licasa_language_tests PRIVATE licasa_image_services Qt6::Test)
+licasa_enable_warnings(licasa_language_tests)
+list(APPEND LICASA_TEST_TARGETS licasa_language_tests)
+list(APPEND LICASA_CORE_TEST_TARGETS licasa_language_tests)
+add_test(NAME licasa_language_tests COMMAND licasa_language_tests -platform offscreen)
+set_tests_properties(licasa_language_tests PROPERTIES TIMEOUT 30 LABELS "core;localization;fast")
+
 add_test(NAME licasa_offline_source_tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_offline_sources.py")
 set_tests_properties(licasa_offline_source_tests PROPERTIES
@@ -354,7 +369,9 @@ if(LICASA_ENABLE_RAW)
     add_test(NAME licasa_raw_hostile_environment COMMAND licasa_raw_tests -platform offscreen
             oversizedSensorKeepsPreview malformedPreviewsAndMetadata boundedStreamArithmetic)
     set_tests_properties(licasa_raw_hostile_environment PROPERTIES ENVIRONMENT "QT_IMAGEIO_MAXALLOC=0")
-    set_tests_properties(licasa_raw_tests PROPERTIES TIMEOUT 120 LABELS "codec;raw;fast")
+    # The cancellation deadline measures this decoder, not competition from
+    # unrelated multithreaded codec/QML tests on a small sanitizer runner.
+    set_tests_properties(licasa_raw_tests PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE LABELS "codec;raw;fast")
     set_tests_properties(licasa_raw_hostile_environment PROPERTIES
             TIMEOUT 120 LABELS "codec;raw;security")
 endif()
@@ -434,7 +451,7 @@ if(LICASA_ENABLE_JXL)
     add_test(NAME licasa_jxl_hostile_environment COMMAND licasa_jxl_tests -platform offscreen
             metadataAndOversizedAdmission embeddedPreviewSkipsPrimary malformedAndAllocationFailures)
     set_tests_properties(licasa_jxl_hostile_environment PROPERTIES ENVIRONMENT "QT_IMAGEIO_MAXALLOC=0")
-    set_tests_properties(licasa_jxl_tests PROPERTIES TIMEOUT 150 LABELS "codec;jxl;fast")
+    set_tests_properties(licasa_jxl_tests PROPERTIES TIMEOUT 150 RUN_SERIAL TRUE LABELS "codec;jxl;fast")
     set_tests_properties(licasa_jxl_hostile_environment PROPERTIES
             TIMEOUT 150 LABELS "codec;jxl;security")
     add_executable(licasa_animation_tests
@@ -472,7 +489,8 @@ if(LICASA_ENABLE_HEIF)
     list(APPEND LICASA_TEST_TARGETS licasa_heif_tests)
     add_test(NAME licasa_heif_tests COMMAND licasa_heif_tests -platform offscreen)
     add_test(NAME licasa_heif_hostile_environment COMMAND licasa_heif_tests -platform offscreen
-            oversizedGridUsesSmallTiles embeddedPreviewAvoidsPrimaryRaster malformedInputs)
+            oversizedGridUsesSmallTiles embeddedPreviewAvoidsPrimaryRaster malformedInputs
+            rejectedCompressedUnitReportsItsActualError)
     set_tests_properties(licasa_heif_hostile_environment PROPERTIES
             ENVIRONMENT "LIBHEIF_SECURITY_LIMITS=off;QT_IMAGEIO_MAXALLOC=0")
     set_tests_properties(licasa_heif_tests PROPERTIES TIMEOUT 90 LABELS "codec;heif;fast")
@@ -560,6 +578,10 @@ set_tests_properties(licasa_qml_tests PROPERTIES
 )
 add_executable(licasa_async_image_provider_tests tests/tst_async_image_provider.cpp)
 target_link_libraries(licasa_async_image_provider_tests PRIVATE licasa_image_services Qt6::Test)
+if(LICASA_HAVE_FAST_SVGZ_INPUT)
+    target_compile_definitions(licasa_async_image_provider_tests PRIVATE
+            LICASA_HAVE_FAST_SVGZ_INPUT=1)
+endif()
 if(LICASA_HAVE_FAST_TIFF_PREVIEW)
     target_compile_definitions(licasa_async_image_provider_tests PRIVATE
             LICASA_HAVE_FAST_TIFF_PREVIEW=1)
@@ -578,7 +600,35 @@ list(APPEND LICASA_CORE_TEST_TARGETS licasa_async_image_provider_tests)
 add_test(NAME licasa_async_image_provider_tests
         COMMAND licasa_async_image_provider_tests -platform offscreen)
 set_tests_properties(licasa_async_image_provider_tests PROPERTIES
-        TIMEOUT 15 LABELS "core;async;lifecycle;fast")
+        TIMEOUT 15 RUN_SERIAL TRUE LABELS "core;async;lifecycle;fast")
+
+# Preserve the original deadlines and assertions while guarding actual CTest
+# isolation. The rest of the registry continues to use parallel scheduling.
+set(LICASA_DECODE_ISOLATION_ARGUMENTS --isolated-test licasa_async_image_provider_tests)
+foreach(test_name licasa_raw_tests licasa_jxl_tests)
+    if(TEST ${test_name})
+        list(APPEND LICASA_DECODE_ISOLATION_ARGUMENTS --isolated-test ${test_name})
+    endif()
+endforeach()
+add_test(NAME licasa_decode_test_scheduling
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ctest_scheduling.py
+        --build-dir ${CMAKE_CURRENT_BINARY_DIR} --ctest ${CMAKE_CTEST_COMMAND}
+        ${LICASA_DECODE_ISOLATION_ARGUMENTS})
+set_tests_properties(licasa_decode_test_scheduling PROPERTIES
+        TIMEOUT 20 LABELS "core;packaging;scheduling;fast")
+
+# Large-raster handoff checks have their own deadline; keep the provider's
+# existing fast/ownership suite and its 15-second budget unchanged.
+if(LICASA_HAVE_FAST_PNG_PREVIEW)
+    add_executable(licasa_preview_handoff_tests tests/tst_preview_handoff.cpp)
+    target_link_libraries(licasa_preview_handoff_tests PRIVATE licasa_image_services Qt6::Test)
+    licasa_enable_warnings(licasa_preview_handoff_tests)
+    list(APPEND LICASA_TEST_TARGETS licasa_preview_handoff_tests)
+    list(APPEND LICASA_CORE_TEST_TARGETS licasa_preview_handoff_tests)
+    add_test(NAME licasa_preview_handoff_tests COMMAND licasa_preview_handoff_tests -platform offscreen)
+    set_tests_properties(licasa_preview_handoff_tests PROPERTIES
+            TIMEOUT 30 LABELS "core;codec;preview;lifecycle")
+endif()
 
 add_executable(licasa_fast_pnm_preview_tests tests/tst_fast_pnm_preview.cpp
         src/imaging/fast_pnm_preview.cpp src/imaging/fast_pnm_preview.h)

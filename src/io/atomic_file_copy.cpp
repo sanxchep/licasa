@@ -1,7 +1,7 @@
 #include "io/atomic_file_copy.h"
 
-#include <QDir>
 #include <QCoreApplication>
+#include <QDir>
 #include <QFileInfo>
 #include <QSaveFile>
 
@@ -40,7 +40,8 @@ QString copyFileRangeAtomically(QFile& source, const ExternalFileIdentity& ident
         return changedError;
     }
     if (!checkedByteRange(identity.size, range.offset, range.length)) {
-        return QCoreApplication::translate("AtomicFileCopy", "The export range no longer fits the source file.");
+        return QCoreApplication::translate("AtomicFileCopy",
+                                           "The export range no longer fits the source file.");
     }
     if (destinationAliasesSource(destinationPath, source.fileName(), identity)) {
         return QCoreApplication::translate(
@@ -68,9 +69,9 @@ QString copyFileRangeAtomically(QFile& source, const ExternalFileIdentity& ident
         if (output.write(buffer.data(), request) != request) {
             const QString error = output.errorString();
             output.cancelWriting();
-            return error.isEmpty()
-                       ? QCoreApplication::translate("AtomicFileCopy", "Unable to write the export.")
-                       : error;
+            return error.isEmpty() ? QCoreApplication::translate("AtomicFileCopy",
+                                                                 "Unable to write the export.")
+                                   : error;
         }
         remaining -= quint64(request);
     }

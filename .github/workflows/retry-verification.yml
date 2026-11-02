@@ -93,7 +93,7 @@ jobs:
     needs: plan
     if: ${{ needs.plan.outputs.desktops != '[]' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -125,7 +125,9 @@ jobs:
           esac
           (cd build/candidate-packages/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
           sudo snap set system experimental.user-daemons=false
-          sudo snap install --dangerous "build/candidate-packages/snap/licasa_${VERSION}_amd64.snap"
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/1.json -- sudo snap install --dangerous "build/candidate-packages/snap/licasa_${VERSION}_amd64.snap"
           python3 tools/verify_snap_install.py --version "$VERSION" --source-sha "$SOURCE_SHA" \
             --output build/candidate-install.json
       - name: Retry the failed desktop contract with retained evidence
@@ -145,6 +147,14 @@ jobs:
           path: build/candidate-reports/
           retention-days: 90
           if-no-files-found: error
+      - name: Retain Snap Store retry diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snap-store-retries-retry-verification-snap_desktops-${{ matrix.desktop }}
+          path: build/snap-store-retries/
+          if-no-files-found: ignore
+          retention-days: 7
 
   attest:
     needs: [plan, packages, snap_desktops]

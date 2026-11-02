@@ -168,6 +168,14 @@ Item {
 
     TestCase {
         name: "ImagePreload"
+        function test_webpSerialHandoffRequiresNativeEligibility() {
+            verify(FileUrls.previewFirstFullResolution("file:///large.webp", 100000000, true))
+            verify(!FileUrls.previewFirstFullResolution("file:///extended.webp", 100000000, false))
+            verify(!FileUrls.previewFirstFullResolution("file:///unknown.webp", 100000000))
+            verify(!FileUrls.previewFirstFullResolution("file:///small.webp", 24999999, true))
+            verify(!FileUrls.previewFirstFullResolution("file:///huge.webp", 104857601, true))
+        }
+
         when: windowShown
         property var viewport: null
         property var mainWindow: null

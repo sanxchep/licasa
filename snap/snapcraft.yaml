@@ -1,6 +1,6 @@
 name: licasa
 title: Licasa
-version: '0.9.5'
+version: '0.9.6'
 summary: Fast, image-first photo viewer and editor
 description: |
   Licasa opens photographs in a focused, image-sized window. Browse, zoom,
@@ -68,6 +68,8 @@ parts:
       - binutils
       - qt6-base-dev
       - qt6-declarative-dev
+      - qt6-tools-dev
+      - qt6-tools-dev-tools
       - qt6-svg-dev
       - qt6-image-formats-plugins
       - libopenjp2-7-dev

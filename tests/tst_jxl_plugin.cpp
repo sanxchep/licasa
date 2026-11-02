@@ -58,6 +58,23 @@ qint64 rssKiB()
 class JxlPluginTest final : public QObject {
     Q_OBJECT
   private slots:
+    void previewHandoffHonorsItsByteLimit()
+    {
+        QImageReader reader(fixture("large-48mp.jxl"));
+        Contract::configure(reader, 100'000'000);
+        reader.device()->setProperty(Contract::retainFullBaseProperty, true);
+        reader.device()->setProperty(Contract::fullBaseByteLimitProperty,
+                                     QVariant::fromValue(quint64(1024)));
+        reader.setScaledSize(QSize(640, 480));
+        const QImage preview = reader.read();
+        QVERIFY2(!preview.isNull(), qPrintable(codecError(reader)));
+        QVERIFY(!reader.device()->property(Contract::decodedFullBaseProperty).isValid());
+        QImageReader reference(fixture("large-48mp.jxl"));
+        Contract::configure(reference, 100'000'000);
+        reference.setScaledSize(QSize(640, 480));
+        QCOMPARE(preview, reference.read());
+    }
+
     void initTestCase()
     {
         QVERIFY(settings_.isValid());

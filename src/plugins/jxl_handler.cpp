@@ -244,7 +244,8 @@ class JxlHandler final : public QImageIOHandler {
                 raster.setColorSpace(QColorSpace::SRgb);
                 if (!usePreview && !info_.have_animation && target != rasterSize && device() &&
                     device()->property(Contract::retainFullBaseProperty).toBool() &&
-                    raster.sizeInBytes() > 0 && raster.sizeInBytes() <= 256 * 1024 * 1024) {
+                    raster.sizeInBytes() > 0 &&
+                    quint64(raster.sizeInBytes()) <= Contract::fullBaseByteLimit(device())) {
                     // The full raster is already decoded for this scaled
                     // preview. Share it with the provider before scaling.
                     device()->setProperty(Contract::decodedFullBaseProperty,

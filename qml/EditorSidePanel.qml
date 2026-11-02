@@ -212,9 +212,17 @@ Item {
             Math.max(0, flick.contentHeight - flick.height), target))
     }
 
+    // Keep the shell cheap at startup; preserve controls after their first use.
+    function ensureContents() {
+        if (editorContent.status === Loader.Null)
+            editorContent.setSource(Qt.resolvedUrl("EditorPanelContent.qml"), { editor: root, viewportHeight: Qt.binding(function() { return flick.height }) })
+    }
+    Component.onCompleted: { if (panelOpen) ensureContents() }
+
     onPanelOpenChanged: {
         if (!panelOpen || toolTabRepeater.count === 0)
             return
+        ensureContents()
         const toolIndex = ["adjust", "crop", "looks", "export"].indexOf(activeTool)
         toolTabRepeater.itemAt(Math.max(0, toolIndex)).forceActiveFocus()
     }
@@ -521,162 +529,16 @@ Item {
             anchors.bottomMargin: 16
             clip: true
             contentWidth: width
-            contentHeight: contentColumn.implicitHeight
+            contentHeight: editorContent.height
             onContentHeightChanged: focusRevealTimer.restart()
             onHeightChanged: focusRevealTimer.restart()
             boundsBehavior: Flickable.StopAtBounds
 
-            Column {
-                id: contentColumn
-                enabled: !root.sourceChanged
-                width: flick.width
-                spacing: 12
-
-                EditorAdjustContent {
-                    visible: root.activeTool === "adjust"
-                    width: parent.width
-                    exposure: root.exposure
-                    contrast: root.contrast
-                    highlights: root.highlights
-                    shadows: root.shadows
-                    saturation: root.saturation
-                    vibrance: root.vibrance
-                    warmth: root.warmth
-                    tint: root.tint
-                    sharpen: root.sharpen
-                    blur: root.blur
-                    vignette: root.vignette
-                    onInteractionStarted: root.adjustmentInteractionStarted()
-                    onInteractionFinished: root.adjustmentInteractionFinished()
-                    onExposureRequested: function(value) { root.exposureRequested(value) }
-                    onContrastRequested: function(value) { root.contrastRequested(value) }
-                    onHighlightsRequested: function(value) { root.highlightsRequested(value) }
-                    onShadowsRequested: function(value) { root.shadowsRequested(value) }
-                    onSaturationRequested: function(value) { root.saturationRequested(value) }
-                    onVibranceRequested: function(value) { root.vibranceRequested(value) }
-                    onWarmthRequested: function(value) { root.warmthRequested(value) }
-                    onTintRequested: function(value) { root.tintRequested(value) }
-                    onSharpenRequested: function(value) { root.sharpenRequested(value) }
-                    onBlurRequested: function(value) { root.blurRequested(value) }
-                    onVignetteRequested: function(value) { root.vignetteRequested(value) }
-                }
-
-                EditorCropContent {
-                    id: cropContent
-                    visible: root.activeTool === "crop"
-                    width: parent.width
-                    cropMode: root.cropMode
-                    cropOutputWidth: root.cropOutputWidth
-                    cropOutputHeight: root.cropOutputHeight
-                    imageWidth: root.cropImageWidth
-                    imageHeight: root.cropImageHeight
-                    cropEstimatedFileSize: root.cropEstimatedFileSize
-                    cropAspectPreset: root.cropAspectPreset
-                    customAspectEditorOpen: root.customAspectEditorOpen
-                    customAspectWidthText: root.customAspectWidthText
-                    customAspectHeightText: root.customAspectHeightText
-                    flipHorizontal: root.flipHorizontal
-                    flipVertical: root.flipVertical
-                    rotationQuarterTurns: root.rotationQuarterTurns
-                    buttonMotionDuration: root.buttonMotionDuration
-                    onCropStarted: root.cropStarted()
-                    onCropPresetRequested: function(presetName) { root.cropPresetRequested(presetName) }
-                    onCustomAspectEditorRequested: root.customAspectEditorOpen = true
-                    onCustomAspectWidthTextEdited: function(value) { root.customAspectWidthText = value }
-                    onCustomAspectHeightTextEdited: function(value) { root.customAspectHeightText = value }
-                    onCustomCropAspectRatioRequested: function(ratio) {
-                        root.customCropAspectRatioRequested(ratio)
-                    }
-                    onRotateLeftRequested: root.rotateLeftRequested()
-                    onRotateRightRequested: root.rotateRightRequested()
-                    onFlipHorizontalToggled: root.flipHorizontalToggled()
-                    onFlipVerticalToggled: root.flipVerticalToggled()
-                    onRotationResetRequested: root.rotationResetRequested()
-                }
-
-                SectionCard {
-                    visible: root.activeTool === "looks"
-                    width: parent.width
-                    title: qsTr("Looks")
-                    subtitle: qsTr("Every look remains fully undoable")
-
-                    Flow {
-                        width: parent.width
-                        spacing: 8
-
-                        ActionChip {
-                            text: qsTr("Original")
-                            checked: !root.hasAdjustments
-                            animationDuration: root.buttonMotionDuration
-                            onClicked: root.resetRequested()
-                        }
-
-                        ActionChip {
-                            text: qsTr("Mono")
-                            animationDuration: root.buttonMotionDuration
-                            onClicked: root.presetRequested("bw")
-                        }
-
-                        ActionChip {
-                            text: qsTr("Pop")
-                            animationDuration: root.buttonMotionDuration
-                            onClicked: root.presetRequested("pop")
-                        }
-
-                        ActionChip {
-                            text: qsTr("Vivid")
-                            animationDuration: root.buttonMotionDuration
-                            onClicked: root.presetRequested("vivid")
-                        }
-
-                        ActionChip {
-                            text: qsTr("Cinema")
-                            animationDuration: root.buttonMotionDuration
-                            onClicked: root.presetRequested("cinematic")
-                        }
-
-                        ActionChip {
-                            text: qsTr("Soft")
-                            animationDuration: root.buttonMotionDuration
-                            onClicked: root.presetRequested("soft")
-                        }
-                    }
-
-                    Text {
-                        width: parent.width
-                        text: qsTr("Every look remains fully undoable.")
-                        color: "#90FFFFFF"
-                        font.pixelSize: 11
-                        wrapMode: Text.Wrap
-                        renderType: Text.NativeRendering
-                    }
-                }
-
-                EditorExportContent {
-                    visible: root.activeTool === "export"
-                    width: parent.width
-                    minimumHeight: flick.height
-                    exportFormat: root.exportFormat
-                    exportScale: root.exportScale
-                    exportQuality: root.exportQuality
-                    exportFormats: root.exportFormats
-                    sourceFormat: root.exportSourceFormat
-                    exportSettings: root.exportSettings
-                    estimatedSize: root.estimatedSize
-                    saveBusy: root.saveBusy
-                    hasImage: root.hasImage
-                    onSettingRequested: function(name, value) { root.exportSettingRequested(name, value) }
-                    onExportRequested: root.exportRequested()
-                    unscaledWidth: root.unscaledOutputWidth
-                    unscaledHeight: root.unscaledOutputHeight
-                    outputWidth: root.outputWidth
-                    outputHeight: root.outputHeight
-                    saveStatus: root.saveStatus
-                    buttonMotionDuration: root.buttonMotionDuration
-                    onExportFormatRequested: function(format) { root.exportFormatRequested(format) }
-                    onExportScaleRequested: function(value) { root.exportScaleRequested(value) }
-                    onExportQualityRequested: function(value) { root.exportQualityRequested(value) }
-                }
+            Loader {
+                id: editorContent
+                objectName: "editorContent"
+                width: parent.width
+                height: item ? (item as Item).implicitHeight : 0
             }
         }
 

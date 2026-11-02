@@ -397,6 +397,16 @@ Item {
         return control
     }
 
+    function cleanup() {
+        testAnimationClock.endControl()
+    }
+
+    function advanceAnimations(milliseconds) {
+        // Initialize newly started animations at the current clock before stepping.
+        testAnimationClock.advanceMilliseconds(0)
+        testAnimationClock.advanceMilliseconds(milliseconds)
+    }
+
     function test_toggleRespondsAcrossTheWholeRow() {
         const control = createControl(toggleComponent)
         const spy = createSpy(control, "toggled")
@@ -527,6 +537,37 @@ Item {
         fuzzyCompare(spy.signalArguments[1][0], 1.125, 0.03)
     }
 
+    function test_drawerContentsAreDeferredUntilFirstOpen_data() {
+        return [{ tag: "settings", editor: false }, { tag: "editor", editor: true }]
+    }
+
+    function test_drawerContentsAreDeferredUntilFirstOpen(data) {
+        const drawer = createControl(data.editor ? editorSidePanelComponent : settingsMenuComponent)
+        const loader = findChild(drawer, data.editor ? "editorContent" : "settingsContent")
+        verify(loader)
+        compare(loader.item, null)
+        const name = data.editor ? "editorExposureControl" : "maximumImageMemoryControl"
+        compare(findChild(drawer, name), null)
+        if (data.editor) drawer.exposure = 0.75
+        else drawer.maximumImageMemoryMiB = 4096
+        drawer.panelOpen = true
+        const control = findChild(drawer, name)
+        verify(control)
+        compare(control.value, data.editor ? 0.75 : 4096)
+        const content = loader.item
+        drawer.panelOpen = false
+        if (data.editor) drawer.exposure = -0.25
+        else drawer.maximumImageMemoryMiB = 2048
+        drawer.panelOpen = true
+        compare(loader.item, content)
+        compare(control.value, data.editor ? -0.25 : 2048)
+        const spy = createSpy(drawer, data.editor ? "exposureRequested" : "maximumImageMemoryMiBRequested")
+        if (data.editor) control.commitValue(0.5)
+        else control.valueChangedByUser(3072)
+        compare(spy.count, 1)
+        compare(spy.signalArguments[0][0], data.editor ? 0.5 : 3072)
+    }
+
     function test_largeImageSettingUsesMemoryStepsAndGuidance() {
         const menu = createControl(settingsMenuComponent)
         menu.panelOpen = true
@@ -555,6 +596,7 @@ Item {
 
     function test_backgroundModeCanBeEnabledInSettings() {
         const menu = createControl(settingsMenuComponent)
+        menu.panelOpen = true
         const row = findChild(menu, "backgroundServiceRow")
         verify(row)
         verify(!row.visible)
@@ -573,6 +615,7 @@ Item {
 
     function test_aboutSectionShowsInstalledBuild() {
         const menu = createControl(settingsMenuComponent)
+        menu.panelOpen = true
         const about = findChild(menu, "aboutSection")
         const releaseDate = findChild(menu, "aboutReleaseDate")
         verify(about)
@@ -587,6 +630,7 @@ Item {
 
     function test_settingsFooterActionsUseSourceAndIssueLinks() {
         const menu = createControl(settingsMenuComponent)
+        menu.panelOpen = true
         const about = findChild(menu, "aboutSection")
         const quit = findChild(menu, "quitLicasaButton")
         const source = findChild(menu, "viewSourceButton")
@@ -722,6 +766,7 @@ Item {
 
     function test_imageInfoSlidesBelowEditor(data) {
         const control = createControl(infoOverlaysComponent)
+        testAnimationClock.beginControl()
         control.smoothMotionEnabled = data.smooth
         control.currentFileName = data.filename
         const details = findChild(control, "imageInfoDetails")
@@ -731,35 +776,41 @@ Item {
         verify(details.visible)
         control.editorPanelVisible = true
         if (data.smooth) {
-            wait(35)
+            advanceAnimations(35)
             verify(details.hideProgress > 0 && details.hideProgress < 1)
             verify(metrics.mapToItem(control, 0, 0).y > homeY)
         }
-        tryCompare(details, "visible", false, 500)
+        advanceAnimations(220)
+        compare(details.visible, false)
         verify(metrics.mapToItem(control, 0, 0).y >= control.height)
         verify(badge.visible)
         compare(badge.mapToItem(control, 0, 0).y, 18)
         compare(control.infoOverlayEnabled, true)
         control.editorPanelVisible = false
-        tryCompare(details, "hideProgress", 0, 500)
+        advanceAnimations(220)
+        verify(details.hideProgress === 0)
         verify(details.visible)
         fuzzyCompare(metrics.mapToItem(control, 0, 0).y, homeY, 0.1)
     }
 
     function test_imageInfoSlideCanReverse() {
         const control = createControl(infoOverlaysComponent)
+        testAnimationClock.beginControl()
         const details = findChild(control, "imageInfoDetails")
         control.editorPanelVisible = true
-        wait(35)
+        advanceAnimations(35)
         verify(details.hideProgress > 0 && details.hideProgress < 1)
         control.editorPanelVisible = false
-        tryCompare(details, "hideProgress", 0, 500)
+        advanceAnimations(220)
+        verify(details.hideProgress === 0)
         verify(details.visible)
         control.infoOverlayEnabled = false
         control.editorPanelVisible = true
-        tryCompare(details, "hideProgress", 1, 500)
+        advanceAnimations(220)
+        verify(details.hideProgress === 1)
         control.editorPanelVisible = false
-        tryCompare(details, "hideProgress", 0, 500)
+        advanceAnimations(220)
+        verify(details.hideProgress === 0)
         compare(details.visible, false)
         control.infoOverlayEnabled = true
         control.fullScreenMode = false
@@ -771,6 +822,7 @@ Item {
 
     function test_oppositeDrawerLauncherSlidesAway(data) {
         const control = drawerControl(data.editor)
+        testAnimationClock.beginControl()
         control.smoothMotionEnabled = data.smooth
         const button = findChild(control, data.editor ? "editorMenuButton" : "settingsMenuButton")
         verify(button)
@@ -781,17 +833,19 @@ Item {
         compare(button.activeFocusOnTab, false)
         compare(button.Accessible.ignored, true)
         if (data.smooth) {
-            wait(35)
+            advanceAnimations(35)
             verify(button.hideProgress > 0 && button.hideProgress < 1)
             verify(data.editor ? button.x < homeX : button.x > homeX)
         }
-        tryCompare(button, "visible", false, 400)
+        advanceAnimations(220)
+        compare(button.visible, false)
         verify(data.editor ? button.x + button.width <= 0 : button.x >= control.width)
         control.anchors.fill = null
         control.width = 900
         verify(data.editor ? button.x + button.width <= 0 : button.x >= control.width)
         control.launcherBlocked = false
-        tryCompare(button, "hideProgress", 0, 400)
+        advanceAnimations(220)
+        verify(button.hideProgress === 0)
         verify(button.visible && button.enabled)
         fuzzyCompare(button.x, data.editor ? control.cornerControlMargin
             : control.width - control.cornerControlMargin - button.width, 0.1)
@@ -857,14 +911,17 @@ Item {
 
     function test_drawerStaysVisibleUntilClosingAnimationFinishes(data) {
         const control = drawerControl(data.editor)
+        testAnimationClock.beginControl()
         control.panelOpen = true
         const panel = findChild(control, data.editor ? "editorPanel" : "settingsPanel")
-        tryCompare(panel, "revealProgress", 1, 400)
+        advanceAnimations(220)
+        verify(panel.revealProgress === 1)
         control.panelOpen = false
         verify(control.panelVisible)
-        wait(35)
+        advanceAnimations(35)
         verify(control.panelVisible)
-        tryCompare(control, "panelVisible", false, 400)
+        advanceAnimations(220)
+        compare(control.panelVisible, false)
     }
 
     function test_scrollBarHandleDragsTheFlickable() {
@@ -1296,6 +1353,7 @@ Item {
 
     function test_editorSaveNeedsConfirmation(data) {
         const editor = createControl(editorSidePanelComponent)
+        testAnimationClock.beginControl()
         editor.smoothMotionEnabled = data.smooth
         editor.panelOpen = true
         editor.hasAdjustments = true
@@ -1307,10 +1365,11 @@ Item {
         compare(saved.count, 0)
         compare(editor.overwriteConfirmationOpen, true)
         if (data.smooth) {
-            wait(35)
-            verify(popup.revealProgress > 0 && popup.revealProgress < 1)
+            advanceAnimations(35)
+            verify(popup.revealProgress > 0 && popup.revealProgress < 1, "progress=" + popup.revealProgress)
         }
-        tryCompare(popup, "revealProgress", 1, 500)
+        advanceAnimations(180)
+        verify(popup.revealProgress === 1)
         verify(popup.y + popup.height <= findChild(editor, "editorFooter").y)
         findChild(editor, "editorOverwriteYesButton").clicked()
         compare(editor.overwriteConfirmationOpen, false)
@@ -1396,6 +1455,7 @@ Item {
 
     function test_exportHidesFooterAndKeepsDedicatedAction(data) {
         const editor = createControl(editorSidePanelComponent)
+        testAnimationClock.beginControl()
         editor.panelOpen = true
         editor.hasAdjustments = true
         editor.smoothMotionEnabled = data.smooth
@@ -1411,18 +1471,21 @@ Item {
         compare(editor.overwriteConfirmationOpen, false)
         compare(footer.enabled, false)
         compare(copy.enabled, false)
-        tryCompare(footer, "visible", false)
+        advanceAnimations(180)
+        compare(footer.visible, false)
         verify(action.sectionStyle)
         verify(action.text.indexOf("~2.4 MB") >= 0)
         const exported = createSpy(editor, "exportRequested")
         action.clicked()
         compare(exported.count, 1)
         editor.activateTool("adjust")
-        tryCompare(footer, "revealProgress", 1)
+        advanceAnimations(180)
+        verify(footer.revealProgress === 1)
         compare(copy.enabled, true)
         editor.activateTool("export")
         editor.activateTool("looks")
-        tryCompare(footer, "revealProgress", 1)
+        advanceAnimations(180)
+        verify(footer.revealProgress === 1)
     }
 
     function test_cropFooterTransition_data() {
@@ -1431,6 +1494,7 @@ Item {
 
     function test_cropFooterTransition(data) {
         const editor = createControl(editorSidePanelComponent)
+        testAnimationClock.beginControl()
         editor.panelOpen = true
         editor.hasAdjustments = true
         editor.smoothMotionEnabled = data.smooth
@@ -1462,11 +1526,13 @@ Item {
         copy.activate()
         compare(copied.count, 0)
         if (data.smooth) {
-            tryVerify(function() { return footer.cropProgress > 0 && footer.cropProgress < 1 })
+            advanceAnimations(35)
+            verify(footer.cropProgress > 0 && footer.cropProgress < 1, "progress=" + footer.cropProgress)
             verify(saves.visible && crops.visible)
             verify(saves.y < 0 && crops.y > 0)
         }
-        tryCompare(footer, "cropProgress", 1)
+        advanceAnimations(180)
+        verify(footer.cropProgress === 1)
         compare(saves.visible, false)
         compare(crops.y, 0)
         compare(scroll.height, viewportHeight)
@@ -1484,10 +1550,12 @@ Item {
         apply.activate()
         compare(applied.count, 1)
         if (data.smooth) {
-            tryVerify(function() { return footer.cropProgress > 0 && footer.cropProgress < 1 })
+            advanceAnimations(35)
+            verify(footer.cropProgress > 0 && footer.cropProgress < 1)
             verify(saves.visible && crops.visible)
         }
-        tryCompare(footer, "cropProgress", 0)
+        advanceAnimations(180)
+        verify(footer.cropProgress === 0)
         compare(crops.visible, false)
         compare(saves.y, 0)
         compare(scroll.height, viewportHeight)
@@ -1496,24 +1564,82 @@ Item {
 
         // Reversing before a slide completes must leave only the current actions usable.
         editor.cropMode = true
-        if (data.smooth)
-            tryVerify(function() { return footer.cropProgress > 0 && footer.cropProgress < 1 })
+        if (data.smooth) {
+            advanceAnimations(35)
+            verify(footer.cropProgress > 0 && footer.cropProgress < 1)
+        }
         editor.cropMode = false
-        tryCompare(footer, "cropProgress", 0)
+        advanceAnimations(180)
+        verify(footer.cropProgress === 0)
         compare(crops.visible, false)
         compare(copy.enabled, true)
         editor.cropMode = true
-        tryCompare(footer, "cropProgress", 1)
+        advanceAnimations(180)
+        verify(footer.cropProgress === 1)
         editor.cropMode = false
-        if (data.smooth)
-            tryVerify(function() { return footer.cropProgress > 0 && footer.cropProgress < 1 })
+        if (data.smooth) {
+            advanceAnimations(35)
+            verify(footer.cropProgress > 0 && footer.cropProgress < 1)
+        }
         editor.cropMode = true
-        tryCompare(footer, "cropProgress", 1)
+        advanceAnimations(180)
+        verify(footer.cropProgress === 1)
         compare(saves.visible, false)
         compare(cancel.enabled, true)
         editor.smoothMotionEnabled = false
         editor.cropMode = false
         compare(footer.cropProgress, 0)
+    }
+
+    function test_cropFooterRequiresExactAnimationEndpoint() {
+        const editor = createControl(editorSidePanelComponent)
+        testAnimationClock.beginControl()
+        editor.panelOpen = true
+        editor.activateTool("crop")
+        const footer = findChild(editor, "editorFooter")
+        const saves = findChild(editor, "editorSaveActions")
+        const crops = findChild(editor, "editorCropActions")
+
+        findChild(editor, "editorSaveCopyButton").forceActiveFocus()
+        editor.cropMode = true
+        advanceAnimations(179)
+        verify(footer.cropProgress < 1 && footer.cropProgress > 0.99999, "progress=" + footer.cropProgress)
+        verify(saves.visible)
+        advanceAnimations(1)
+        verify(footer.cropProgress === 1)
+        compare(saves.visible, false)
+
+        editor.cropMode = false
+        advanceAnimations(179)
+        verify(footer.cropProgress > 0 && footer.cropProgress < 0.00001)
+        verify(crops.visible)
+        advanceAnimations(1)
+        verify(footer.cropProgress === 0)
+        compare(crops.visible, false)
+    }
+
+    function test_animationClockIgnoresWallTimeAndRestoresLiveAnimations() {
+        const editor = createControl(editorSidePanelComponent)
+        testAnimationClock.beginControl()
+        editor.panelOpen = true
+        editor.hasAdjustments = true
+        editor.requestSaveConfirmation()
+        const popup = findChild(editor, "editorOverwriteConfirmation")
+        advanceAnimations(35)
+        const heldProgress = popup.revealProgress
+        verify(heldProgress > 0 && heldProgress < 1)
+
+        // Deliberately exceed the full 180 ms animation in real time. This must
+        // not skip the controlled frame, even while the event loop keeps running.
+        wait(250)
+        verify(popup.revealProgress === heldProgress)
+        advanceAnimations(145)
+        verify(popup.revealProgress === 1)
+
+        // Cleanup must restore ordinary animation timing for subsequent tests.
+        testAnimationClock.endControl()
+        editor.cancelSaveConfirmation()
+        tryVerify(function() { return popup.revealProgress === 0 && !popup.visible })
     }
 
     function test_exportDropdownHandlesKeyboardWithoutDismissingEditor() {
@@ -2173,6 +2299,26 @@ Item {
         compare(viewport.pendingImageSlot, -1)
         compare(viewport.imageStatus, Image.Loading)
         tryCompare(viewport, "imageStatus", Image.Ready, 5000)
+    }
+
+    function test_failedPreviewGeometryChangeEndsLoading() {
+        const viewport = createTemporaryObject(imageViewportComponent, visualRoot, {
+            "providerSource": "",
+            "previewPhase": true
+        })
+        verify(viewport)
+        wait(0)
+        const failureSpy = createSpy(viewport, "imageRequestFailed")
+        // Revealing a failed opening can change its viewport geometry without
+        // scheduling another image. A changed key alone is not replacement work.
+        viewport.imageRequestFailed.connect(function() {
+            viewport.previewSourceWidth += 1
+        })
+        viewport.providerSource = "file:///no-such-licasa-preview-geometry.png"
+        tryCompare(failureSpy, "count", 1, 5000)
+        compare(viewport.pendingImageSlot, -1)
+        compare(viewport.decodePending, false)
+        compare(viewport.imageStatus, Image.Error)
     }
 
     function test_parallelFullImageWaitsForPreviewThenPromotes() {

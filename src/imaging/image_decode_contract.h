@@ -6,6 +6,7 @@
 #include <QSize>
 #include <QVariant>
 
+#include <algorithm>
 #include <atomic>
 
 // A narrow, per-reader bridge to application-owned Qt image plugins. It carries
@@ -14,15 +15,19 @@
 // worker/handler, and are never taken from file metadata.
 namespace Licasa::ImageDecodeContract {
 inline constexpr quint64 maximumDecodedBaseCacheBytes = 256ULL * 1024 * 1024;
+// A selected preview may hand an already-decoded raster to its imminent full
+// request. Larger bases are consumed once, never retained for subsequent edits.
+inline constexpr quint64 maximumFullBaseHandoffBytes = 512ULL * 1024 * 1024;
 
-inline bool boundedPngFullBase(const QSize& size, quint64 maximumPixels) noexcept
+inline bool boundedRasterFullBase(const QSize& size, quint64 maximumPixels,
+                                  quint64 maximumBytes = maximumDecodedBaseCacheBytes) noexcept
 {
     if (size.width() <= 0 || size.height() <= 0) {
         return false;
     }
     const quint64 pixels = quint64(size.width()) * quint64(size.height());
     return pixels >= 25000000 && pixels <= maximumPixels &&
-           pixels <= maximumDecodedBaseCacheBytes / 4;
+           pixels <= std::min(maximumBytes, maximumFullBaseHandoffBytes) / 4;
 }
 
 inline bool reusablePngFullBase(const QSize& size, QImage::Format format,
@@ -34,7 +39,7 @@ inline bool reusablePngFullBase(const QSize& size, QImage::Format format,
     const quint64 pixels = quint64(size.width()) * quint64(size.height());
     // When the image fits half the pixel budget, paired preview/full reads
     // can overlap and are faster than waiting for a retained preview base.
-    return boundedPngFullBase(size, maximumPixels) && pixels > maximumPixels / 2;
+    return boundedRasterFullBase(size, maximumPixels) && pixels > maximumPixels / 2;
 }
 
 inline constexpr char pixelBudgetProperty[] = "_licasaPixelBudget";
@@ -60,6 +65,7 @@ inline constexpr char scalableEmbeddedJpegProperty[] = "_licasaScalableEmbeddedJ
 // A single-image decoder that must materialize the full raster for a scaled
 // preview can offer that immutable base to the provider's bounded edit cache.
 inline constexpr char retainFullBaseProperty[] = "_licasaRetainFullBase";
+inline constexpr char fullBaseByteLimitProperty[] = "_licasaFullBaseByteLimit";
 inline constexpr char decodedFullBaseProperty[] = "_licasaDecodedFullBase";
 inline constexpr char previewPresentedProperty[] = "_licasaPreviewPresented";
 // Metadata-only HEIF Exif exposure is opt-in. Ordinary HEIC/HEIF probing keeps
@@ -70,6 +76,13 @@ inline bool allows(const QSize& size, quint64 maximumPixels) noexcept
 {
     return size.width() > 0 && size.height() > 0 &&
            quint64(size.width()) * quint64(size.height()) <= maximumPixels;
+}
+
+inline quint64 fullBaseByteLimit(QIODevice* device)
+{
+    const QVariant value = device ? device->property(fullBaseByteLimitProperty) : QVariant();
+    return value.isValid() ? std::min(value.toULongLong(), maximumFullBaseHandoffBytes)
+                           : maximumDecodedBaseCacheBytes;
 }
 
 inline void configure(QImageReader& reader, quint64 pixels,

@@ -1,0 +1,88 @@
+--- a/libheif/plugins/decoder_libde265.cc
++++ b/libheif/plugins/decoder_libde265.cc
+@@ -195,6 +195,20 @@
+     else {
+       de265_limits->max_image_size_pixels = static_cast<uint32_t>(limits->max_image_size_pixels);
+     }
++
++    // Compressed input must follow the same finite allocation allowance as
++    // libheif. A fixed 16 MiB NAL cap otherwise rejects valid large stills.
++    // With unlimited caller limits, keep libde265's finite default instead.
++    uint64_t max_nal_bytes = limits->max_memory_block_size;
++    if (limits->max_total_memory != 0 &&
++        (max_nal_bytes == 0 || limits->max_total_memory < max_nal_bytes)) {
++      max_nal_bytes = limits->max_total_memory;
++    }
++    if (max_nal_bytes != 0) {
++      const uint64_t api_limit = std::numeric_limits<int>::max();
++      de265_limits->max_NAL_size_bytes = static_cast<uint32_t>(
++          max_nal_bytes < api_limit ? max_nal_bytes : api_limit);
++    }
+   }
+ #endif
+ 
+@@ -263,8 +277,16 @@
+ 
+     // TODO: the size of the NAL unit length variable is defined in the hvcC header.
+     // We should not assume that it is always 4 bytes.
+-    uint32_t nal_size = (uint32_t)((cdata[ptr]<<24) | (cdata[ptr+1]<<16) | (cdata[ptr+2]<<8) | (cdata[ptr+3]));
++    const uint32_t nal_size = (static_cast<uint32_t>(cdata[ptr]) << 24) |
++                              (static_cast<uint32_t>(cdata[ptr + 1]) << 16) |
++                              (static_cast<uint32_t>(cdata[ptr + 2]) << 8) |
++                              static_cast<uint32_t>(cdata[ptr + 3]);
+     ptr+=4;
++
++    if (nal_size > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
++      return {heif_error_Decoder_plugin_error, heif_suberror_Security_limit_exceeded,
++              "HEVC NAL unit exceeds the decoder input size limit"};
++    }
+ 
+     if (nal_size > size - ptr) {
+       //sstr << "NAL size (" << size32 << ") exceeds available data in file ("
+@@ -275,7 +297,12 @@
+                kEmptyString };
+     }
+ 
+-    de265_push_NAL(decoder->ctx, cdata+ptr, nal_size, 0, nullptr);
++    const de265_error push_error = de265_push_NAL(decoder->ctx, cdata + ptr,
++                                                 static_cast<int>(nal_size), 0, nullptr);
++    if (push_error != DE265_OK) {
++      return {heif_error_Decoder_plugin_error, heif_suberror_Unspecified,
++              de265_get_error_text(push_error)};
++    }
+     ptr += nal_size;
+   }
+ 
+@@ -335,8 +362,16 @@
+       };
+     }
+ 
+-    uint32_t nal_size = static_cast<uint32_t>((cdata[ptr] << 24) | (cdata[ptr + 1] << 16) | (cdata[ptr + 2] << 8) | (cdata[ptr + 3]));
++    const uint32_t nal_size = (static_cast<uint32_t>(cdata[ptr]) << 24) |
++                              (static_cast<uint32_t>(cdata[ptr + 1]) << 16) |
++                              (static_cast<uint32_t>(cdata[ptr + 2]) << 8) |
++                              static_cast<uint32_t>(cdata[ptr + 3]);
+     ptr += 4;
++
++    if (nal_size > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
++      return {heif_error_Decoder_plugin_error, heif_suberror_Security_limit_exceeded,
++              "HEVC NAL unit exceeds the decoder input size limit"};
++    }
+ 
+     if (nal_size > size - ptr) {
+       return {
+@@ -358,7 +393,13 @@
+ #endif
+ 
+     // The codec hands this opaque pointer back unchanged; it carries an integer, not an address.
+-    de265_push_NAL(decoder->ctx, cdata + ptr, nal_size, 0, (void*)user_data); // NOLINT(performance-no-int-to-ptr)
++    const de265_error push_error = de265_push_NAL(decoder->ctx, cdata + ptr,
++                                                 static_cast<int>(nal_size), 0,
++                                                 (void*)user_data); // NOLINT(performance-no-int-to-ptr)
++    if (push_error != DE265_OK) {
++      return {heif_error_Decoder_plugin_error, heif_suberror_Unspecified,
++              de265_get_error_text(push_error)};
++    }
+     ptr += nal_size;
+   }
+ 

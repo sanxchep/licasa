@@ -1,5 +1,11 @@
 #include "app/application_settings.h"
 #include "imaging/async_image_provider.h"
+#include "imaging/fast_xpm_decode.h"
+#ifdef LICASA_HAVE_FAST_SVGZ_INPUT
+#include "imaging/fast_svgz_input.h"
+#include <QBuffer>
+#include <libdeflate.h>
+#endif
 #include "imaging/image_resource_policy.h"
 #include "imaging/parallel_decode_pair.h"
 #ifdef LICASA_HAVE_FAST_TIFF_PREVIEW
@@ -8,7 +14,7 @@
 #endif
 #ifdef LICASA_HAVE_FAST_PNG_PREVIEW
 #include "imaging/fast_png_preview.h"
-#include <png.h>
+#include "png_preview_fixture.h"
 #endif
 #ifdef LICASA_HAVE_FAST_WEBP_PREVIEW
 #include "imaging/fast_webp_preview.h"
@@ -30,6 +36,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QThread>
+#include <QtEndian>
 
 #include <atomic>
 #include <chrono>
@@ -39,66 +46,148 @@
 #include <thread>
 #include <vector>
 
-#ifdef LICASA_HAVE_FAST_PNG_PREVIEW
-namespace {
-bool writePlainLargePng(const QString& path, bool alpha)
-{
-    const QByteArray encoded = QFile::encodeName(path);
-    FILE* file = std::fopen(encoded.constData(), "wb");
-    if (!file) {
-        return false;
-    }
-    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-    png_infop info = png ? png_create_info_struct(png) : nullptr;
-    if (!info) {
-        if (png) {
-            png_destroy_write_struct(&png, nullptr);
-        }
-        std::fclose(file);
-        return false;
-    }
-    std::vector<uchar> row(size_t(5000) * (alpha ? 4 : 3));
-    if (setjmp(png_jmpbuf(png))) {
-        png_destroy_write_struct(&png, &info);
-        std::fclose(file);
-        return false;
-    }
-    png_init_io(png, file);
-    png_set_compression_level(png, 1);
-    png_set_IHDR(png, info, 5000, 5000, 8, alpha ? PNG_COLOR_TYPE_RGBA : PNG_COLOR_TYPE_RGB,
-                 PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
-    png_write_info(png, info);
-    const int channels = alpha ? 4 : 3;
-    for (int x = 0; x < 5000; ++x) {
-        row[size_t(x) * channels] = 30;
-        row[size_t(x) * channels + 1] = 80;
-        row[size_t(x) * channels + 2] = 140;
-        if (alpha) {
-            row[size_t(x) * channels + 3] = 255;
-        }
-    }
-    for (int y = 0; y < 5000; ++y) {
-        if (y == 2500) {
-            row[size_t(2500) * channels] = 210;
-            row[size_t(2500) * channels + 1] = 40;
-            row[size_t(2500) * channels + 2] = 90;
-            if (alpha) {
-                row[size_t(2500) * channels + 3] = 120;
-            }
-        }
-        png_write_row(png, row.data());
-    }
-    png_write_end(png, info);
-    png_destroy_write_struct(&png, &info);
-    return std::fclose(file) == 0;
-}
-} // namespace
-#endif
-
 class AsyncImageProviderTest final : public QObject {
     Q_OBJECT
 
   private slots:
+#ifdef LICASA_HAVE_FAST_SVGZ_INPUT
+    void svgzInputKeepsExactBytesAndNativeRendering()
+    {
+        QTemporaryDir images;
+        QImage external(19, 13, QImage::Format_ARGB32);
+        external.fill(QColor(70, 110, 210, 150));
+        const QString png = images.filePath("external.png");
+        QVERIFY(external.save(png));
+        const QList<QByteArray> documents = {
+            QByteArray("<svg xmlns='http://www.w3.org/2000/svg' width='73' height='51'>"
+                       "<defs><linearGradient id='g'><stop stop-color='#123456'/>"
+                       "<stop offset='1' stop-color='#abcdef' stop-opacity='.4'/></linearGradient>"
+                       "</defs><rect x='3' y='5' width='61' height='37' fill='url(#g)'/>"
+                       "<circle cx='30' cy='20' r='11' fill='red' opacity='.3'/></svg>"),
+            QByteArray(
+                "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink'"
+                " width='73' height='51'><image x='4' y='7' width='38' height='26' xlink:href='") +
+                QUrl::fromLocalFile(png).toEncoded() + "'/></svg>"};
+        const QString path = images.filePath("native.svgz");
+        for (const auto& document : documents) {
+            std::unique_ptr<libdeflate_compressor, decltype(&libdeflate_free_compressor)>
+                compressor(libdeflate_alloc_compressor(1), &libdeflate_free_compressor);
+            QVERIFY(compressor);
+            QByteArray gzip(qsizetype(libdeflate_gzip_compress_bound(compressor.get(),
+                                                                     size_t(document.size()))),
+                            Qt::Uninitialized);
+            const size_t length =
+                libdeflate_gzip_compress(compressor.get(), document.constData(),
+                                         size_t(document.size()), gzip.data(), size_t(gzip.size()));
+            QVERIFY(length > 0);
+            gzip.resize(qsizetype(length));
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QCOMPARE(file.write(gzip), gzip.size());
+            file.close();
+            const QByteArray decoded = Licasa::readFastSvgzInput(path, 1'000'000, nullptr);
+            QCOMPARE(decoded, document);
+            QImageReader original(path);
+            const QImage expected = original.read();
+            QVERIFY(!expected.isNull());
+            QBuffer input;
+            input.setData(decoded);
+            QVERIFY(input.open(QIODevice::ReadOnly));
+            QImageReader optimized(&input, "svg");
+            const QImage actual = optimized.read();
+            QCOMPARE(actual, expected);
+        }
+    }
+
+    void svgzInputRejectsBoundsCancellationAndNonExactGzip()
+    {
+        QTemporaryDir images;
+        const QByteArray document =
+            "<svg xmlns='http://www.w3.org/2000/svg' width='31' height='29'/>";
+        std::unique_ptr<libdeflate_compressor, decltype(&libdeflate_free_compressor)> compressor(
+            libdeflate_alloc_compressor(1), &libdeflate_free_compressor);
+        QVERIFY(compressor);
+        QByteArray gzip(
+            qsizetype(libdeflate_gzip_compress_bound(compressor.get(), size_t(document.size()))),
+            Qt::Uninitialized);
+        const size_t length =
+            libdeflate_gzip_compress(compressor.get(), document.constData(),
+                                     size_t(document.size()), gzip.data(), size_t(gzip.size()));
+        QVERIFY(length > 0);
+        gzip.resize(qsizetype(length));
+        const QString path = images.filePath("bounded.svgz");
+        const auto save = [&](const QByteArray& bytes) {
+            QFile file(path);
+            return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+        };
+        QVERIFY(save(gzip));
+        QVERIFY(Licasa::readFastSvgzInput(path, 0, nullptr).isNull());
+        QVERIFY(Licasa::readFastSvgzInput(path, quint64(document.size() - 1), nullptr).isNull());
+        std::atomic_bool cancelled{true};
+        QVERIFY(Licasa::readFastSvgzInput(path, 1'000'000, &cancelled).isNull());
+        QByteArray corrupt = gzip;
+        corrupt[corrupt.size() - 8] ^= 1;
+        QVERIFY(save(corrupt));
+        QVERIFY(Licasa::readFastSvgzInput(path, 1'000'000, nullptr).isNull());
+        QVERIFY(save(gzip.chopped(2)));
+        QVERIFY(Licasa::readFastSvgzInput(path, 1'000'000, nullptr).isNull());
+        QVERIFY(save(gzip + gzip));
+        QVERIFY(Licasa::readFastSvgzInput(path, 1'000'000, nullptr).isNull());
+        QVERIFY(save(gzip + QByteArrayLiteral("trailing")));
+        QVERIFY(Licasa::readFastSvgzInput(path, 1'000'000, nullptr).isNull());
+        corrupt = gzip;
+        qToLittleEndian<quint32>(0xffffffffU, corrupt.data() + corrupt.size() - 4);
+        QVERIFY(save(corrupt));
+        QVERIFY(Licasa::readFastSvgzInput(path, quint64(-1), nullptr).isNull());
+        QFile oversized(path);
+        QVERIFY(oversized.open(QIODevice::ReadWrite));
+        QVERIFY(oversized.resize(513LL * 1024 * 1024));
+        oversized.close();
+        QVERIFY(Licasa::readFastSvgzInput(path, 1'000'000, nullptr).isNull());
+    }
+#endif
+
+    void plainXpmMatchesNativePixelsAndRejectsMalformedOrOverBudgetInput()
+    {
+        QTemporaryDir images;
+        const QString path = images.filePath("plain.xpm");
+        const QList<QByteArray> documents = {
+            "/* XPM */\nstatic const char *x[]={\n\"5 2 3 1\",\n\"a c #123456\",\"b c #fedcba\",\" "
+            " c None\",\n\"ab ab\",\"b aba\"};",
+            "/* XPM */\nstatic const char *x[]={\"3 2 2 2\",/*palette*/\"aa c #123456\",\"bb c "
+            "#fedcba\",\"aabbaa\",\"bbaabb\"};"};
+        for (const auto& document : documents) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QCOMPARE(file.write(document), document.size());
+            file.close();
+            const QImage actual = Licasa::readFastXpm(path, 100, 400, nullptr);
+            QVERIFY(!actual.isNull());
+            const QImage expected = QImageReader(path).read().convertToFormat(actual.format());
+            QCOMPARE(actual.size(), expected.size());
+            for (int y = 0; y < actual.height(); ++y) {
+                for (int x = 0; x < actual.width(); ++x) {
+                    QCOMPARE(actual.pixel(x, y), expected.pixel(x, y));
+                }
+            }
+            QVERIFY(Licasa::readFastXpm(path, 1, 400, nullptr).isNull());
+            QVERIFY(Licasa::readFastXpm(path, 100, 4, nullptr).isNull());
+            std::atomic_bool cancelled{true};
+            QVERIFY(Licasa::readFastXpm(path, 100, 400, &cancelled).isNull());
+        }
+        for (const QByteArray& document :
+             {QByteArray("/* XPM */\nstatic char*x[]={\"3 1 1 1\",\"a c #123456\",\"aab\"};"),
+              QByteArray("/* XPM */\nstatic char*x[]={\"3 2 1 1\",\"a c #123456\",\"aaa\"};"),
+              QByteArray("/* XPM */\nstatic char*x[]={\"3 1 1 1\",\"a c red\",\"aaa\"};"),
+              QByteArray(
+                  "/* XPM */\nstatic char*x[]={\"2147483647 2147483647 1 1\",\"a c #123456\"};")}) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QCOMPARE(file.write(document), document.size());
+            file.close();
+            QVERIFY(Licasa::readFastXpm(path, 100, 400, nullptr).isNull());
+        }
+    }
 
     void initTestCase() { qputenv("LICASA_TRACE_FAST_PNM", QByteArrayLiteral("1")); }
 
@@ -395,6 +484,27 @@ class AsyncImageProviderTest final : public QObject {
     }
 
 #ifdef LICASA_HAVE_FAST_WEBP_PREVIEW
+    void webpBaseEligibilityRejectsExtendedAndOversizedInput()
+    {
+        QTemporaryDir images;
+        const QString path = images.filePath(QStringLiteral("sparse.webp"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadWrite));
+        QVERIFY(file.resize(17 * 1024 * 1024));
+        QByteArray header = QByteArrayLiteral("RIFF0000WEBPVP8 0000");
+        qToLittleEndian<quint32>(quint32(file.size() - 8), header.data() + 4);
+        qToLittleEndian<quint32>(quint32(file.size() - 20), header.data() + 16);
+        QCOMPARE(file.write(header), header.size());
+        QVERIFY(file.flush());
+        QVERIFY(Licasa::fastWebpBaseEligible(path));
+        QVERIFY(file.seek(12));
+        QCOMPARE(file.write("VP8X", 4), 4);
+        QVERIFY(file.flush());
+        QVERIFY(!Licasa::fastWebpBaseEligible(path));
+        QVERIFY(file.resize(513LL * 1024 * 1024));
+        QVERIFY(!Licasa::fastWebpBaseEligible(path));
+    }
+
     void simpleWebpPreviewUsesBoundedBufferAndRejectsCancellation()
     {
         QTemporaryDir images;
@@ -739,7 +849,7 @@ class AsyncImageProviderTest final : public QObject {
         const QString path = images.filePath(QStringLiteral("large.png"));
         const QUrl url = QUrl::fromLocalFile(path);
 #ifdef LICASA_HAVE_FAST_PNG_PREVIEW
-        QVERIFY(writePlainLargePng(path, true));
+        QVERIFY(LicasaTest::writePlainLargePng(path, true));
         QVERIFY(Licasa::fastPngBaseEligible(path, policy.maximumImagePixels()));
         std::atomic_bool cancelled{false};
         const auto direct = Licasa::readFastPngPreview(
@@ -793,7 +903,7 @@ class AsyncImageProviderTest final : public QObject {
         QTemporaryDir images;
         QVERIFY(images.isValid());
         const QString path = images.filePath(QStringLiteral("truncated.png"));
-        QVERIFY(writePlainLargePng(path, false));
+        QVERIFY(LicasaTest::writePlainLargePng(path, false));
         QFile file(path);
         QVERIFY(file.open(QIODevice::ReadWrite));
         QVERIFY(file.resize(file.size() / 2));
@@ -825,7 +935,7 @@ class AsyncImageProviderTest final : public QObject {
         Licasa::ImageResourcePolicy policy(preferences);
         Licasa::AsyncImageProvider provider(policy);
         const QString path = images.filePath(QStringLiteral("neighbor.png"));
-        QVERIFY(writePlainLargePng(path, false));
+        QVERIFY(LicasaTest::writePlainLargePng(path, false));
         const QUrl url = QUrl::fromLocalFile(path);
 
         provider.prepareNearbyPreviews({url}, QSize(1000, 1000), 384);
@@ -840,7 +950,7 @@ class AsyncImageProviderTest final : public QObject {
         QTemporaryDir images;
         QVERIFY(images.isValid());
         const QString path = images.filePath(QStringLiteral("rgb.png"));
-        QVERIFY(writePlainLargePng(path, false));
+        QVERIFY(LicasaTest::writePlainLargePng(path, false));
         QVERIFY(Licasa::fastPngBaseEligible(path, 40000000));
         std::atomic_bool cancelled{false};
         const auto decoded = Licasa::readFastPngPreview(path, QSize(1000, 1000), 40000000,

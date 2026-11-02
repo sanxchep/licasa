@@ -17,7 +17,8 @@
     "sha256": "d0c02b4b0e978f34a1974b6f3eea7975a537bf7a9195ffeea38e7242ff316fdd",
     "license": "LGPL-3.0-or-later",
     "patches": [
-      "packaging/patches/libheif-1.23.4-tiles-and-thumbnails.patch"
+      "packaging/patches/libheif-1.23.4-tiles-and-thumbnails.patch",
+      "packaging/patches/libheif-1.23.4-bounded-nal-admission.patch"
     ],
     "options": {
       "WITH_LIBDE265": "ON",

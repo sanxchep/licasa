@@ -4,9 +4,9 @@
 #include "imaging/image_resource_policy.h"
 #include "io/atomic_file_copy.h"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
-#include <QCoreApplication>
 #include <QImageReader>
 #include <QMetaObject>
 #include <QMutexLocker>
@@ -23,7 +23,8 @@ bool validateAnimatedSource(ImageResourcePolicy& resourcePolicy, QFile& source, 
 {
     if (!source.seek(0)) {
         if (error) {
-            *error = QCoreApplication::translate("AnimationExport", "Unable to seek the animation source.");
+            *error = QCoreApplication::translate("AnimationExport",
+                                                 "Unable to seek the animation source.");
         }
         return false;
     }
@@ -38,7 +39,8 @@ bool validateAnimatedSource(ImageResourcePolicy& resourcePolicy, QFile& source, 
 
     if (!reader.canRead()) {
         if (error) {
-            *error = QCoreApplication::translate("AnimationExport", "The source is not a readable image.");
+            *error = QCoreApplication::translate("AnimationExport",
+                                                 "The source is not a readable image.");
         }
         return false;
     }
@@ -46,7 +48,8 @@ bool validateAnimatedSource(ImageResourcePolicy& resourcePolicy, QFile& source, 
     // supportsAnimation() is authoritative. Only a known singleton is static.
     if (!reader.supportsAnimation() || reader.imageCount() == 1) {
         if (error) {
-            *error = QCoreApplication::translate("AnimationExport", "The source is not an animated image.");
+            *error = QCoreApplication::translate("AnimationExport",
+                                                 "The source is not an animated image.");
         }
         return false;
     }
@@ -59,10 +62,12 @@ AnimationExportResult copyAnimationFile(ImageResourcePolicy& resourcePolicy, con
                                         const QUrl& destinationUrl)
 {
     if (!sourceUrl.isValid() || !sourceUrl.isLocalFile()) {
-        return failure(QCoreApplication::translate("AnimationExport", "The animation source is not a local file."));
+        return failure(QCoreApplication::translate("AnimationExport",
+                                                   "The animation source is not a local file."));
     }
     if (!destinationUrl.isValid() || !destinationUrl.isLocalFile()) {
-        return failure(QCoreApplication::translate("AnimationExport", "Choose a local destination file."));
+        return failure(
+            QCoreApplication::translate("AnimationExport", "Choose a local destination file."));
     }
 
     const QString sourcePath = sourceUrl.toLocalFile();
@@ -70,11 +75,12 @@ AnimationExportResult copyAnimationFile(ImageResourcePolicy& resourcePolicy, con
     const QString sourceSuffix = QFileInfo(sourcePath).suffix().toLower();
     const QString destinationSuffix = QFileInfo(destinationPath).suffix().toLower();
     if (sourceSuffix.isEmpty()) {
-        return failure(QCoreApplication::translate("AnimationExport", "The animation source has no exportable file extension."));
+        return failure(QCoreApplication::translate(
+            "AnimationExport", "The animation source has no exportable file extension."));
     }
     if (destinationSuffix != sourceSuffix) {
         return failure(QCoreApplication::translate(
-            "AnimationExport", "Export this animation copy with the %1 extension.")
+                           "AnimationExport", "Export this animation copy with the %1 extension.")
                            .arg(QStringLiteral(".") + sourceSuffix));
     }
 
@@ -96,7 +102,8 @@ AnimationExportResult copyAnimationFile(ImageResourcePolicy& resourcePolicy, con
 
     const auto identityAfterValidation = externalFileIdentity(source, &identityError);
     if (!identityAfterValidation || *identityAfterValidation != *identityBefore) {
-        return failure(QCoreApplication::translate("AnimationExport", "The animation source changed during export validation."));
+        return failure(QCoreApplication::translate(
+            "AnimationExport", "The animation source changed during export validation."));
     }
     const QString copyError = copyFileRangeAtomically(
         source, *identityBefore, CheckedByteRange{0, identityBefore->size}, destinationPath);
@@ -133,15 +140,20 @@ QThreadPool& AnimationExportService::workerPool()
 bool AnimationExportService::exportCopy(const QUrl& sourceUrl, const QUrl& destinationUrl)
 {
     if (busy_) {
-        emit exportFailed(sourceUrl, QCoreApplication::translate("AnimationExport", "Another animation export is still running."));
+        emit exportFailed(
+            sourceUrl, QCoreApplication::translate("AnimationExport",
+                                                   "Another animation export is still running."));
         return false;
     }
     if (!sourceUrl.isValid() || !sourceUrl.isLocalFile()) {
-        emit exportFailed(sourceUrl, QCoreApplication::translate("AnimationExport", "No local animation source is available."));
+        emit exportFailed(sourceUrl,
+                          QCoreApplication::translate("AnimationExport",
+                                                      "No local animation source is available."));
         return false;
     }
     if (!destinationUrl.isValid() || !destinationUrl.isLocalFile()) {
-        emit exportFailed(sourceUrl, QCoreApplication::translate("AnimationExport", "Choose a local destination file."));
+        emit exportFailed(sourceUrl, QCoreApplication::translate(
+                                         "AnimationExport", "Choose a local destination file."));
         return false;
     }
 

@@ -1,12 +1,17 @@
 #include "imaging/async_image_provider.h"
 #include "imaging/compute/edit_compute.h"
 #include "imaging/fast_pnm_preview.h"
+#include "imaging/fast_xpm_decode.h"
+#ifdef LICASA_HAVE_FAST_SVGZ_INPUT
+#include "imaging/fast_svgz_input.h"
+#endif
 #include "imaging/image_decode_contract.h"
 #include "imaging/image_edit_pipeline.h"
 #include "imaging/image_processing.h"
 #include "imaging/image_resource_policy.h"
 #include "imaging/nearby_preview_cache.h"
 #include "imaging/parallel_decode_pair.h"
+#include "imaging/parallel_smooth_scale.h"
 #include "imaging/preview_decode_support.h"
 #ifdef LICASA_HAVE_FAST_PNG_PREVIEW
 #include "imaging/fast_png_preview.h"
@@ -20,6 +25,7 @@
 #ifdef LICASA_EARLY_PROGRESSIVE_JPEG
 #include "imaging/progressive_jpeg_preview.h"
 #endif
+#include <QBuffer>
 #include <QColorSpace>
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -59,6 +65,7 @@ struct DecodedImageCache {
     int maximumMegapixels = 0;
     bool fullDetail = false;
     bool rawFastDevelopment = false;
+    bool oneShot = false;
     QImage image;
     quint64 hitCount = 0;
 
@@ -88,7 +95,7 @@ struct DecodedImageCache {
         if (matchesFile(file, megapixels) && requestedSize == normalizedRequestedSize(requested) &&
             fullDetail == full && rawFastDevelopment == rawFast) {
             ++hitCount;
-            return image;
+            return oneShot ? std::exchange(image, QImage()) : image;
         }
         return {};
     }
@@ -109,6 +116,8 @@ struct DecodedImageCache {
         maximumMegapixels = megapixels;
         fullDetail = full;
         rawFastDevelopment = rawFast;
+        oneShot =
+            quint64(decoded.sizeInBytes()) > ImageDecodeContract::maximumDecodedBaseCacheBytes;
         image = decoded;
         return true;
     }
@@ -123,6 +132,7 @@ struct DecodedImageCache {
         maximumMegapixels = 0;
         fullDetail = false;
         rawFastDevelopment = false;
+        oneShot = false;
         image = {};
     }
 };
@@ -183,7 +193,8 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                         ImageResourcePolicy& resourcePolicy,
                         std::shared_ptr<DecodedImageCache> decodedImageCache,
                         std::shared_ptr<NearbyPreviewCache> nearbyPreviewCache,
-                        std::shared_ptr<std::atomic_bool> cancelled, bool priorityNavigationPreview)
+                        std::shared_ptr<std::atomic_bool> cancelled, bool priorityNavigationPreview,
+                        bool fullBaseHandoff)
         : filePath_(std::move(filePath)), requestedSize_(requestedSize),
           editParameters_(std::move(editParameters)), colorManagedRendering_(colorManagedRendering),
           fullDetail_(fullDetail), rawFastDevelopment_(rawFastDevelopment),
@@ -192,7 +203,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
           speculativeFull_(speculativeFull), parallelPair_(std::move(parallelPair)),
           resourcePolicy_(resourcePolicy), decodedImageCache_(std::move(decodedImageCache)),
           nearbyPreviewCache_(std::move(nearbyPreviewCache)), cancelled_(std::move(cancelled)),
-          priorityNavigationPreview_(priorityNavigationPreview)
+          priorityNavigationPreview_(priorityNavigationPreview), fullBaseHandoff_(fullBaseHandoff)
     {
         if (traceDecodePhases()) {
             queuedAt_ = Clock::now();
@@ -415,9 +426,13 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
     void decodeImage(int maximumMegapixels, QImage preparedNeighbor = {})
     {
         const quint64 maximumPixels = ImageProcessing::pixelsForMegapixels(maximumMegapixels);
+        const quint64 maximumFullBaseBytes =
+            fullBaseHandoff_ ? ImageDecodeContract::maximumFullBaseHandoffBytes
+                             : ImageDecodeContract::maximumDecodedBaseCacheBytes;
         const QFileInfo fileInfo(filePath_);
         if (!fileInfo.exists() || !fileInfo.isFile()) {
-            error_ = QCoreApplication::translate("AsyncImageProvider", "File not found: %1").arg(filePath_);
+            error_ = QCoreApplication::translate("AsyncImageProvider", "File not found: %1")
+                         .arg(filePath_);
             return;
         }
 
@@ -456,17 +471,39 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                                                          fileInfo, maximumMegapixels))) {
                 decodedImageCache_->clear();
             }
+            const QString suffix = fileInfo.suffix().toLower();
+            QBuffer svgInput;
+#ifdef LICASA_HAVE_FAST_SVGZ_INPUT
+            // Qt's SVGZ handler already loads a byte array without a filename
+            // base URL. Keep that same renderer/input semantics, but avoid its
+            // compressed readAll and growing zlib inflation buffer on large files.
+            if (suffix == QStringLiteral("svgz") && fileInfo.size() >= 16 * 1024 * 1024 &&
+                QImageReader::supportedImageFormats().contains(QByteArrayLiteral("svg"))) {
+                const QByteArray document =
+                    readFastSvgzInput(filePath_, 512ULL * 1024 * 1024, cancelled_.get());
+                if (!document.isEmpty()) {
+                    svgInput.setData(document);
+                    svgInput.open(QIODevice::ReadOnly);
+                }
+            }
+#endif
             QImageReader reader(filePath_);
+            if (svgInput.isOpen()) {
+                reader.setDevice(&svgInput);
+                reader.setFormat(QByteArrayLiteral("svg"));
+            }
             ImageDecodeContract::configure(reader, maximumPixels, cancelled_.get(), fullDetail_,
                                            rawFastDevelopment_, rawInteractiveDevelopment_);
-            const QString suffix = fileInfo.suffix().toLower();
             const bool retainDecodedFullBase =
                 !fullDetail_ && !parallelPreview_ && !rawFastDevelopment_ &&
                 (suffix == QStringLiteral("heic") || suffix == QStringLiteral("heif") ||
-                 suffix == QStringLiteral("hif") || suffix == QStringLiteral("jxl") ||
-                 suffix == QStringLiteral("avif"));
+                 suffix == QStringLiteral("hif") || suffix == QStringLiteral("heics") ||
+                 suffix == QStringLiteral("heifs") || suffix == QStringLiteral("jxl") ||
+                 suffix == QStringLiteral("avif") || suffix == QStringLiteral("avifs"));
             if (retainDecodedFullBase && reader.device()) {
                 reader.device()->setProperty(ImageDecodeContract::retainFullBaseProperty, true);
+                reader.device()->setProperty(ImageDecodeContract::fullBaseByteLimitProperty,
+                                             QVariant::fromValue(maximumFullBaseBytes));
             }
             if (speculativeFull_ && parallelPair_ && reader.device()) {
                 reader.device()->setProperty(ImageDecodeContract::previewPresentedProperty,
@@ -493,7 +530,8 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                     return ImageDecodeContract::allows(size, maximumPixels / 2);
                 };
                 if (!fitsPair(dimensions) || (sensor.isValid() && !fitsPair(sensor))) {
-                    error_ = QCoreApplication::translate("AsyncImageProvider", "Parallel decoding exceeds the image memory budget.");
+                    error_ = QCoreApplication::translate(
+                        "AsyncImageProvider", "Parallel decoding exceeds the image memory budget.");
                     return;
                 }
             }
@@ -515,9 +553,10 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
             }
 
 #ifdef LICASA_HAVE_FAST_WEBP_PREVIEW
-            const bool onePassWebpBase =
-                suffix == QStringLiteral("webp") && reader.size().isValid() &&
-                !ImageDecodeContract::allows(reader.size(), maximumPixels / 2);
+            const bool onePassWebpBase = suffix == QStringLiteral("webp") &&
+                                         ImageDecodeContract::boundedRasterFullBase(
+                                             reader.size(), maximumPixels, 400ULL * 1024 * 1024) &&
+                                         fastWebpBaseEligible(filePath_);
             if (!fullDetail_ && (!parallelPreview_ || onePassWebpBase) && !rawFastDevelopment_ &&
                 !rawInteractiveDevelopment_ && suffix == QStringLiteral("webp") &&
                 reader.scaledSize().isValid() &&
@@ -530,8 +569,8 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                     // A large, complex WebP spends nearly as long on its
                     // scaled preview as on full decode. Keep that one full
                     // raster through the immediate full-detail promotion.
-                    // This is limited to an admitted 400 MiB source and only
-                    // when the paired full reader cannot run concurrently.
+                    // This is limited to an admitted 400 MiB source. QML
+                    // serializes this range so the full request consumes it.
                     decodedImageCache_->store(fileInfo, QSize(), maximumMegapixels, true, false,
                                               fullBase);
                 }
@@ -546,14 +585,44 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                 (!reader.supportsAnimation() || reader.imageCount() == 1) &&
                 ImageDecodeContract::reusablePngFullBase(reader.size(), reader.imageFormat(),
                                                          maximumPixels);
+            // SVG's scaled read still parses/decompresses embedded images in
+            // full. Render one admitted base, then hand it to full promotion
+            // instead of repeating that work in a second SVG reader.
+            const bool qtReuseSvgBase =
+                !fullDetail_ && !parallelPreview_ && !rawFastDevelopment_ &&
+                !rawInteractiveDevelopment_ &&
+                (suffix == QStringLiteral("svg") || suffix == QStringLiteral("svgz")) &&
+                reader.scaledSize().isValid() &&
+                ImageDecodeContract::boundedRasterFullBase(reader.size(), maximumPixels,
+                                                           maximumFullBaseBytes);
+            const bool qtReuseXpmBase =
+                !fullDetail_ && !parallelPreview_ && suffix == QStringLiteral("xpm") &&
+                reader.scaledSize().isValid() &&
+                ImageDecodeContract::boundedRasterFullBase(reader.size(), maximumPixels,
+                                                           maximumFullBaseBytes);
+            if (image.isNull() && suffix == QStringLiteral("xpm")) {
+                QImage base =
+                    readFastXpm(filePath_, maximumPixels,
+                                ImageDecodeContract::maximumFullBaseHandoffBytes, cancelled_.get());
+                if (!base.isNull() && base.size() == reader.size() && !isCancelled()) {
+                    image = reader.scaledSize().isValid()
+                                ? parallelSmoothScale(base, reader.scaledSize())
+                                : base;
+                    if (qtReuseXpmBase && !image.isNull()) {
+                        decodedImageCache_->store(fileInfo, QSize(), maximumMegapixels, true, false,
+                                                  base);
+                    }
+                }
+            }
             bool fastPngBase = false;
 #ifdef LICASA_HAVE_FAST_PNG_PREVIEW
             fastPngBase = !fullDetail_ && !parallelPreview_ && !rawFastDevelopment_ &&
                           !rawInteractiveDevelopment_ && suffix == QStringLiteral("png") &&
                           reader.scaledSize().isValid() &&
                           reader.transformation() == QImageIOHandler::TransformationNone &&
-                          ImageDecodeContract::boundedPngFullBase(reader.size(), maximumPixels) &&
-                          fastPngBaseEligible(filePath_, maximumPixels);
+                          ImageDecodeContract::boundedRasterFullBase(reader.size(), maximumPixels,
+                                                                     maximumFullBaseBytes) &&
+                          fastPngBaseEligible(filePath_, maximumPixels, maximumFullBaseBytes);
 #endif
 
 #ifdef LICASA_EARLY_PROGRESSIVE_JPEG
@@ -569,7 +638,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
 #ifdef LICASA_HAVE_FAST_PNG_PREVIEW
                 FastPngPreview decoded =
                     readFastPngPreview(filePath_, reader.scaledSize(), maximumPixels,
-                                       8 * 1024 * 1024, cancelled_.get());
+                                       8 * 1024 * 1024, cancelled_.get(), maximumFullBaseBytes);
                 if (!decoded.preview.isNull() && !decoded.fullBase.isNull() && !isCancelled()) {
                     image = std::move(decoded.preview);
                     const bool stored = decodedImageCache_->store(
@@ -586,7 +655,8 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                 }
 #endif
             }
-            if (image.isNull() && (qtReusePngBase || fastPngBase)) {
+            if (image.isNull() &&
+                (qtReusePngBase || fastPngBase || qtReuseSvgBase || qtReuseXpmBase)) {
                 const QSize previewSize = reader.scaledSize();
                 const QSize sourceSize = reader.size();
                 reader.setScaledSize(QSize());
@@ -595,16 +665,18 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                     if (!fullBase.colorSpace().isValid()) {
                         fullBase.setColorSpace(QColorSpace::SRgb);
                     }
-                    image = fullBase.scaled(previewSize, Qt::IgnoreAspectRatio,
-                                            Qt::SmoothTransformation);
+                    image = (qtReuseSvgBase || qtReuseXpmBase)
+                                ? parallelSmoothScale(fullBase, previewSize)
+                                : fullBase.scaled(previewSize, Qt::IgnoreAspectRatio,
+                                                  Qt::SmoothTransformation);
                     if (!image.isNull() && !isCancelled() && fullBase.size() == sourceSize &&
                         fullBase.sizeInBytes() > 0 &&
-                        fullBase.sizeInBytes() <= kMaximumDecodedBaseCacheBytes) {
+                        quint64(fullBase.sizeInBytes()) <= maximumFullBaseBytes) {
                         const bool stored = decodedImageCache_->store(
                             fileInfo, QSize(), maximumMegapixels, true, false, fullBase);
                         if (traceDecodeCache() && stored) {
                             qInfo().noquote()
-                                << QStringLiteral("[Licasa] Decoded full PNG base retained from "
+                                << QStringLiteral("[Licasa] Decoded full raster base retained from "
                                                   "preview: %1 MiB (%2x%3)")
                                        .arg(double(fullBase.sizeInBytes()) / (1024.0 * 1024.0), 0,
                                             'f', 1)
@@ -639,7 +711,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                                             ->property(ImageDecodeContract::decodedFullBaseProperty)
                                             .value<QImage>();
                 if (!fullBase.isNull() && fullBase.sizeInBytes() > 0 &&
-                    fullBase.sizeInBytes() <= kMaximumDecodedBaseCacheBytes &&
+                    quint64(fullBase.sizeInBytes()) <= maximumFullBaseBytes &&
                     ImageDecodeContract::allows(fullBase.size(), maximumPixels) &&
                     fullBase.size() == reader.size()) {
                     const bool stored = decodedImageCache_->store(
@@ -694,7 +766,8 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
         if (!applyImageEdits(image, editParameters_, cancelled_.get(), &editExecution)) {
             image = {};
             if (!isCancelled()) {
-                error_ = QCoreApplication::translate("AsyncImageProvider", "The image could not be processed safely.");
+                error_ = QCoreApplication::translate("AsyncImageProvider",
+                                                     "The image could not be processed safely.");
             }
             return;
         }
@@ -778,6 +851,7 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
     QString error_;
     std::shared_ptr<std::atomic_bool> cancelled_;
     bool priorityNavigationPreview_ = false;
+    bool fullBaseHandoff_ = false;
     Clock::time_point queuedAt_;
 };
 
@@ -926,6 +1000,8 @@ QQuickImageResponse* AsyncImageProvider::requestImageResponse(const QString& id,
                             decodeStage == QStringLiteral("raw-interactive");
     const bool rawFastDevelopment = decodeStage == QStringLiteral("raw-fast");
     const bool rawInteractiveDevelopment = decodeStage == QStringLiteral("raw-interactive");
+    const bool fullBaseHandoff =
+        !fullDetail && queryBooleanValue(query, QStringLiteral("licasa_handoff"), false);
     const QString parallelStage = query.queryItemValue(QStringLiteral("licasa_parallel"));
     const bool parallelPreview = parallelStage == QStringLiteral("preview") && !fullDetail;
     const bool speculativeFull = parallelStage == QStringLiteral("full") && fullDetail;
@@ -974,7 +1050,8 @@ QQuickImageResponse* AsyncImageProvider::requestImageResponse(const QString& id,
         filePath, requestedSize, editParametersFromQuery(query), colorManagedRendering, fullDetail,
         rawFastDevelopment, rawInteractiveDevelopment, editWarmupRequested,
         parallelPreview && bool(pair), speculativeFull && bool(pair), pair, resourcePolicy_,
-        decodedImageCache_, nearbyPreviewCache_, std::move(cancelled), navigationPriority);
+        decodedImageCache_, nearbyPreviewCache_, std::move(cancelled), navigationPriority,
+        fullBaseHandoff);
     if (speculativeFull && pair) {
         speculativeFullPool_.start(response);
     } else if (navigationPriority) {

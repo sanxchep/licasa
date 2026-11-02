@@ -23,6 +23,7 @@ Item {
     readonly property bool panelVisible: panelOpen || panel.revealProgress > 0.001
     property bool startInFullscreenEnabled: true
     property var backgroundModeManager: null
+    property var languageManager: null
     property string appVersion: ""
     property string releaseDate: ""
     property bool installedAsSnap: false
@@ -149,12 +150,20 @@ Item {
         if (!fullscreen)
             panelOpen = false
     }
+    // Keep the shell cheap at startup; preserve controls after their first use.
+    function ensureContents() {
+        if (settingsContent.status === Loader.Null)
+            settingsContent.setSource(Qt.resolvedUrl("FullscreenSettingsContent.qml"), { menu: root })
+    }
+    Component.onCompleted: { if (panelOpen) ensureContents() }
+
     onPanelOpenChanged: {
         if (panelOpen) {
             if (launcherBlocked) {
                 panelOpen = false
                 return
             }
+            ensureContents()
             closeButton.forceActiveFocus()
         } else if (fullscreen && !launcherBlocked)
             menuButton.forceActiveFocus()
@@ -288,363 +297,14 @@ Item {
                 anchors.bottom: parent.bottom
                 clip: true
                 contentWidth: width
-                contentHeight: settingsColumn.implicitHeight
+                contentHeight: settingsContent.height
                 boundsBehavior: Flickable.StopAtBounds
 
-                Column {
-                    id: settingsColumn
-                    width: settingsFlick.width
-                    spacing: 12
-
-                    ToggleRow {
-                        width: parent.width
-                        title: qsTr("Info overlay")
-                        subtitle: qsTr("Show file name and zoom details")
-                        checked: root.infoOverlayEnabled
-                        buttonMotionDuration: root.buttonMotionDuration
-                        switchMotionDuration: root.switchMotionDuration
-
-                        onToggled: function(value) {
-                            root.infoOverlayChanged(value)
-                        }
-                    }
-
-                    ToggleRow {
-                        width: parent.width
-                        title: qsTr("Smooth motion")
-                        subtitle: qsTr("Animate menu and switches")
-                        checked: root.smoothMotionEnabled
-                        buttonMotionDuration: root.buttonMotionDuration
-                        switchMotionDuration: root.switchMotionDuration
-
-                        onToggled: function(value) {
-                            root.smoothMotionChanged(value)
-                        }
-                    }
-
-                    ToggleRow {
-                        width: parent.width
-                        title: qsTr("Open in fullscreen")
-                        subtitle: qsTr("Use fullscreen when opening or showing images")
-                        checked: root.startInFullscreenEnabled
-                        buttonMotionDuration: root.buttonMotionDuration
-                        switchMotionDuration: root.switchMotionDuration
-
-                        onToggled: function(value) {
-                            root.startInFullscreenChanged(value)
-                        }
-                    }
-
-                    ToggleRow {
-                        id: backgroundServiceRow
-                        objectName: "backgroundServiceRow"
-                        visible: root.backgroundModeManager
-                            && root.backgroundModeManager.supported
-                        width: parent.width
-                        title: qsTr("Background process")
-                        subtitle: qsTr("Keep a lightweight background process open. Starts at next login.")
-                        checked: root.backgroundModeManager
-                            ? root.backgroundModeManager.enabled : false
-                        buttonMotionDuration: root.buttonMotionDuration
-                        switchMotionDuration: root.switchMotionDuration
-
-                        onToggled: function(value) {
-                            root.backgroundModeManager.setEnabled(value)
-                        }
-                    }
-
-                    ValueRow {
-                        width: parent.width
-                        title: qsTr("Background opacity")
-                        subtitle: qsTr("Dark backdrop behind the image in fullscreen")
-                        value: root.fullscreenBackgroundOpacity
-                        step: 0.05
-                        buttonMotionDuration: root.buttonMotionDuration
-
-                        onValueChangedByUser: function(value) {
-                            root.fullscreenBackgroundOpacityRequested(value)
-                        }
-                    }
-
-                    ToggleRow {
-                        width: parent.width
-                        title: qsTr("Full screen transparency grid")
-                        subtitle: qsTr("Show a checkerboard behind transparent pixels in full screen")
-                        checked: root.transparencyCheckerboardEnabled
-                        buttonMotionDuration: root.buttonMotionDuration
-                        switchMotionDuration: root.switchMotionDuration
-
-                        onToggled: function(value) {
-                            root.transparencyCheckerboardChanged(value)
-                        }
-                    }
-
-                    ValueRow {
-                        width: parent.width
-                        title: qsTr("Grid opacity")
-                        subtitle: root.transparencyCheckerboardEnabled
-                            ? qsTr("Strength of the transparency checkerboard")
-                            : qsTr("Turn on the full screen grid to adjust")
-                        value: root.transparencyCheckerboardOpacity
-                        step: 0.05
-                        enabled: root.transparencyCheckerboardEnabled
-                        opacity: enabled ? 1.0 : 0.7
-                        buttonMotionDuration: root.buttonMotionDuration
-
-                        onValueChangedByUser: function(value) {
-                            root.transparencyCheckerboardOpacityRequested(value)
-                        }
-                    }
-
-                    ToggleRow {
-                        width: parent.width
-                        title: qsTr("Floating transparency grid")
-                        subtitle: qsTr("Show a checkerboard instead of solid backing in floating mode")
-                        checked: root.windowedTransparencyCheckerboardEnabled
-                        buttonMotionDuration: root.buttonMotionDuration
-                        switchMotionDuration: root.switchMotionDuration
-
-                        onToggled: function(value) {
-                            root.windowedTransparencyCheckerboardChanged(value)
-                        }
-                    }
-
-                    ValueRow {
-                        width: parent.width
-                        title: qsTr("Floating transparency opacity")
-                        subtitle: root.windowedTransparencyCheckerboardEnabled
-                            ? qsTr("Strength of the floating checkerboard")
-                            : qsTr("Strength of the solid backing for transparent pixels")
-                        value: root.windowedTransparencyOpacity
-                        step: 0.05
-                        buttonMotionDuration: root.buttonMotionDuration
-
-                        onValueChangedByUser: function(value) {
-                            root.windowedTransparencyOpacityRequested(value)
-                        }
-                    }
-
-                    Rectangle {
-                        width: parent.width
-                        height: 1
-                        color: "#18FFFFFF"
-                    }
-
-                    ActionChip {
-                        objectName: "advancedSettingsButton"
-                        width: parent.width
-                        text: root.advancedOpen
-                            ? qsTr("Advanced settings  ▲")
-                            : qsTr("Advanced settings  ▼")
-                        checkable: true
-                        checked: root.advancedOpen
-                        accent: "#34FFFFFF"
-                        animationDuration: root.buttonMotionDuration
-                        onClicked: root.advancedOpen = !root.advancedOpen
-                    }
-
-                    SectionCard {
-                        visible: root.advancedOpen
-                        width: parent.width
-                        title: qsTr("Rendering quality")
-
-                        ToggleRow {
-                            width: parent.width
-                            title: qsTr("Smooth scaling")
-                            subtitle: qsTr("Filter pixels while zooming and fitting")
-                            checked: root.smoothImageScalingEnabled
-                            buttonMotionDuration: root.buttonMotionDuration
-                            switchMotionDuration: root.switchMotionDuration
-                            onToggled: function(value) {
-                                root.smoothImageScalingChanged(value)
-                            }
-                        }
-
-                        ToggleRow {
-                            width: parent.width
-                            title: qsTr("Mipmap downscaling")
-                            subtitle: qsTr("Sharper text and detail when zoomed out")
-                            checked: root.mipmapImageScalingEnabled
-                            buttonMotionDuration: root.buttonMotionDuration
-                            switchMotionDuration: root.switchMotionDuration
-                            onToggled: function(value) {
-                                root.mipmapImageScalingChanged(value)
-                            }
-                        }
-
-                        ToggleRow {
-                            width: parent.width
-                            title: qsTr("Pixel-aligned placement")
-                            subtitle: qsTr("Avoid half-pixel blur at the image origin")
-                            checked: root.pixelAlignedRenderingEnabled
-                            buttonMotionDuration: root.buttonMotionDuration
-                            switchMotionDuration: root.switchMotionDuration
-                            onToggled: function(value) {
-                                root.pixelAlignedRenderingChanged(value)
-                            }
-                        }
-
-                        ToggleRow {
-                            width: parent.width
-                            title: qsTr("Full-resolution rendering")
-                            subtitle: qsTr("Promote previews to the original resolution")
-                            checked: root.fullResolutionRenderingEnabled
-                            buttonMotionDuration: root.buttonMotionDuration
-                            switchMotionDuration: root.switchMotionDuration
-                            onToggled: function(value) {
-                                root.fullResolutionRenderingChanged(value)
-                            }
-                        }
-
-                        ToggleRow {
-                            width: parent.width
-                            title: qsTr("Color-managed rendering")
-                            subtitle: qsTr("Convert embedded profiles to display sRGB")
-                            checked: root.colorManagedRenderingEnabled
-                            buttonMotionDuration: root.buttonMotionDuration
-                            switchMotionDuration: root.switchMotionDuration
-                            onToggled: function(value) {
-                                root.colorManagedRenderingChanged(value)
-                            }
-                        }
-                    }
-
-                    ValueRow {
-                        visible: root.advancedOpen
-                        objectName: "maximumImageMemoryControl"
-                        width: parent.width
-                        title: qsTr("Maximum working memory per image")
-                        subtitle: root.estimatedLargeImageMemoryText()
-                            + qsTr("\nImages above this budget open in a bounded preview")
-                        from: root.minimumImageMemoryMiB
-                        to: root.maximumImageMemoryLimitMiB
-                        value: root.maximumImageMemoryMiB
-                        step: 128
-                        displayMultiplier: 1.0 / 1024.0
-                        displayDecimals: 2
-                        displaySuffix: qsTr(" GiB")
-                        accessibleUnit: qsTr("MiB")
-                        buttonMotionDuration: root.buttonMotionDuration
-                        onValueChangedByUser: function(value) {
-                            root.maximumImageMemoryMiBRequested(
-                                Math.max(root.minimumImageMemoryMiB,
-                                    root.minimumImageMemoryMiB
-                                        + Math.round((value - root.minimumImageMemoryMiB) / 128)
-                                            * 128)
-                            )
-                        }
-                    }
-
-                    ValueRow {
-                        visible: root.advancedOpen
-                        width: parent.width
-                        title: qsTr("Crop shield opacity")
-                        subtitle: qsTr("Dim only the area outside the crop frame")
-                        value: root.cropShieldOpacity
-                        step: 0.05
-                        buttonMotionDuration: root.buttonMotionDuration
-                        onValueChangedByUser: function(value) {
-                            root.cropShieldOpacityRequested(value)
-                        }
-                    }
-
-                    SectionCard {
-                        visible: root.advancedOpen
-                        width: parent.width
-                        title: qsTr("Animated Playback Settings")
-
-                        ToggleRow {
-                            width: parent.width
-                            title: qsTr("Play animated images")
-                            checked: root.animatedImagePlaybackEnabled
-                            buttonMotionDuration: root.buttonMotionDuration
-                            switchMotionDuration: root.switchMotionDuration
-                            onToggled: function(value) {
-                                root.animatedImagePlaybackChanged(value)
-                            }
-                        }
-
-                        ValueRow {
-                            width: parent.width
-                            title: qsTr("Playback speed")
-                            from: 0.25
-                            to: 2.0
-                            value: root.animationSpeed
-                            step: 0.25
-                            displayMultiplier: 100
-                            displayDecimals: 0
-                            displaySuffix: "%"
-                            enabled: root.animatedImagePlaybackEnabled
-                            opacity: enabled ? 1.0 : 0.7
-                            buttonMotionDuration: root.buttonMotionDuration
-                            onValueChangedByUser: function(value) {
-                                root.animationSpeedRequested(value)
-                            }
-                        }
-                    }
-
-                    ActionChip {
-                        objectName: "quitLicasaButton"
-                        width: parent.width
-                        text: qsTr("Fully Quit Licasa")
-                        subtitle: qsTr("Closes the viewer and all Licasa background processes.")
-                        sectionStyle: true
-                        destructive: true
-                        animationDuration: root.buttonMotionDuration
-                        Accessible.description: subtitle + qsTr(" Shortcut Control Shift Q.")
-                        onClicked: root.quitRequested()
-                    }
-
-                    ActionChip {
-                        objectName: "viewSourceButton"
-                        width: parent.width
-                        text: qsTr("View Source")
-                        sectionStyle: true
-                        animationDuration: root.buttonMotionDuration
-                        Accessible.description: qsTr("Open the Licasa source repository on GitHub.")
-                        onClicked: root.externalUrlRequested(root.sourceRepositoryUrl)
-                    }
-
-                    ActionChip {
-                        objectName: "reportIssueButton"
-                        width: parent.width
-                        text: qsTr("Report a Bug / Fix / Suggestion")
-                        sectionStyle: true
-                        animationDuration: root.buttonMotionDuration
-                        Accessible.description: qsTr("Open a new GitHub issue for a bug, fix, or suggestion.")
-                        onClicked: root.externalUrlRequested(root.issueReportUrl)
-                    }
-
-                    SectionCard {
-                        objectName: "aboutSection"
-                        width: parent.width
-                        title: qsTr("About Licasa")
-                        subtitle: qsTr("Version ") + root.appVersion
-                        contentTopSpacing: 4
-                        color: "transparent"
-                        radius: 12
-                        border.width: 1
-                        border.color: "#24FFFFFF"
-
-                        Text {
-                            objectName: "aboutReleaseDate"
-                            visible: root.releaseDate.length > 0
-                            width: parent.width
-                            text: qsTr("Released ") + root.releaseDate
-                            color: "#B3FFFFFF"
-                            font.pixelSize: 12
-                        }
-
-                        Text {
-                            width: parent.width
-                            visible: root.installedAsSnap
-                            text: qsTr("Fully quitting Licasa allows Snap updates. Open pictures and unsaved changes are kept until you finish them.")
-                            color: "#B3FFFFFF"
-                            font.pixelSize: 12
-                            wrapMode: Text.Wrap
-                        }
-                    }
-
+                Loader {
+                    id: settingsContent
+                    objectName: "settingsContent"
+                    width: parent.width
+                    height: item ? (item as Item).implicitHeight : 0
                 }
             }
 
