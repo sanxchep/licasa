@@ -1,4 +1,5 @@
 #include "app/application_settings.h"
+#include "app/language_manager.h"
 #include "editor_test_support.h"
 #include "export/image_save_service.h"
 #include "imaging/async_image_provider.h"
@@ -15,6 +16,7 @@
 #include <QQmlEngine>
 #include <QQuickImageResponse>
 #include <QQuickTextureFactory>
+#include <QTemporaryDir>
 #include <QUrlQuery>
 #include <QtQuickTest/quicktest.h>
 #include <atomic>
@@ -213,6 +215,12 @@ class LicasaQuickSetup final : public QObject {
   public slots:
     void qmlEngineAvailable(QQmlEngine* engine)
     {
+        languageManager_ = std::make_unique<Licasa::LanguageManager>(
+            languageSettings_.filePath("language.ini"), QStringLiteral(":/i18n"),
+            QStringList{QStringLiteral("en-US")});
+        connect(languageManager_.get(), &Licasa::LanguageManager::languageChanged, engine,
+                &QQmlEngine::retranslate);
+        engine->rootContext()->setContextProperty("testLanguageManager", languageManager_.get());
         Licasa::initializeImagePlugins();
         preferences_ = std::make_unique<Licasa::ViewerPreferences>();
         policy_ = std::make_unique<Licasa::ImageResourcePolicy>(*preferences_);
@@ -232,6 +240,8 @@ class LicasaQuickSetup final : public QObject {
     }
 
   private:
+    QTemporaryDir languageSettings_;
+    std::unique_ptr<Licasa::LanguageManager> languageManager_;
     std::unique_ptr<Licasa::ViewerPreferences> preferences_;
     std::unique_ptr<Licasa::ImageResourcePolicy> policy_;
     std::unique_ptr<Licasa::ImageAnimationService> animations_;

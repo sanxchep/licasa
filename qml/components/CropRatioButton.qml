@@ -14,7 +14,7 @@ Item {
     activeFocusOnTab: enabled && visible
     Accessible.role: Accessible.Button
     Accessible.name: text
-    Accessible.description: checked ? "Selected aspect ratio" : "Use this aspect ratio"
+    Accessible.description: checked ? qsTr("Selected aspect ratio") : qsTr("Use this aspect ratio")
     Accessible.checkable: true
     Accessible.checked: checked
     Accessible.focusable: enabled && visible

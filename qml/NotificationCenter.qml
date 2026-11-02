@@ -232,7 +232,7 @@ Item {
         y: root.fullScreenMode ? root.cornerControlMargin + 3 : 8
         visible: root.appVisible
         iconName: "notifications"
-        accessibleName: "Notifications"
+        accessibleName: qsTr("Notifications")
         checkable: true
         checked: root.historyOpen
         onClicked: root.historyOpen = !root.historyOpen
@@ -334,7 +334,7 @@ Item {
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.margins: 18
-            text: "Notifications"
+            text: qsTr("Notifications")
             color: "white"
             font.pixelSize: 17
             font.weight: Font.DemiBold
@@ -344,7 +344,7 @@ Item {
             id: emptyHistory
             anchors.centerIn: parent
             visible: root.notificationCount === 0
-            text: "No notifications yet"
+            text: qsTr("No notifications yet")
             color: "#BAC1CA"
             font.pixelSize: 12
         }

@@ -36,13 +36,13 @@ Column {
 
     SectionCard {
         width: parent.width
-        title: "Light"
-        subtitle: "Shape brightness and tonal range"
+        title: qsTr("Light")
+        subtitle: qsTr("Shape brightness and tonal range")
 
         AdjustRow {
             objectName: "editorExposureControl"
             width: parent.width
-            label: "Exposure"
+            label: qsTr("Exposure")
             value: root.exposure
             onInteractionStarted: root.interactionStarted()
             onInteractionFinished: root.interactionFinished()
@@ -52,7 +52,7 @@ Column {
         AdjustRow {
             objectName: "editorContrastControl"
             width: parent.width
-            label: "Contrast"
+            label: qsTr("Contrast")
             value: root.contrast
             onInteractionStarted: root.interactionStarted()
             onInteractionFinished: root.interactionFinished()
@@ -62,7 +62,7 @@ Column {
         AdjustRow {
             objectName: "editorHighlightsControl"
             width: parent.width
-            label: "Highlights"
+            label: qsTr("Highlights")
             value: root.highlights
             onInteractionStarted: root.interactionStarted()
             onInteractionFinished: root.interactionFinished()
@@ -72,7 +72,7 @@ Column {
         AdjustRow {
             objectName: "editorShadowsControl"
             width: parent.width
-            label: "Shadows"
+            label: qsTr("Shadows")
             value: root.shadows
             onInteractionStarted: root.interactionStarted()
             onInteractionFinished: root.interactionFinished()
@@ -82,13 +82,13 @@ Column {
 
     SectionCard {
         width: parent.width
-        title: "Color"
-        subtitle: "Control intensity and color balance"
+        title: qsTr("Color")
+        subtitle: qsTr("Control intensity and color balance")
 
         AdjustRow {
             objectName: "editorSaturationControl"
             width: parent.width
-            label: "Saturation"
+            label: qsTr("Saturation")
             value: root.saturation
             onInteractionStarted: root.interactionStarted()
             onInteractionFinished: root.interactionFinished()
@@ -98,7 +98,7 @@ Column {
         AdjustRow {
             objectName: "editorVibranceControl"
             width: parent.width
-            label: "Vibrance"
+            label: qsTr("Vibrance")
             value: root.vibrance
             onInteractionStarted: root.interactionStarted()
             onInteractionFinished: root.interactionFinished()
@@ -108,7 +108,7 @@ Column {
         AdjustRow {
             objectName: "editorWarmthControl"
             width: parent.width
-            label: "Warmth"
+            label: qsTr("Warmth")
             value: root.warmth
             onInteractionStarted: root.interactionStarted()
             onInteractionFinished: root.interactionFinished()
@@ -118,7 +118,7 @@ Column {
         AdjustRow {
             objectName: "editorTintControl"
             width: parent.width
-            label: "Tint"
+            label: qsTr("Tint")
             value: root.tint
             onInteractionStarted: root.interactionStarted()
             onInteractionFinished: root.interactionFinished()
@@ -128,13 +128,13 @@ Column {
 
     SectionCard {
         width: parent.width
-        title: "Detail"
-        subtitle: "Refine texture and edge focus"
+        title: qsTr("Detail")
+        subtitle: qsTr("Refine texture and edge focus")
 
         AdjustRow {
             objectName: "editorSharpenControl"
             width: parent.width
-            label: "Sharpen"
+            label: qsTr("Sharpen")
             value: root.sharpen
             from: 0.0
             to: 1.0
@@ -147,7 +147,7 @@ Column {
         AdjustRow {
             objectName: "editorSoftenControl"
             width: parent.width
-            label: "Soften"
+            label: qsTr("Soften")
             value: root.blur
             from: 0.0
             to: 0.35
@@ -160,7 +160,7 @@ Column {
         AdjustRow {
             objectName: "editorVignetteControl"
             width: parent.width
-            label: "Vignette"
+            label: qsTr("Vignette")
             value: root.vignette
             from: 0.0
             to: 1.0

@@ -8,10 +8,74 @@ Column {
     required property FullscreenSideMenu menu
     spacing: 12
 
+    function languageSelectionIndex() {
+        if (!content.menu.languageManager)
+            return -1
+        const choices = content.menu.languageManager.languages
+        const selected = content.menu.languageManager.selectedLanguage
+        for (let index = 0; index < choices.length; ++index) {
+            if (choices[index].value === selected)
+                return index
+        }
+        return -1
+    }
+
+    Column {
+        objectName: "languageSettingRow"
+        visible: content.menu.languageManager !== null
+        width: parent.width
+        spacing: 6
+
+        Text {
+            objectName: "languageSettingTitle"
+            x: 12
+            width: parent.width - 24
+            text: qsTr("Language")
+            color: "white"
+            font.pixelSize: 14
+            font.weight: Font.Medium
+            wrapMode: Text.Wrap
+        }
+
+        ExportChoice {
+            id: languageChoice
+            objectName: "languageChoice"
+            x: 12
+            width: parent.width - 24
+            accessibleLabel: qsTr("Language")
+            Accessible.description: qsTr("Choose the interface language. Changes apply immediately. System default follows your computer's language.")
+                + (languageError.visible ? " " + languageError.text : "")
+            model: content.menu.languageManager ? content.menu.languageManager.languages : []
+            currentIndex: content.languageSelectionIndex()
+            onActivated: function(index) {
+                if (content.menu.languageManager) {
+                    content.menu.languageManager.selectLanguage(valueAt(index))
+                    // A failed save/load retains the last applied choice.
+                    currentIndex = Qt.binding(function() {
+                        return content.languageSelectionIndex()
+                    })
+                }
+            }
+        }
+
+        Text {
+            id: languageError
+            objectName: "languageSettingError"
+            x: 12
+            width: parent.width - 24
+            visible: text.length > 0
+            text: content.menu.languageManager ? content.menu.languageManager.errorMessage : ""
+            color: "#FFB4AB"
+            font.pixelSize: 12
+            wrapMode: Text.Wrap
+            Accessible.ignored: !visible
+        }
+    }
+
     ToggleRow {
         width: parent.width
-        title: "Info overlay"
-        subtitle: "Show file name and zoom details"
+        title: qsTr("Info overlay")
+        subtitle: qsTr("Show file name and zoom details")
         checked: content.menu.infoOverlayEnabled
         buttonMotionDuration: content.menu.buttonMotionDuration
         switchMotionDuration: content.menu.switchMotionDuration
@@ -23,8 +87,8 @@ Column {
 
     ToggleRow {
         width: parent.width
-        title: "Smooth motion"
-        subtitle: "Animate menu and switches"
+        title: qsTr("Smooth motion")
+        subtitle: qsTr("Animate menu and switches")
         checked: content.menu.smoothMotionEnabled
         buttonMotionDuration: content.menu.buttonMotionDuration
         switchMotionDuration: content.menu.switchMotionDuration
@@ -36,8 +100,8 @@ Column {
 
     ToggleRow {
         width: parent.width
-        title: "Open in fullscreen"
-        subtitle: "Use fullscreen when opening or showing images"
+        title: qsTr("Open in fullscreen")
+        subtitle: qsTr("Use fullscreen when opening or showing images")
         checked: content.menu.startInFullscreenEnabled
         buttonMotionDuration: content.menu.buttonMotionDuration
         switchMotionDuration: content.menu.switchMotionDuration
@@ -53,8 +117,8 @@ Column {
         visible: content.menu.backgroundModeManager
             && content.menu.backgroundModeManager.supported
         width: parent.width
-        title: "Background process"
-        subtitle: "Keep a lightweight background process open. Starts at next login."
+        title: qsTr("Background process")
+        subtitle: qsTr("Keep a lightweight background process open. Starts at next login.")
         checked: content.menu.backgroundModeManager
             ? content.menu.backgroundModeManager.enabled : false
         buttonMotionDuration: content.menu.buttonMotionDuration
@@ -67,8 +131,8 @@ Column {
 
     ValueRow {
         width: parent.width
-        title: "Background opacity"
-        subtitle: "Dark backdrop behind the image in fullscreen"
+        title: qsTr("Background opacity")
+        subtitle: qsTr("Dark backdrop behind the image in fullscreen")
         value: content.menu.fullscreenBackgroundOpacity
         step: 0.05
         buttonMotionDuration: content.menu.buttonMotionDuration
@@ -80,8 +144,8 @@ Column {
 
     ToggleRow {
         width: parent.width
-        title: "Full screen transparency grid"
-        subtitle: "Show a checkerboard behind transparent pixels in full screen"
+        title: qsTr("Full screen transparency grid")
+        subtitle: qsTr("Show a checkerboard behind transparent pixels in full screen")
         checked: content.menu.transparencyCheckerboardEnabled
         buttonMotionDuration: content.menu.buttonMotionDuration
         switchMotionDuration: content.menu.switchMotionDuration
@@ -93,10 +157,10 @@ Column {
 
     ValueRow {
         width: parent.width
-        title: "Grid opacity"
+        title: qsTr("Grid opacity")
         subtitle: content.menu.transparencyCheckerboardEnabled
-            ? "Strength of the transparency checkerboard"
-            : "Turn on the full screen grid to adjust"
+            ? qsTr("Strength of the transparency checkerboard")
+            : qsTr("Turn on the full screen grid to adjust")
         value: content.menu.transparencyCheckerboardOpacity
         step: 0.05
         enabled: content.menu.transparencyCheckerboardEnabled
@@ -110,8 +174,8 @@ Column {
 
     ToggleRow {
         width: parent.width
-        title: "Floating transparency grid"
-        subtitle: "Show a checkerboard instead of solid backing in floating mode"
+        title: qsTr("Floating transparency grid")
+        subtitle: qsTr("Show a checkerboard instead of solid backing in floating mode")
         checked: content.menu.windowedTransparencyCheckerboardEnabled
         buttonMotionDuration: content.menu.buttonMotionDuration
         switchMotionDuration: content.menu.switchMotionDuration
@@ -123,10 +187,10 @@ Column {
 
     ValueRow {
         width: parent.width
-        title: "Floating transparency opacity"
+        title: qsTr("Floating transparency opacity")
         subtitle: content.menu.windowedTransparencyCheckerboardEnabled
-            ? "Strength of the floating checkerboard"
-            : "Strength of the solid backing for transparent pixels"
+            ? qsTr("Strength of the floating checkerboard")
+            : qsTr("Strength of the solid backing for transparent pixels")
         value: content.menu.windowedTransparencyOpacity
         step: 0.05
         buttonMotionDuration: content.menu.buttonMotionDuration
@@ -146,8 +210,8 @@ Column {
         objectName: "advancedSettingsButton"
         width: parent.width
         text: content.menu.advancedOpen
-            ? "Advanced settings  ▲"
-            : "Advanced settings  ▼"
+            ? qsTr("Advanced settings  ▲")
+            : qsTr("Advanced settings  ▼")
         checkable: true
         checked: content.menu.advancedOpen
         accent: "#34FFFFFF"
@@ -158,12 +222,12 @@ Column {
     SectionCard {
         visible: content.menu.advancedOpen
         width: parent.width
-        title: "Rendering quality"
+        title: qsTr("Rendering quality")
 
         ToggleRow {
             width: parent.width
-            title: "Smooth scaling"
-            subtitle: "Filter pixels while zooming and fitting"
+            title: qsTr("Smooth scaling")
+            subtitle: qsTr("Filter pixels while zooming and fitting")
             checked: content.menu.smoothImageScalingEnabled
             buttonMotionDuration: content.menu.buttonMotionDuration
             switchMotionDuration: content.menu.switchMotionDuration
@@ -174,8 +238,8 @@ Column {
 
         ToggleRow {
             width: parent.width
-            title: "Mipmap downscaling"
-            subtitle: "Sharper text and detail when zoomed out"
+            title: qsTr("Mipmap downscaling")
+            subtitle: qsTr("Sharper text and detail when zoomed out")
             checked: content.menu.mipmapImageScalingEnabled
             buttonMotionDuration: content.menu.buttonMotionDuration
             switchMotionDuration: content.menu.switchMotionDuration
@@ -186,8 +250,8 @@ Column {
 
         ToggleRow {
             width: parent.width
-            title: "Pixel-aligned placement"
-            subtitle: "Avoid half-pixel blur at the image origin"
+            title: qsTr("Pixel-aligned placement")
+            subtitle: qsTr("Avoid half-pixel blur at the image origin")
             checked: content.menu.pixelAlignedRenderingEnabled
             buttonMotionDuration: content.menu.buttonMotionDuration
             switchMotionDuration: content.menu.switchMotionDuration
@@ -198,8 +262,8 @@ Column {
 
         ToggleRow {
             width: parent.width
-            title: "Full-resolution rendering"
-            subtitle: "Promote previews to the original resolution"
+            title: qsTr("Full-resolution rendering")
+            subtitle: qsTr("Promote previews to the original resolution")
             checked: content.menu.fullResolutionRenderingEnabled
             buttonMotionDuration: content.menu.buttonMotionDuration
             switchMotionDuration: content.menu.switchMotionDuration
@@ -210,8 +274,8 @@ Column {
 
         ToggleRow {
             width: parent.width
-            title: "Color-managed rendering"
-            subtitle: "Convert embedded profiles to display sRGB"
+            title: qsTr("Color-managed rendering")
+            subtitle: qsTr("Convert embedded profiles to display sRGB")
             checked: content.menu.colorManagedRenderingEnabled
             buttonMotionDuration: content.menu.buttonMotionDuration
             switchMotionDuration: content.menu.switchMotionDuration
@@ -225,17 +289,17 @@ Column {
         visible: content.menu.advancedOpen
         objectName: "maximumImageMemoryControl"
         width: parent.width
-        title: "Maximum working memory per image"
+        title: qsTr("Maximum working memory per image")
         subtitle: content.menu.estimatedLargeImageMemoryText()
-            + "\nImages above this budget open in a bounded preview"
+            + qsTr("\nImages above this budget open in a bounded preview")
         from: content.menu.minimumImageMemoryMiB
         to: content.menu.maximumImageMemoryLimitMiB
         value: content.menu.maximumImageMemoryMiB
         step: 128
         displayMultiplier: 1.0 / 1024.0
         displayDecimals: 2
-        displaySuffix: " GiB"
-        accessibleUnit: "MiB"
+        displaySuffix: qsTr(" GiB")
+        accessibleUnit: qsTr("MiB")
         buttonMotionDuration: content.menu.buttonMotionDuration
         onValueChangedByUser: function(value) {
             content.menu.maximumImageMemoryMiBRequested(
@@ -250,8 +314,8 @@ Column {
     ValueRow {
         visible: content.menu.advancedOpen
         width: parent.width
-        title: "Crop shield opacity"
-        subtitle: "Dim only the area outside the crop frame"
+        title: qsTr("Crop shield opacity")
+        subtitle: qsTr("Dim only the area outside the crop frame")
         value: content.menu.cropShieldOpacity
         step: 0.05
         buttonMotionDuration: content.menu.buttonMotionDuration
@@ -263,11 +327,11 @@ Column {
     SectionCard {
         visible: content.menu.advancedOpen
         width: parent.width
-        title: "Animated Playback Settings"
+        title: qsTr("Animated Playback Settings")
 
         ToggleRow {
             width: parent.width
-            title: "Play animated images"
+            title: qsTr("Play animated images")
             checked: content.menu.animatedImagePlaybackEnabled
             buttonMotionDuration: content.menu.buttonMotionDuration
             switchMotionDuration: content.menu.switchMotionDuration
@@ -278,7 +342,7 @@ Column {
 
         ValueRow {
             width: parent.width
-            title: "Playback speed"
+            title: qsTr("Playback speed")
             from: 0.25
             to: 2.0
             value: content.menu.animationSpeed
@@ -298,40 +362,40 @@ Column {
     ActionChip {
         objectName: "quitLicasaButton"
         width: parent.width
-        text: "Fully Quit Licasa"
-        subtitle: "Closes the viewer and all Licasa background processes."
+        text: qsTr("Fully Quit Licasa")
+        subtitle: qsTr("Closes the viewer and all Licasa background processes.")
         sectionStyle: true
         destructive: true
         animationDuration: content.menu.buttonMotionDuration
-        Accessible.description: subtitle + " Shortcut Control Shift Q."
+        Accessible.description: subtitle + qsTr(" Shortcut Control Shift Q.")
         onClicked: content.menu.quitRequested()
     }
 
     ActionChip {
         objectName: "viewSourceButton"
         width: parent.width
-        text: "View Source"
+        text: qsTr("View Source")
         sectionStyle: true
         animationDuration: content.menu.buttonMotionDuration
-        Accessible.description: "Open the Licasa source repository on GitHub."
+        Accessible.description: qsTr("Open the Licasa source repository on GitHub.")
         onClicked: content.menu.externalUrlRequested(content.menu.sourceRepositoryUrl)
     }
 
     ActionChip {
         objectName: "reportIssueButton"
         width: parent.width
-        text: "Report a Bug / Fix / Suggestion"
+        text: qsTr("Report a Bug / Fix / Suggestion")
         sectionStyle: true
         animationDuration: content.menu.buttonMotionDuration
-        Accessible.description: "Open a new GitHub issue for a bug, fix, or suggestion."
+        Accessible.description: qsTr("Open a new GitHub issue for a bug, fix, or suggestion.")
         onClicked: content.menu.externalUrlRequested(content.menu.issueReportUrl)
     }
 
     SectionCard {
         objectName: "aboutSection"
         width: parent.width
-        title: "About Licasa"
-        subtitle: "Version " + content.menu.appVersion
+        title: qsTr("About Licasa")
+        subtitle: qsTr("Version ") + content.menu.appVersion
         contentTopSpacing: 4
         color: "transparent"
         radius: 12
@@ -342,7 +406,7 @@ Column {
             objectName: "aboutReleaseDate"
             visible: content.menu.releaseDate.length > 0
             width: parent.width
-            text: "Released " + content.menu.releaseDate
+            text: qsTr("Released ") + content.menu.releaseDate
             color: "#B3FFFFFF"
             font.pixelSize: 12
         }
@@ -350,7 +414,7 @@ Column {
         Text {
             width: parent.width
             visible: content.menu.installedAsSnap
-            text: "Fully quitting Licasa allows Snap updates. Open pictures and unsaved changes are kept until you finish them."
+            text: qsTr("Fully quitting Licasa allows Snap updates. Open pictures and unsaved changes are kept until you finish them.")
             color: "#B3FFFFFF"
             font.pixelSize: 12
             wrapMode: Text.Wrap

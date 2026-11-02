@@ -27,6 +27,7 @@
 #endif
 #include <QBuffer>
 #include <QColorSpace>
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDebug>
@@ -430,7 +431,8 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                              : ImageDecodeContract::maximumDecodedBaseCacheBytes;
         const QFileInfo fileInfo(filePath_);
         if (!fileInfo.exists() || !fileInfo.isFile()) {
-            error_ = QStringLiteral("File not found: %1").arg(filePath_);
+            error_ = QCoreApplication::translate("AsyncImageProvider", "File not found: %1")
+                         .arg(filePath_);
             return;
         }
 
@@ -528,7 +530,8 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
                     return ImageDecodeContract::allows(size, maximumPixels / 2);
                 };
                 if (!fitsPair(dimensions) || (sensor.isValid() && !fitsPair(sensor))) {
-                    error_ = QStringLiteral("Parallel decoding exceeds the image memory budget.");
+                    error_ = QCoreApplication::translate(
+                        "AsyncImageProvider", "Parallel decoding exceeds the image memory budget.");
                     return;
                 }
             }
@@ -763,7 +766,8 @@ class AsyncDecodeResponse final : public QQuickImageResponse, public QRunnable {
         if (!applyImageEdits(image, editParameters_, cancelled_.get(), &editExecution)) {
             image = {};
             if (!isCancelled()) {
-                error_ = QStringLiteral("The image could not be processed safely.");
+                error_ = QCoreApplication::translate("AsyncImageProvider",
+                                                     "The image could not be processed safely.");
             }
             return;
         }

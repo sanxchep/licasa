@@ -1,5 +1,7 @@
 #include "io/byte_range_device.h"
 
+#include <QCoreApplication>
+
 #include <algorithm>
 #include <limits>
 #include <utility>
@@ -41,20 +43,21 @@ ByteRangeDevice::~ByteRangeDevice() { close(); }
 bool ByteRangeDevice::open(OpenMode mode)
 {
     if (isOpen()) {
-        fail(QStringLiteral("Byte range is already open"));
+        fail(QCoreApplication::translate("ByteRangeDevice", "Byte range is already open"));
         return false;
     }
     if (mode != QIODevice::ReadOnly) {
-        fail(QStringLiteral("Byte range is read-only"));
+        fail(QCoreApplication::translate("ByteRangeDevice", "Byte range is read-only"));
         return false;
     }
     if (cancelled()) {
-        fail(QStringLiteral("Byte-range operation cancelled"));
+        fail(QCoreApplication::translate("ByteRangeDevice", "Byte-range operation cancelled"));
         return false;
     }
     if (declaredOffset_ > quint64(std::numeric_limits<qint64>::max()) ||
         declaredLength_ > quint64(std::numeric_limits<qint64>::max())) {
-        fail(QStringLiteral("Byte range exceeds seekable file limits"));
+        fail(QCoreApplication::translate("ByteRangeDevice",
+                                         "Byte range exceeds seekable file limits"));
         return false;
     }
     if (!source_.open(QIODevice::ReadOnly)) {
@@ -64,7 +67,8 @@ bool ByteRangeDevice::open(OpenMode mode)
     const qint64 signedSize = source_.size();
     if (signedSize < 0 ||
         !checkedByteRange(quint64(signedSize), declaredOffset_, declaredLength_)) {
-        fail(QStringLiteral("Byte range lies outside the source file"));
+        fail(QCoreApplication::translate("ByteRangeDevice",
+                                         "Byte range lies outside the source file"));
         source_.close();
         return false;
     }
@@ -106,12 +110,12 @@ bool ByteRangeDevice::seek(qint64 position)
 {
     if (!isOpen() || cancelled()) {
         if (cancelled()) {
-            fail(QStringLiteral("Byte-range operation cancelled"));
+            fail(QCoreApplication::translate("ByteRangeDevice", "Byte-range operation cancelled"));
         }
         return false;
     }
     if (position < 0 || position > validatedLength_) {
-        fail(QStringLiteral("Seek lies outside the byte range"));
+        fail(QCoreApplication::translate("ByteRangeDevice", "Seek lies outside the byte range"));
         return false;
     }
     QString reason;
@@ -120,7 +124,7 @@ bool ByteRangeDevice::seek(qint64 position)
         return false;
     }
     if (!QIODevice::seek(position)) {
-        fail(QStringLiteral("Unable to seek within byte range"));
+        fail(QCoreApplication::translate("ByteRangeDevice", "Unable to seek within byte range"));
         return false;
     }
     return true;
@@ -129,23 +133,23 @@ bool ByteRangeDevice::seek(qint64 position)
 qint64 ByteRangeDevice::readData(char* data, qint64 maximumSize)
 {
     if (!isOpen() || maximumSize < 0) {
-        fail(QStringLiteral("Invalid byte-range read"));
+        fail(QCoreApplication::translate("ByteRangeDevice", "Invalid byte-range read"));
         return -1;
     }
     const qint64 logicalPosition = QIODevice::pos();
     if (logicalPosition < 0 || logicalPosition > validatedLength_) {
-        fail(QStringLiteral("Byte-range position is invalid"));
+        fail(QCoreApplication::translate("ByteRangeDevice", "Byte-range position is invalid"));
         return -1;
     }
     if (maximumSize == 0 || logicalPosition == validatedLength_) {
         return 0;
     }
     if (!data) {
-        fail(QStringLiteral("Invalid byte-range read buffer"));
+        fail(QCoreApplication::translate("ByteRangeDevice", "Invalid byte-range read buffer"));
         return -1;
     }
     if (cancelled()) {
-        fail(QStringLiteral("Byte-range operation cancelled"));
+        fail(QCoreApplication::translate("ByteRangeDevice", "Byte-range operation cancelled"));
         return -1;
     }
 
@@ -162,7 +166,7 @@ qint64 ByteRangeDevice::readData(char* data, qint64 maximumSize)
     // bounded by QFile::size() at open and again above. This subtraction-based
     // invariant guarantees the addition is representable in qint64.
     if (validatedOffset_ > std::numeric_limits<qint64>::max() - logicalPosition) {
-        fail(QStringLiteral("Byte-range offset overflow"));
+        fail(QCoreApplication::translate("ByteRangeDevice", "Byte-range offset overflow"));
         return -1;
     }
     const qint64 sourcePosition = validatedOffset_ + logicalPosition;
@@ -176,7 +180,8 @@ qint64 ByteRangeDevice::readData(char* data, qint64 maximumSize)
     const qint64 received = source_.read(data, requested);
     if (received != requested) {
         fail(received < 0 ? source_.errorString()
-                          : QStringLiteral("Source file changed during byte-range read"));
+                          : QCoreApplication::translate(
+                                "ByteRangeDevice", "Source file changed during byte-range read"));
         return -1;
     }
 
@@ -185,7 +190,7 @@ qint64 ByteRangeDevice::readData(char* data, qint64 maximumSize)
 
 qint64 ByteRangeDevice::writeData(const char*, qint64)
 {
-    fail(QStringLiteral("Byte range is read-only"));
+    fail(QCoreApplication::translate("ByteRangeDevice", "Byte range is read-only"));
     return -1;
 }
 
@@ -198,7 +203,7 @@ bool ByteRangeDevice::validateCurrentSource(QString* reason) const
 {
     if (!source_.isOpen() || !source_.isReadable()) {
         if (reason) {
-            *reason = QStringLiteral("Source file is not readable");
+            *reason = QCoreApplication::translate("ByteRangeDevice", "Source file is not readable");
         }
         return false;
     }
@@ -208,7 +213,8 @@ bool ByteRangeDevice::validateCurrentSource(QString* reason) const
     };
     const auto truncated = [reason]() {
         if (reason) {
-            *reason = QStringLiteral("Source file was truncated below the byte range");
+            *reason = QCoreApplication::translate("ByteRangeDevice",
+                                                  "Source file was truncated below the byte range");
         }
         return false;
     };

@@ -133,12 +133,12 @@ Item {
     readonly property int panelMotionDuration: smoothMotionEnabled ? 220 : 0
     readonly property int buttonMotionDuration: smoothMotionEnabled ? 140 : 0
     readonly property string toolSubtitle: {
-        if (sourceChanged) return "File changed. Reopen to continue."
+        if (sourceChanged) return qsTr("File changed. Reopen to continue.")
         switch (activeTool) {
-        case "crop": return cropMode ? "Adjust the frame, then apply" : "Frame, rotate, and mirror"
-        case "looks": return "One-click non-destructive styles"
-        case "export": return "Format, resolution, and quality"
-        default: return "Light, color, and detail"
+        case "crop": return cropMode ? qsTr("Adjust the frame, then apply") : qsTr("Frame, rotate, and mirror")
+        case "looks": return qsTr("One-click non-destructive styles")
+        case "export": return qsTr("Format, resolution, and quality")
+        default: return qsTr("Light, color, and detail")
         }
     }
 
@@ -295,7 +295,7 @@ Item {
             - (root.cornerControlMargin + width + 8) * hideProgress
         anchors.bottomMargin: root.cornerControlMargin
         iconName: "edit"
-        accessibleName: "Open editor"
+        accessibleName: qsTr("Open editor")
         animationDuration: root.buttonMotionDuration
         onClicked: {
             if (!root.launcherBlocked)
@@ -369,7 +369,7 @@ Item {
                 anchors.leftMargin: 20
                 anchors.top: parent.top
                 anchors.topMargin: 16
-                text: root.hasAdjustments ? "Editor  •" : "Editor"
+                text: root.hasAdjustments ? qsTr("Editor  •") : qsTr("Editor")
                 color: "white"
                 font.pixelSize: 22
                 font.weight: Font.DemiBold
@@ -396,7 +396,7 @@ Item {
                 HeaderButton {
                     width: 64
                     height: 34
-                    text: "Reset"
+                    text: qsTr("Reset")
                     enabled: (root.hasAdjustments || root.pendingNumber) && !root.cropMode
                     highlighted: root.hasAdjustments && !root.cropMode
                     animationDuration: root.buttonMotionDuration
@@ -438,10 +438,10 @@ Item {
                 Repeater {
                     id: toolTabRepeater
                     model: [
-                        { "key": "adjust", "label": "Adjust" },
-                        { "key": "crop", "label": "Crop" },
-                        { "key": "looks", "label": "Looks" },
-                        { "key": "export", "label": "Export" }
+                        { "key": "adjust", "label": qsTr("Adjust") },
+                        { "key": "crop", "label": qsTr("Crop") },
+                        { "key": "looks", "label": qsTr("Looks") },
+                        { "key": "export", "label": qsTr("Export") }
                     ]
 
                     Rectangle {
@@ -583,8 +583,8 @@ Item {
             enabled: root.overwriteConfirmationOpen
             property real revealProgress: root.overwriteConfirmationOpen ? 1 : 0
             Accessible.role: Accessible.Dialog
-            Accessible.name: "Overwrite original?"
-            Accessible.description: "This replaces the original image. The original will be lost. Continue?"
+            Accessible.name: qsTr("Overwrite original?")
+            Accessible.description: qsTr("This replaces the original image. The original will be lost. Continue?")
             Accessible.ignored: !root.overwriteConfirmationOpen
 
             Behavior on revealProgress {
@@ -616,7 +616,7 @@ Item {
 
                     Text {
                         width: parent.width
-                        text: "⚠  Overwrite original?"
+                        text: qsTr("⚠  Overwrite original?")
                         color: "#F0CC70"
                         font.pixelSize: 14
                         font.weight: Font.DemiBold
@@ -642,7 +642,7 @@ Item {
                             id: overwriteYesButton
                             objectName: "editorOverwriteYesButton"
                             width: 68
-                            text: "Yes"
+                            text: qsTr("Yes")
                             checked: true
                             accent: "#8A681E"
                             enabled: root.overwriteConfirmationOpen && root.canOverwrite
@@ -656,7 +656,7 @@ Item {
                             id: overwriteNoButton
                             objectName: "editorOverwriteNoButton"
                             width: 68
-                            text: "No"
+                            text: qsTr("No")
                             animationDuration: root.buttonMotionDuration
                             KeyNavigation.tab: overwriteYesButton
                             KeyNavigation.backtab: overwriteYesButton
@@ -705,7 +705,7 @@ Item {
                     Accessible.ignored: !root.cropMode || !footer.enabled
                     width: (parent.width - parent.spacing) * 0.38
                     height: parent.height
-                    text: "Cancel"
+                    text: qsTr("Cancel")
                     animationDuration: root.buttonMotionDuration
                     onClicked: root.cropCanceled()
                 }
@@ -716,7 +716,7 @@ Item {
                     Accessible.ignored: !root.cropMode || !footer.enabled
                     width: (parent.width - parent.spacing) * 0.62
                     height: parent.height
-                    text: "Apply crop"
+                    text: qsTr("Apply crop")
                     affirmative: true
                     animationDuration: root.buttonMotionDuration
                     onClicked: root.cropApplied()
@@ -739,7 +739,7 @@ Item {
                     Accessible.ignored: root.cropMode || !footer.enabled
                     width: (parent.width - parent.spacing) * 0.38
                     height: parent.height
-                    text: root.saveBusy ? "Saving…" : "Save"
+                    text: root.saveBusy ? qsTr("Saving…") : qsTr("Save")
                     enabled: root.canOverwrite
                     checked: root.hasAdjustments && !root.saveBusy
                     accent: "#48FFFFFF"
@@ -753,7 +753,7 @@ Item {
                     Accessible.ignored: root.cropMode || !footer.enabled
                     width: parent.width - x
                     height: parent.height
-                    text: "Save as a copy"
+                    text: qsTr("Save as a copy")
                     enabled: !root.saveBusy && root.hasImage && !root.sourceChanged
                     animationDuration: root.buttonMotionDuration
                     onClicked: {

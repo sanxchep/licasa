@@ -89,7 +89,7 @@ Column {
                 anchors.margins: 12
                 spacing: 4
                 Text {
-                    text: root.cropMode ? "Selected area" : "Image size"
+                    text: root.cropMode ? qsTr("Selected area") : qsTr("Image size")
                     color: "#A8FFFFFF"
                     font.pixelSize: 11
                     renderType: Text.NativeRendering
@@ -98,7 +98,7 @@ Column {
                     width: parent.width
                     text: root.cropMode && root.cropOutputWidth > 0
                         ? root.cropOutputWidth + " × " + root.cropOutputHeight
-                        : root.imageWidth > 0 ? Math.round(root.imageWidth) + " × " + Math.round(root.imageHeight) : "Ready to frame"
+                        : root.imageWidth > 0 ? Math.round(root.imageWidth) + " × " + Math.round(root.imageHeight) : qsTr("Ready to frame")
                     color: "white"
                     font.pixelSize: 18
                     font.weight: Font.DemiBold
@@ -123,7 +123,7 @@ Column {
             objectName: "editorStartCropButton"
             width: parent.width
             height: 44
-            text: "Start crop"
+            text: qsTr("Start crop")
             sectionStyle: true
             affirmative: true
             animationDuration: root.buttonMotionDuration
@@ -133,7 +133,7 @@ Column {
         ActionChip {
             visible: root.cropMode
             width: parent.width
-            text: "Reset frame"
+            text: qsTr("Reset frame")
             sectionStyle: true
             height: 44
             animationDuration: root.buttonMotionDuration
@@ -143,7 +143,7 @@ Column {
 
     SectionCard {
         width: parent.width
-        title: "Aspect ratio"
+        title: qsTr("Aspect ratio")
 
         Grid {
             id: ratioGrid
@@ -154,8 +154,8 @@ Column {
 
             Repeater {
                 model: [
-                    { "key": "free", "label": "Free", "ratio": 0 },
-                    { "key": "original", "label": "Original", "ratio": root.imageHeight > 0 ? root.imageWidth / root.imageHeight : 1.5 },
+                    { "key": "free", "label": qsTr("Free"), "ratio": 0 },
+                    { "key": "original", "label": qsTr("Original"), "ratio": root.imageHeight > 0 ? root.imageWidth / root.imageHeight : 1.5 },
                     { "key": "square", "label": "1:1", "ratio": 1 },
                     { "key": "4:3", "label": "4:3", "ratio": 4 / 3 },
                     { "key": "3:2", "label": "3:2", "ratio": 3 / 2 },
@@ -178,7 +178,7 @@ Column {
             CropRatioButton {
                 objectName: "editorCustomAspectChip"
                 width: (ratioGrid.width - 3 * ratioGrid.spacing) / 4
-                text: "Custom"
+                text: qsTr("Custom")
                 custom: true
                 checked: root.cropAspectPreset === "custom"
                     || root.customAspectEditorOpen
@@ -212,7 +212,7 @@ Column {
                     spacing: 4
 
                     Text {
-                        text: "Width"
+                        text: qsTr("Width")
                         color: "#99FFFFFF"
                         font.pixelSize: 10
                         renderType: Text.NativeRendering
@@ -231,8 +231,8 @@ Column {
                         TextInput {
                             id: customWidthInput
                             objectName: "customAspectWidthInput"
-                            Accessible.name: "Horizontal aspect ratio"
-                            Accessible.description: "Enter the width proportion, then press Enter to apply."
+                            Accessible.name: qsTr("Horizontal aspect ratio")
+                            Accessible.description: qsTr("Enter the width proportion, then press Enter to apply.")
                             anchors.fill: parent
                             anchors.leftMargin: 8
                             anchors.rightMargin: 8
@@ -274,7 +274,7 @@ Column {
                     spacing: 4
 
                     Text {
-                        text: "Height"
+                        text: qsTr("Height")
                         color: "#99FFFFFF"
                         font.pixelSize: 10
                         renderType: Text.NativeRendering
@@ -292,8 +292,8 @@ Column {
                         TextInput {
                             id: customHeightInput
                             objectName: "customAspectHeightInput"
-                            Accessible.name: "Vertical aspect ratio"
-                            Accessible.description: "Enter the height proportion, then press Enter to apply."
+                            Accessible.name: qsTr("Vertical aspect ratio")
+                            Accessible.description: qsTr("Enter the height proportion, then press Enter to apply.")
                             anchors.fill: parent
                             anchors.leftMargin: 8
                             anchors.rightMargin: 8
@@ -326,7 +326,7 @@ Column {
                     y: customWidthField.y
                     width: 72
                     height: 38
-                    text: "Apply"
+                    text: qsTr("Apply")
                     sectionStyle: true
                     textAlignment: Text.AlignHCenter
                     affirmative: true
@@ -340,7 +340,7 @@ Column {
 
     SectionCard {
         width: parent.width
-        title: "Rotate & mirror"
+        title: qsTr("Rotate & mirror")
 
         Grid {
             id: orientationGrid
@@ -353,7 +353,7 @@ Column {
                 width: (orientationGrid.width - orientationGrid.spacing) / 2
                 height: 44
                 sectionStyle: true
-                text: "↶  Rotate left"
+                text: qsTr("↶  Rotate left")
                 textColor: "#DDFFFFFF"
                 enabled: !root.cropMode
                 animationDuration: root.buttonMotionDuration
@@ -364,7 +364,7 @@ Column {
                 width: (orientationGrid.width - orientationGrid.spacing) / 2
                 height: 44
                 sectionStyle: true
-                text: "↷  Rotate right"
+                text: qsTr("↷  Rotate right")
                 textColor: "#DDFFFFFF"
                 enabled: !root.cropMode
                 animationDuration: root.buttonMotionDuration
@@ -376,7 +376,7 @@ Column {
                 height: 44
                 sectionStyle: true
                 affirmative: root.flipHorizontal
-                text: "Flip horizontal"
+                text: qsTr("Flip horizontal")
                 textColor: "#DDFFFFFF"
                 enabled: !root.cropMode
                 checkable: true
@@ -390,7 +390,7 @@ Column {
                 height: 44
                 sectionStyle: true
                 affirmative: root.flipVertical
-                text: "Flip vertical"
+                text: qsTr("Flip vertical")
                 textColor: "#DDFFFFFF"
                 enabled: !root.cropMode
                 checkable: true
@@ -407,7 +407,7 @@ Column {
             sectionStyle: true
             visible: root.rotationQuarterTurns !== 0
             enabled: !root.cropMode
-            text: "Reset " + (root.rotationQuarterTurns * 90) + "°"
+            text: qsTr("Reset ") + (root.rotationQuarterTurns * 90) + "°"
             textColor: "#DDFFFFFF"
             animationDuration: root.buttonMotionDuration
             onClicked: root.rotationResetRequested()

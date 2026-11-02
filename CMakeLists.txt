@@ -56,7 +56,7 @@ endif()
 
 include(cmake/LicasaRuntimeProfiles.cmake)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickDialogs2)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickDialogs2 LinguistTools)
 if(LICASA_ENABLE_MOTION_PLAYBACK)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Multimedia)
     # Bounded QIODevice playback requires the patched private plugin for the
@@ -355,7 +355,7 @@ endif()
 # A working-source receipt complements the exact executable generation hash.
 # Include package and test inputs; documentation and build caches are separate.
 file(GLOB_RECURSE LICASA_RECEIPT_INPUTS CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
-        src/* qml/* cmake/* packaging/* snap/* tools/* tests/* .github/*)
+        src/* qml/* translations/* cmake/* packaging/* snap/* tools/* tests/* .github/*)
 list(APPEND LICASA_RECEIPT_INPUTS CMakeLists.txt CMakePresets.json)
 list(SORT LICASA_RECEIPT_INPUTS)
 set(LICASA_RECEIPT_CONTENT "")
@@ -380,6 +380,8 @@ licasa_enable_warnings(licasa_lifecycle_platform)
 install(PROGRAMS tools/lifecycle_update.py DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/licasa")
 
 add_library(licasa_image_services STATIC
+        src/app/language_manager.cpp
+        src/app/language_manager.h
         src/app/application_settings.cpp
         src/app/application_settings.h
         src/imaging/image_edit_pipeline.cpp
@@ -697,6 +699,22 @@ function(licasa_add_qml target_name)
     )
 endfunction()
 licasa_add_qml(licasa)
+# Explicit source collection and the separate Linguist commands also work on
+# Qt 6.4, including strings in services and the lazily loaded QML contents.
+file(GLOB_RECURSE LICASA_TRANSLATION_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.qml" "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.js")
+qt_add_lupdate(licasa_image_services
+        TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/translations/licasa_sv.ts"
+        SOURCES ${LICASA_TRANSLATION_SOURCES}
+        OPTIONS -no-obsolete -locations relative)
+qt_add_lrelease(licasa_image_services
+        TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/translations/licasa_sv.ts"
+        QM_FILES_OUTPUT_VARIABLE LICASA_TRANSLATION_CATALOGS
+        OPTIONS -nounfinished)
+qt_add_resources(licasa_image_services "licasa_translations"
+        PREFIX "/i18n" BASE "${CMAKE_CURRENT_BINARY_DIR}"
+        FILES ${LICASA_TRANSLATION_CATALOGS})
 qt_add_resources(licasa "licasa_app_icon" PREFIX "/" FILES assets/licasa.png)
 configure_file(assets/licasa-4096x4096.png
         generated/default-image/licasa-4096x4096.png COPYONLY)

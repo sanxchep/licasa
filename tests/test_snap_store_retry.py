@@ -226,6 +226,49 @@ pathlib.Path(sys.argv[1]).write_text(str(p.pid))
 
 
 class SnapBuildTests(unittest.TestCase):
+    def test_snap_detection_ignores_bootstrap_launchers_and_path_aliases(self):
+        for already_installed in (False, True):
+            with self.subTest(already_installed=already_installed), \
+                    tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                installed = {"lxd", "snapcraft"} if already_installed else set()
+                calls = []
+                setup = []
+
+                def executable(name):
+                    # Ubuntu provides /sbin/lxd before the LXD snap exists.
+                    # PATH can also omit the real /snap/bin entry entirely.
+                    if name.startswith("/snap/bin/"):
+                        return name if Path(name).name in installed else None
+                    return {"snap": "/usr/bin/snap", "lxd": "/sbin/lxd",
+                            "snapcraft": "/usr/bin/snapcraft"}.get(name)
+
+                def store(command, **options):
+                    calls.append(command)
+                    if command[:2] == ["sudo", "snap"]:
+                        action, name = command[2], command[-1]
+                        if action == "refresh" and name not in installed:
+                            return 1  # snapd: cannot refresh an uninstalled snap.
+                        if action == "install" and name in installed:
+                            return 1
+                        installed.add(name)
+                    else:
+                        self.assertEqual(command[-1], "/snap/bin/snapcraft")
+                        (root / "licasa_test_amd64.snap").write_bytes(b"fake snap")
+                    return 0
+
+                env = {"RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_TEMP": str(root),
+                       "GITHUB_REPOSITORY": "example/licasa", "GITHUB_RUN_ID": "123",
+                       "GITHUB_OUTPUT": str(root / "output")}
+                with patch.dict(os.environ, env):
+                    build(root, run=lambda command, **kw: setup.append(command),
+                          retry_command=store, executable=executable)
+                action = "refresh" if already_installed else "install"
+                self.assertEqual(calls[:2], [["sudo", "snap", action, "lxd"],
+                    ["sudo", "snap", action, "--channel=stable", "--classic", "snapcraft"]])
+                self.assertIn(["sudo", "/snap/bin/lxd", "init", "--auto"], setup)
+                self.assertEqual((root / "output").read_text(), f"snap={root}/licasa_test_amd64.snap\n")
+
     def test_local_machine_is_rejected_before_any_setup(self):
         with patch.dict(os.environ, {"RUNNER_ENVIRONMENT": "self-hosted"}), \
                 self.assertRaisesRegex(ValueError, "disposable"):
@@ -261,7 +304,7 @@ with (root/'commands.jsonl').open('a') as stream:
     stream.write(json.dumps({'args':args,'cwd':os.getcwd(),'image':os.environ.get('SNAPCRAFT_IMAGE_INFO')})+'\\n')
 if args[:3] == ['snap','install','lxd'] and not (root/'failed').exists():
     (root/'failed').touch(); print('error: unable to contact snap store'); sys.exit(1)
-if args[-1:] == ['snapcraft'] and args[0] == '-u':
+if args[-1:] == ['/snap/bin/snapcraft'] and args[0] == '-u':
     (root/'licasa_test_amd64.snap').write_bytes(b'fake snap')
 ''')
             sudo.chmod(0o755)

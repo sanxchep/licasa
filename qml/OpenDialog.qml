@@ -21,7 +21,7 @@ FileDialog {
         return DialogRuntime.open(dialog)
     }
 
-    title: "Open image"
+    title: qsTr("Open image")
     fileMode: FileDialog.OpenFile
     nameFilters: formatSupport.nameFilters
 

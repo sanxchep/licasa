@@ -44,8 +44,8 @@ Item {
     enabled: visible
     activeFocusOnTab: visible
     Accessible.role: Accessible.Pane
-    Accessible.name: "Crop frame"
-    Accessible.description: "Alt and arrow keys move the crop. Add Shift to resize. Enter applies; Escape cancels."
+    Accessible.name: qsTr("Crop frame")
+    Accessible.description: qsTr("Alt and arrow keys move the crop. Add Shift to resize. Enter applies; Escape cancels.")
     Accessible.focusable: visible
     Accessible.focused: activeFocus
 

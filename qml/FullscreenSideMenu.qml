@@ -23,6 +23,7 @@ Item {
     readonly property bool panelVisible: panelOpen || panel.revealProgress > 0.001
     property bool startInFullscreenEnabled: true
     property var backgroundModeManager: null
+    property var languageManager: null
     property string appVersion: ""
     property string releaseDate: ""
     property bool installedAsSnap: false
@@ -122,12 +123,12 @@ Item {
 
     function estimatedLargeImageMemoryText() {
         const gibibytes = maximumImageMemoryMiB / 1024.0
-        return "Estimated per-image budget: " + gibibytes.toFixed(2) + " GiB"
+        return qsTr("Estimated per-image budget: ") + gibibytes.toFixed(2) + qsTr(" GiB")
     }
 
     function currentImageMegapixelsText() {
         const decimals = currentImageMegapixels < 100.0 ? 1 : 0
-        return currentImageMegapixels.toFixed(decimals) + " MP"
+        return currentImageMegapixels.toFixed(decimals) + qsTr(" MP")
     }
 
     // Controls consume their own arrows first (sliders, fields and tool tabs).
@@ -208,7 +209,7 @@ Item {
             - (root.cornerControlMargin + width + 8) * hideProgress
         anchors.bottomMargin: root.cornerControlMargin
         iconName: "settings"
-        accessibleName: root.panelOpen ? "Close settings" : "Open settings"
+        accessibleName: root.panelOpen ? qsTr("Close settings") : qsTr("Open settings")
         checkable: true
         checked: root.panelOpen
         animationDuration: root.buttonMotionDuration
@@ -256,7 +257,7 @@ Item {
                 id: titleText
                 x: 0
                 anchors.verticalCenter: closeButton.verticalCenter
-                text: "Settings"
+                text: qsTr("Settings")
                 color: "white"
                 font.pixelSize: 22
                 font.weight: Font.DemiBold
@@ -270,7 +271,7 @@ Item {
                 anchors.top: parent.top
                 anchors.right: parent.right
                 iconName: "close"
-                accessibleName: "Close settings"
+                accessibleName: qsTr("Close settings")
                 baseColor: "#2B2B2B"
                 hoverColor: "#393939"
                 animationDuration: root.buttonMotionDuration

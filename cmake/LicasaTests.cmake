@@ -14,6 +14,21 @@ set(LICASA_AVIF_TEST_TARGETS)
 set(LICASA_APNG_TEST_TARGETS)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+add_test(NAME licasa_translation_catalog
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_translations.py
+        --lupdate $<TARGET_FILE:Qt6::lupdate>)
+set_tests_properties(licasa_translation_catalog PROPERTIES TIMEOUT 75 LABELS "core;localization;packaging")
+
+add_executable(licasa_language_tests tests/tst_language_manager.cpp)
+target_compile_definitions(licasa_language_tests PRIVATE LICASA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(licasa_language_tests PRIVATE licasa_image_services Qt6::Test)
+licasa_enable_warnings(licasa_language_tests)
+list(APPEND LICASA_TEST_TARGETS licasa_language_tests)
+list(APPEND LICASA_CORE_TEST_TARGETS licasa_language_tests)
+add_test(NAME licasa_language_tests COMMAND licasa_language_tests -platform offscreen)
+set_tests_properties(licasa_language_tests PROPERTIES TIMEOUT 30 LABELS "core;localization;fast")
+
 add_test(NAME licasa_offline_source_tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_offline_sources.py")
 set_tests_properties(licasa_offline_source_tests PROPERTIES

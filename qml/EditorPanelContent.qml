@@ -75,46 +75,46 @@ Column {
     SectionCard {
         visible: content.editor.activeTool === "looks"
         width: parent.width
-        title: "Looks"
-        subtitle: "Every look remains fully undoable"
+        title: qsTr("Looks")
+        subtitle: qsTr("Every look remains fully undoable")
 
         Flow {
             width: parent.width
             spacing: 8
 
             ActionChip {
-                text: "Original"
+                text: qsTr("Original")
                 checked: !content.editor.hasAdjustments
                 animationDuration: content.editor.buttonMotionDuration
                 onClicked: content.editor.resetRequested()
             }
 
             ActionChip {
-                text: "Mono"
+                text: qsTr("Mono")
                 animationDuration: content.editor.buttonMotionDuration
                 onClicked: content.editor.presetRequested("bw")
             }
 
             ActionChip {
-                text: "Pop"
+                text: qsTr("Pop")
                 animationDuration: content.editor.buttonMotionDuration
                 onClicked: content.editor.presetRequested("pop")
             }
 
             ActionChip {
-                text: "Vivid"
+                text: qsTr("Vivid")
                 animationDuration: content.editor.buttonMotionDuration
                 onClicked: content.editor.presetRequested("vivid")
             }
 
             ActionChip {
-                text: "Cinema"
+                text: qsTr("Cinema")
                 animationDuration: content.editor.buttonMotionDuration
                 onClicked: content.editor.presetRequested("cinematic")
             }
 
             ActionChip {
-                text: "Soft"
+                text: qsTr("Soft")
                 animationDuration: content.editor.buttonMotionDuration
                 onClicked: content.editor.presetRequested("soft")
             }
@@ -122,7 +122,7 @@ Column {
 
         Text {
             width: parent.width
-            text: "Every look remains fully undoable."
+            text: qsTr("Every look remains fully undoable.")
             color: "#90FFFFFF"
             font.pixelSize: 11
             wrapMode: Text.Wrap

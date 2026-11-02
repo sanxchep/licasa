@@ -40,7 +40,7 @@ Item {
         Text {
             id: compareText
             anchors.centerIn: parent
-            text: "Original preview"
+            text: qsTr("Original preview")
             color: Qt.rgba(1, 1, 1, 0.94)
             font.pixelSize: 12
             font.weight: Font.Medium
@@ -90,7 +90,7 @@ Item {
                 elide: Text.ElideRight
                 text: Math.round(root.imageWidth) + " × " + Math.round(root.imageHeight)
                     + "   " + Math.round(root.currentScale * 100) + "%"
-                    + (root.limitedToPreview ? "   MEMORY-SAVING PREVIEW" : "")
+                    + (root.limitedToPreview ? qsTr("   MEMORY-SAVING PREVIEW") : "")
             }
         }
 

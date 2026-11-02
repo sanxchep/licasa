@@ -7,6 +7,7 @@
 #include "app/app_constants.h"
 #include "app/application_lifecycle.h"
 #include "app/application_settings.h"
+#include "app/language_manager.h"
 #include "app/runtime_error_log.h"
 #include "app/window_manager.h"
 #include "export/image_save_service.h"
@@ -79,11 +80,10 @@ int main(int argc, char* argv[])
         snapVersion.isEmpty() ? QStringLiteral(LICASA_VERSION) : snapVersion;
     application.setApplicationVersion(installedVersion);
     const QDate releaseDate = QDate::fromString(QStringLiteral(LICASA_RELEASE_DATE), Qt::ISODate);
-    const QVariantMap appInfo{
-        {QStringLiteral("version"), installedVersion},
-        {QStringLiteral("installedAsSnap"), installedAsSnap},
-        {QStringLiteral("releaseDate"),
-         QLocale(QLocale::English).toString(releaseDate, QStringLiteral("d MMMM yyyy"))}};
+    const QVariantMap appInfo{{QStringLiteral("version"), installedVersion},
+                              {QStringLiteral("installedAsSnap"), installedAsSnap},
+                              {QStringLiteral("releaseDate"),
+                               QLocale().toString(releaseDate, QStringLiteral("d MMMM yyyy"))}};
 
     const Licasa::LaunchOptions options = Licasa::parseLaunchOptions(application.arguments());
     const QString endpoint = Licasa::lifecycleEndpointName();
@@ -124,6 +124,8 @@ int main(int argc, char* argv[])
         }
     }
     Licasa::ViewerPreferences viewerPreferences;
+    Licasa::LanguageManager languageManager;
+    languageManager.setReleaseDate(releaseDate);
     Licasa::ImageResourcePolicy imageResourcePolicy(viewerPreferences);
     Licasa::ImageProbe imageProbe(imageResourcePolicy);
     Licasa::FormatSupport formatSupport;
@@ -132,10 +134,16 @@ int main(int argc, char* argv[])
     auto* decodeProvider = new Licasa::AsyncImageProvider(imageResourcePolicy);
     Licasa::ImageAnimationService imageAnimationService(imageResourcePolicy, *decodeProvider);
     QQmlApplicationEngine engine;
+    QObject::connect(&languageManager, &Licasa::LanguageManager::languageChanged, &engine, [&] {
+        formatSupport.retranslate();
+        engine.retranslate();
+    });
     engine.addImageProvider(QStringLiteral("animation"),
                             imageAnimationService.createFrameProvider());
 
     const QVariantMap sharedWindowProperties{
+        {QStringLiteral("languageManager"),
+         QVariant::fromValue(static_cast<QObject*>(&languageManager))},
         {QStringLiteral("appInfo"), appInfo},
         {QStringLiteral("imageProbe"), QVariant::fromValue(static_cast<QObject*>(&imageProbe))},
         {QStringLiteral("formatSupport"),
