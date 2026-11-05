@@ -299,8 +299,12 @@ class BackgroundModeTests final : public QObject {
         }
         const QString appDir = home_->filePath(QStringLiteral("installed space $`\"%\\ image"));
         const QString appRun = QDir(appDir).filePath(QStringLiteral("AppRun"));
-        QVERIFY(writeFile(
-            appRun, "#!/bin/sh\nprintf '%s\\0' \"$0\" \"$@\" > \"$LICASA_BACKGROUND_CAPTURE\"\n"));
+        // GIO can return before AppRun finishes. Publish the complete capture in one rename.
+        QVERIFY(writeFile(appRun, "#!/bin/sh\n"
+                                  "set -e\n"
+                                  "capture=$LICASA_BACKGROUND_CAPTURE\n"
+                                  "printf '%s\\0' \"$0\" \"$@\" > \"$capture.tmp\"\n"
+                                  "mv -- \"$capture.tmp\" \"$capture\"\n"));
         QVERIFY(QFile::setPermissions(appRun, QFileDevice::ReadOwner | QFileDevice::WriteOwner |
                                                   QFileDevice::ExeOwner));
         qputenv("APPDIR", appDir.toUtf8());

@@ -3,6 +3,7 @@
 #include "imaging/image_resource_policy.h"
 #include "png_preview_fixture.h"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QImage>
 #include <QImageReader>
@@ -18,6 +19,11 @@ class PreviewHandoffTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void initTestCase()
+    {
+        QCoreApplication::setOrganizationName(QStringLiteral("LicasaPreviewHandoffTests"));
+    }
+
     void xpmHandoffPreservesNativeAndFallbackPixels_data()
     {
         QTest::addColumn<bool>("named");

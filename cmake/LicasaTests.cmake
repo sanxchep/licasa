@@ -607,10 +607,23 @@ add_test(NAME licasa_async_image_provider_tests
 set_tests_properties(licasa_async_image_provider_tests PROPERTIES
         TIMEOUT 15 RUN_SERIAL TRUE LABELS "core;async;lifecycle;fast")
 
+# Large-raster handoffs compete with codec and rendering tests for CPU and
+# memory. Isolate them while keeping their own deadline and full-size fixtures.
+if(LICASA_HAVE_FAST_PNG_PREVIEW)
+    add_executable(licasa_preview_handoff_tests tests/tst_preview_handoff.cpp)
+    target_link_libraries(licasa_preview_handoff_tests PRIVATE licasa_image_services Qt6::Test)
+    licasa_enable_warnings(licasa_preview_handoff_tests)
+    list(APPEND LICASA_TEST_TARGETS licasa_preview_handoff_tests)
+    list(APPEND LICASA_CORE_TEST_TARGETS licasa_preview_handoff_tests)
+    add_test(NAME licasa_preview_handoff_tests COMMAND licasa_preview_handoff_tests -platform offscreen)
+    set_tests_properties(licasa_preview_handoff_tests PROPERTIES
+            TIMEOUT 30 RUN_SERIAL TRUE LABELS "core;codec;preview;lifecycle")
+endif()
+
 # Preserve the original deadlines and assertions while guarding actual CTest
 # isolation. The rest of the registry continues to use parallel scheduling.
 set(LICASA_DECODE_ISOLATION_ARGUMENTS --isolated-test licasa_async_image_provider_tests)
-foreach(test_name licasa_raw_tests licasa_jxl_tests)
+foreach(test_name licasa_raw_tests licasa_jxl_tests licasa_preview_handoff_tests)
     if(TEST ${test_name})
         list(APPEND LICASA_DECODE_ISOLATION_ARGUMENTS --isolated-test ${test_name})
     endif()
@@ -621,19 +634,6 @@ add_test(NAME licasa_decode_test_scheduling
         ${LICASA_DECODE_ISOLATION_ARGUMENTS})
 set_tests_properties(licasa_decode_test_scheduling PROPERTIES
         TIMEOUT 20 LABELS "core;packaging;scheduling;fast")
-
-# Large-raster handoff checks have their own deadline; keep the provider's
-# existing fast/ownership suite and its 15-second budget unchanged.
-if(LICASA_HAVE_FAST_PNG_PREVIEW)
-    add_executable(licasa_preview_handoff_tests tests/tst_preview_handoff.cpp)
-    target_link_libraries(licasa_preview_handoff_tests PRIVATE licasa_image_services Qt6::Test)
-    licasa_enable_warnings(licasa_preview_handoff_tests)
-    list(APPEND LICASA_TEST_TARGETS licasa_preview_handoff_tests)
-    list(APPEND LICASA_CORE_TEST_TARGETS licasa_preview_handoff_tests)
-    add_test(NAME licasa_preview_handoff_tests COMMAND licasa_preview_handoff_tests -platform offscreen)
-    set_tests_properties(licasa_preview_handoff_tests PROPERTIES
-            TIMEOUT 30 LABELS "core;codec;preview;lifecycle")
-endif()
 
 add_executable(licasa_fast_pnm_preview_tests tests/tst_fast_pnm_preview.cpp
         src/imaging/fast_pnm_preview.cpp src/imaging/fast_pnm_preview.h)

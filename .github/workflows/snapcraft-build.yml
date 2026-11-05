@@ -39,10 +39,22 @@ jobs:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           APPROVED: ${{ inputs.approve_prerelease }}
         run: |
-          test "$APPROVED" = true
-          test "$GITHUB_REF" = refs/heads/main
-          test "$GITHUB_SHA" = "$EXPECTED_SHA"
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$APPROVED" = true || {
+            echo "::error::Enable approve_prerelease to authorize Snap edge and GitHub prerelease publication."
+            exit 1
+          }
+          test "$GITHUB_REF" = refs/heads/main || {
+            echo "::error::Run this workflow from the main branch."
+            exit 1
+          }
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::Enter the full 40-character reviewed main commit SHA in expected_sha."
+            exit 1
+          }
+          test "$GITHUB_SHA" = "$EXPECTED_SHA" || {
+            echo "::error::The selected main commit differs from expected_sha. Review the selected commit before dispatching again."
+            exit 1
+          }
       - name: Check source, new version, stable grade, and notes
         id: version
         run: |

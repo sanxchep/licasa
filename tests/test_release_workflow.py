@@ -51,6 +51,30 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('test "$APPROVED" = true', scripts)
         self.assertIn('test "$GITHUB_SHA" = "$EXPECTED_SHA"', scripts)
 
+    def test_release_preflight_explains_rejected_dispatch_inputs(self):
+        step = next(step for step in self.jobs["preflight"]["steps"]
+                    if "APPROVED" in step.get("env", {}))
+        valid = {"APPROVED": "true", "GITHUB_REF": "refs/heads/main",
+                 "GITHUB_SHA": SOURCE_SHA, "EXPECTED_SHA": SOURCE_SHA}
+        cases = (
+            ({}, None),
+            ({"APPROVED": "false"}, "Enable approve_prerelease"),
+            ({"APPROVED": ""}, "Enable approve_prerelease"),
+            ({"GITHUB_REF": "refs/heads/review"}, "Run this workflow from the main branch"),
+            ({"EXPECTED_SHA": SOURCE_SHA[:7]}, "Enter the full 40-character"),
+            ({"EXPECTED_SHA": "b" * 40}, "The selected main commit differs from expected_sha"),
+        )
+        for overrides, diagnostic in cases:
+            with self.subTest(overrides=overrides):
+                result = subprocess.run(["bash", "-e", "-c", step["run"]],
+                                        env={**os.environ, **valid, **overrides},
+                                        capture_output=True, text=True, check=False)
+                if diagnostic is None:
+                    self.assertEqual((result.returncode, result.stdout), (0, ""))
+                else:
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(f"::error::{diagnostic}", result.stdout)
+
     def test_release_consumes_the_same_run_packages_without_rebuilding(self):
         stage = self.jobs["stage_candidate"]
         self.assertEqual(dependencies(stage), {"preflight", "verify_sanitizers"})
