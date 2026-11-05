@@ -49,8 +49,7 @@ def checked_file(path: Path, root: Path) -> str:
         raise RuntimeError(f"Missing QML runtime file: {path}")
     if not path.resolve().is_relative_to(root.resolve()):
         raise RuntimeError(f"QML runtime file escapes its runtime root: {path}")
-    with path.open("rb") as source:
-        return hashlib.file_digest(source, "sha256").hexdigest()
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def validate_runtime(qml_root: Path, library_root: Path, qt_version: str) -> dict:

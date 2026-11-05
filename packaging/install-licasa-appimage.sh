@@ -50,7 +50,7 @@ licasa_check_runtime_dependencies() (
   fi
   if [[ $failed -ne 0 ]]; then
     echo "Licasa needs the libraries listed above before it can run." >&2
-    echo "Use a compatible glibc-based Linux desktop; this build uses Ubuntu 24.04 as its library baseline." >&2
+    echo "Use a glibc-based Linux desktop that provides the required library versions." >&2
     return 1
   fi
   printf 'Runtime library check passed (%s ELF files).\n' "$checked"

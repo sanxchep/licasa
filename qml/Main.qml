@@ -17,6 +17,7 @@ import QtQuick.Window
 import "components"
 import "ViewerMath.js" as ViewerMath
 import "FileUrls.js" as FileUrls
+import "ShortcutCatalog.js" as ShortcutCatalog
 
 Window {
     id: root
@@ -85,7 +86,7 @@ Window {
         if ((motionPhotoExportService && motionPhotoExportService.busy)
                 || (animationExportService && animationExportService.busy))
             return "exporting"
-        if (fileDialogVisible)
+        if (modalInteractionVisible)
             return "modal-dialog"
         if (editorCropMode)
             return "crop-draft"
@@ -248,9 +249,11 @@ Window {
     readonly property real previewTriggerRatio: 1.15
     readonly property int maxPreviewDecodeExtent: 8192
     // Give rapid arrow browsing time to cancel a costly full JPEG decode.
-    // Promote sooner only when preview decoding has already retained the full raster.
+    // A full preload can finish just after the preview's cache snapshot. Treat
+    // that matching ready slot like a retained base without waiting another 80 ms.
     readonly property int fullResUpgradeDelayMs: isLargeTiff() ? 120
-        : isLargeJpeg() ? 220 : decodedFullBaseReady ? 32 : 80
+        : isLargeJpeg() ? 220
+        : (decodedFullBaseReady || imageViewport.speculativeFullReady) ? 32 : 80
 
     readonly property real maxWheelDeltaPerEvent: 120
 
@@ -1846,6 +1849,46 @@ Window {
         || (frameSaveDialogLoader.dialog && frameSaveDialogLoader.dialog.visible)
         || (temporalExportCoordinatorLoader.item && temporalExportCoordinatorLoader.item.dialogVisible))
 
+    property bool shortcutsVisible: false
+    property real shortcutsSettingsPosition: 0
+    readonly property bool modalInteractionVisible: fileDialogVisible || shortcutsVisible
+    property var shortcutsFocusTarget: null
+
+    function openKeyboardShortcuts() {
+        if (modalInteractionVisible || editorSidePanel.overwriteConfirmationOpen)
+            return
+        shortcutsFocusTarget = activeFocusItem
+        shortcutsSettingsPosition = fullscreenSideMenu.scrollPosition
+        shortcutsVisible = true
+        shortcutsLoader.setSource("qrc:/Licasa/qml/ShortcutsDialog.qml", {
+            backdropSource: viewerScene,
+            smoothMotionEnabled: root.smoothMenuMotionEnabled
+        })
+        shortcutsLoader.active = true
+    }
+
+    function dismissKeyboardShortcuts(restoreFocus) {
+        const target = shortcutsFocusTarget
+        shortcutsFocusTarget = null
+        shortcutsLoader.active = false
+        shortcutsLoader.source = ""
+        shortcutsVisible = false
+        if (restoreFocus) {
+            Qt.callLater(function() {
+                if (root.shortcutsVisible || !root.visible)
+                    return
+                if (target && target.visible && target.enabled)
+                    target.forceActiveFocus(Qt.PopupFocusReason)
+                else if (fullscreenSideMenu.panelOpen)
+                    fullscreenSideMenu.forceActiveFocus(Qt.PopupFocusReason)
+                else
+                    root.contentItem.forceActiveFocus(Qt.PopupFocusReason)
+                if (fullscreenSideMenu.panelOpen)
+                    fullscreenSideMenu.restoreScrollPosition(shortcutsSettingsPosition)
+            })
+        }
+    }
+
     property var dialogFocusTarget: null
 
     function rememberDialogFocus() {
@@ -2326,6 +2369,7 @@ Window {
     }
 
     onClosing: function(close) {
+        dismissKeyboardShortcuts(false)
         clearImageState()
         if (backgroundModeManager.enabled && persistentShell) {
             close.accepted = false
@@ -2618,6 +2662,7 @@ Window {
             if (!root.hasAssignedImage())
                 root.scheduleOpenActionFocus()
         } else {
+            dismissKeyboardShortcuts(false)
             stopMotionPhotoPlaybackForLifecycle()
             resourceReleaseTimer.restart()
             memoryTrimTimer.restart()
@@ -2632,23 +2677,31 @@ Window {
             root.scheduleOpenActionFocus()
     }
 
-    Shortcut { enabled: !root.fileDialogVisible; sequence: "Ctrl+O"; onActivated: root.openFileDialog() }
     Shortcut {
-        enabled: !root.fileDialogVisible && !editorSidePanel.panelVisible
+        objectName: "keyboardShortcutsShortcut"
+        sequence: ShortcutCatalog.sequence("help")
+        enabled: !root.modalInteractionVisible && !editorSidePanel.overwriteConfirmationOpen
+        autoRepeat: false
+        onActivated: root.openKeyboardShortcuts()
+    }
+
+    Shortcut { enabled: !root.modalInteractionVisible; sequence: ShortcutCatalog.sequence("open"); onActivated: root.openFileDialog() }
+    Shortcut {
+        enabled: !root.modalInteractionVisible && !editorSidePanel.panelVisible
         objectName: "settingsPreferencesShortcut"
-        sequence: "Ctrl+,"
+        sequence: ShortcutCatalog.sequence("preferences")
         onActivated: fullscreenSideMenu.panelOpen = !fullscreenSideMenu.panelOpen
     }
     Shortcut {
         objectName: "overwriteSaveShortcut"
-        enabled: !root.fileDialogVisible
-        sequence: "Ctrl+S"
+        enabled: !root.modalInteractionVisible
+        sequence: ShortcutCatalog.sequence("save")
         onActivated: root.requestImageOverwrite()
     }
-    Shortcut { enabled: !root.fileDialogVisible; sequence: "Ctrl+Shift+S"; onActivated: root.openSaveAsDialog() }
+    Shortcut { enabled: !root.modalInteractionVisible; sequence: ShortcutCatalog.sequence("saveCopy"); onActivated: root.openSaveAsDialog() }
 
-    Shortcut { enabled: !root.fileDialogVisible;
-        sequence: "Esc"
+    Shortcut { enabled: !root.modalInteractionVisible;
+        sequence: ShortcutCatalog.sequence("escape")
         onActivated: {
             if (editorSidePanel.overwriteConfirmationOpen) {
                 editorSidePanel.cancelSaveConfirmation()
@@ -2682,47 +2735,47 @@ Window {
         }
     }
 
-    Shortcut { sequence: "F"; enabled: !root.fileDialogVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.fitToWindow() }
-    Shortcut { sequence: "1"; enabled: !root.fileDialogVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.actualSize() }
-    Shortcut { enabled: !root.fileDialogVisible;
-        sequence: "C"
+    Shortcut { sequence: ShortcutCatalog.sequence("fit"); enabled: !root.modalInteractionVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.fitToWindow() }
+    Shortcut { sequence: ShortcutCatalog.sequence("actualSize"); enabled: !root.modalInteractionVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.actualSize() }
+    Shortcut { enabled: !root.modalInteractionVisible;
+        sequence: ShortcutCatalog.sequence("crop")
         onActivated: {
             if (root.fullScreenMode && root.editPanelOpen && !root.editorCropMode)
                 root.beginCropMode()
         }
     }
     Shortcut {
-        sequence: "Return"
-        enabled: !root.fileDialogVisible && (root.editorCropMode)
+        sequence: ShortcutCatalog.sequence("applyCrop")
+        enabled: !root.modalInteractionVisible && (root.editorCropMode)
         onActivated: {
             if (root.editorCropMode)
                 root.applyDraftCrop()
         }
     }
-    Shortcut { enabled: !root.fileDialogVisible; sequence: "Ctrl+Shift+Q"; onActivated: root.quitApp() }
-    Shortcut { enabled: !root.fileDialogVisible;
-        sequence: "Ctrl+Z"
+    Shortcut { enabled: !root.modalInteractionVisible; sequence: ShortcutCatalog.sequence("quit"); onActivated: root.quitApp() }
+    Shortcut { enabled: !root.modalInteractionVisible;
+        sequence: ShortcutCatalog.sequence("undo")
         onActivated: {
             if (root.fullScreenMode && root.editPanelOpen)
                 root.undoEditorChange()
         }
     }
-    Shortcut { enabled: !root.fileDialogVisible;
-        sequence: "Ctrl+Shift+Z"
+    Shortcut { enabled: !root.modalInteractionVisible;
+        sequence: ShortcutCatalog.sequence("redo")
         onActivated: {
             if (root.fullScreenMode && root.editPanelOpen)
                 root.redoEditorChange()
         }
     }
-    Shortcut { enabled: !root.fileDialogVisible; sequence: "F11"; onActivated: root.toggleFullScreen() }
-    Shortcut { sequence: "+"; enabled: !root.fileDialogVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.zoomFromKeyboard(1.15) }
-    Shortcut { sequence: "="; enabled: !root.fileDialogVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.zoomFromKeyboard(1.15) }
-    Shortcut { sequence: "-"; enabled: !root.fileDialogVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.zoomFromKeyboard(1.0 / 1.15) }
+    Shortcut { enabled: !root.modalInteractionVisible; sequence: ShortcutCatalog.sequence("fullscreen"); onActivated: root.toggleFullScreen() }
+    Shortcut { sequence: ShortcutCatalog.sequence("zoomIn"); enabled: !root.modalInteractionVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.zoomFromKeyboard(1.15) }
+    Shortcut { sequence: ShortcutCatalog.sequence("zoomInAlias"); enabled: !root.modalInteractionVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.zoomFromKeyboard(1.15) }
+    Shortcut { sequence: ShortcutCatalog.sequence("zoomOut"); enabled: !root.modalInteractionVisible && (!fullscreenSideMenu.panelOpen && !notificationCenter.historyOpen); onActivated: root.zoomFromKeyboard(1.0 / 1.15) }
 
     Shortcut {
         objectName: "editorShortcut"
-        sequence: "E"
-        enabled: !root.fileDialogVisible && !root.editorCropMode && !fullscreenSideMenu.panelVisible
+        sequence: ShortcutCatalog.sequence("editor")
+        enabled: !root.modalInteractionVisible && !root.editorCropMode && !fullscreenSideMenu.panelVisible
         onActivated: {
             if (root.fullScreenMode && root.hasAssignedImage())
                 root.setEditPanelOpen(!root.editPanelOpen)
@@ -2730,8 +2783,8 @@ Window {
     }
     Shortcut {
         objectName: "settingsShortcut"
-        sequence: "M"
-        enabled: !root.fileDialogVisible && !root.editorCropMode && !editorSidePanel.panelVisible
+        sequence: ShortcutCatalog.sequence("settings")
+        enabled: !root.modalInteractionVisible && !root.editorCropMode && !editorSidePanel.panelVisible
         onActivated: {
             if (root.fullScreenMode) {
                 notificationCenter.historyOpen = false
@@ -2740,13 +2793,13 @@ Window {
         }
     }
     Shortcut {
-        sequence: "N"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen)
+        sequence: ShortcutCatalog.sequence("notifications")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen)
         onActivated: notificationCenter.historyOpen = !notificationCenter.historyOpen
     }
     Shortcut {
-        sequence: "PageDown"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && (root.editPanelOpen || fullscreenSideMenu.panelOpen
+        sequence: ShortcutCatalog.sequence("pageDown")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && (root.editPanelOpen || fullscreenSideMenu.panelOpen
             || notificationCenter.historyOpen))
         onActivated: {
             if (notificationCenter.historyOpen)
@@ -2758,8 +2811,8 @@ Window {
         }
     }
     Shortcut {
-        sequence: "PageUp"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && (root.editPanelOpen || fullscreenSideMenu.panelOpen
+        sequence: ShortcutCatalog.sequence("pageUp")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && (root.editPanelOpen || fullscreenSideMenu.panelOpen
             || notificationCenter.historyOpen))
         onActivated: {
             if (notificationCenter.historyOpen)
@@ -2771,97 +2824,97 @@ Window {
         }
     }
     Shortcut {
-        sequence: "Ctrl+1"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && root.editPanelOpen)
+        sequence: ShortcutCatalog.sequence("adjustTool")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && root.editPanelOpen)
         onActivated: editorSidePanel.activateTool("adjust")
     }
     Shortcut {
-        sequence: "Ctrl+2"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && root.editPanelOpen)
+        sequence: ShortcutCatalog.sequence("cropTool")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && root.editPanelOpen)
         onActivated: editorSidePanel.activateTool("crop")
     }
     Shortcut {
-        sequence: "Ctrl+3"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && root.editPanelOpen)
+        sequence: ShortcutCatalog.sequence("looksTool")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && root.editPanelOpen)
         onActivated: editorSidePanel.activateTool("looks")
     }
     Shortcut {
-        sequence: "Ctrl+4"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && root.editPanelOpen)
+        sequence: ShortcutCatalog.sequence("exportTool")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && root.editPanelOpen)
         onActivated: editorSidePanel.activateTool("export")
     }
 
     Shortcut {
-        sequence: "Left"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
+        sequence: ShortcutCatalog.sequence("previous")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen
             && !(root.temporalControlsItem && root.temporalControlsItem.keyboardFocusWithin))
         onActivated: root.browseImage(-1)
     }
     Shortcut {
-        sequence: "Right"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
+        sequence: ShortcutCatalog.sequence("next")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen
             && !(root.temporalControlsItem && root.temporalControlsItem.keyboardFocusWithin))
         onActivated: root.browseImage(1)
     }
     Shortcut {
-        sequence: "Up"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
+        sequence: ShortcutCatalog.sequence("zoomUp")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen
             && !(root.temporalControlsItem && root.temporalControlsItem.keyboardFocusWithin))
         onActivated: root.zoomFromKeyboard(1.15)
     }
     Shortcut {
-        sequence: "Down"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
+        sequence: ShortcutCatalog.sequence("zoomDown")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && !root.editPanelOpen && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen
             && !(root.temporalControlsItem && root.temporalControlsItem.keyboardFocusWithin))
         onActivated: root.zoomFromKeyboard(1.0 / 1.15)
     }
     Shortcut {
-        sequence: "Ctrl+Left"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && !fullscreenSideMenu.panelOpen
+        sequence: ShortcutCatalog.sequence("panLeft")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen)
         onActivated: root.moveImage(-48, 0)
     }
     Shortcut {
-        sequence: "Ctrl+Right"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && !fullscreenSideMenu.panelOpen
+        sequence: ShortcutCatalog.sequence("panRight")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen)
         onActivated: root.moveImage(48, 0)
     }
     Shortcut {
-        sequence: "Ctrl+Up"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && !fullscreenSideMenu.panelOpen
+        sequence: ShortcutCatalog.sequence("panUp")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen)
         onActivated: root.moveImage(0, -48)
     }
     Shortcut {
-        sequence: "Ctrl+Down"
-        enabled: !root.fileDialogVisible && (root.fullScreenMode && !fullscreenSideMenu.panelOpen
+        sequence: ShortcutCatalog.sequence("panDown")
+        enabled: !root.modalInteractionVisible && (root.fullScreenMode && !fullscreenSideMenu.panelOpen
             && !notificationCenter.historyOpen)
         onActivated: root.moveImage(0, 48)
     }
-    Shortcut { sequence: "Alt+Left"; enabled: !root.fileDialogVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(-1, 0, false) }
-    Shortcut { sequence: "Alt+Right"; enabled: !root.fileDialogVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(1, 0, false) }
-    Shortcut { sequence: "Alt+Up"; enabled: !root.fileDialogVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(0, -1, false) }
-    Shortcut { sequence: "Alt+Down"; enabled: !root.fileDialogVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(0, 1, false) }
-    Shortcut { sequence: "Alt+Shift+Left"; enabled: !root.fileDialogVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(-1, 0, true) }
-    Shortcut { sequence: "Alt+Shift+Right"; enabled: !root.fileDialogVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(1, 0, true) }
-    Shortcut { sequence: "Alt+Shift+Up"; enabled: !root.fileDialogVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(0, -1, true) }
-    Shortcut { sequence: "Alt+Shift+Down"; enabled: !root.fileDialogVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(0, 1, true) }
+    Shortcut { sequence: ShortcutCatalog.sequence("cropLeft"); enabled: !root.modalInteractionVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(-1, 0, false) }
+    Shortcut { sequence: ShortcutCatalog.sequence("cropRight"); enabled: !root.modalInteractionVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(1, 0, false) }
+    Shortcut { sequence: ShortcutCatalog.sequence("cropUp"); enabled: !root.modalInteractionVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(0, -1, false) }
+    Shortcut { sequence: ShortcutCatalog.sequence("cropDown"); enabled: !root.modalInteractionVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(0, 1, false) }
+    Shortcut { sequence: ShortcutCatalog.sequence("cropResizeLeft"); enabled: !root.modalInteractionVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(-1, 0, true) }
+    Shortcut { sequence: ShortcutCatalog.sequence("cropResizeRight"); enabled: !root.modalInteractionVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(1, 0, true) }
+    Shortcut { sequence: ShortcutCatalog.sequence("cropResizeUp"); enabled: !root.modalInteractionVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(0, -1, true) }
+    Shortcut { sequence: ShortcutCatalog.sequence("cropResizeDown"); enabled: !root.modalInteractionVisible && (root.editorCropMode); onActivated: cropOverlay.keyboardAdjust(0, 1, true) }
 
-    Shortcut { enabled: !root.fileDialogVisible;
-        sequence: "Ctrl+R"
+    Shortcut { enabled: !root.modalInteractionVisible;
+        sequence: ShortcutCatalog.sequence("reset")
         onActivated: {
             if (root.fullScreenMode && root.hasAssignedImage())
                 root.resetEditorAdjustments()
         }
     }
 
-    Shortcut { enabled: !root.fileDialogVisible;
-        sequence: "Y"
+    Shortcut { enabled: !root.modalInteractionVisible;
+        sequence: ShortcutCatalog.sequence("compare")
         onActivated: {
             if (root.fullScreenMode && root.hasAssignedImage() && !root.editorCropMode) {
                 root.compareOriginal = !root.compareOriginal
@@ -2870,791 +2923,820 @@ Window {
         }
     }
 
-    ImageViewport {
-        id: imageViewport
-        objectName: "imageViewport"
+    Item {
+        id: viewerScene
+        objectName: "viewerScene"
         anchors.fill: parent
-        onImageStatusChanged: root.nativeWindowOps.traceZoom(
-            "exact-image-status-" + imageStatus, windowedZoom.scale)
+        enabled: !root.shortcutsVisible
+        Accessible.ignored: root.shortcutsVisible
 
-        fullScreenMode: root.fullScreenMode
-        fullscreenBackdropOpacity: root.fullscreenBackdropOpacity
-        transparencyCheckerboardEnabled: root.transparencyCheckerboardEnabled
-        transparencyCheckerboardOpacity: root.transparencyCheckerboardOpacity
-        windowedTransparencyCheckerboardEnabled: root.windowedTransparencyCheckerboardEnabled
-        windowedTransparencyOpacity: root.windowedTransparencyOpacity
-        hasImage: root.hasImage()
-        imageAccessibleName: root.displayedFileName || root.currentFileName
+        ImageViewport {
+            id: imageViewport
+            objectName: "imageViewport"
+            anchors.fill: parent
+            onImageStatusChanged: root.nativeWindowOps.traceZoom(
+                "exact-image-status-" + imageStatus, windowedZoom.scale)
 
-        imageX: root.imageX()
-        imageY: root.imageY()
-        imageWidth: root.imageWidth()
-        imageHeight: root.imageHeight()
-        currentScale: root.currentScale
-        windowedInspectionMode: !root.fullScreenMode && windowedZoom.inspectionMode
-        rasterPixelZoomEnabled: root.rasterPixelZoomEnabled
+            fullScreenMode: root.fullScreenMode
+            fullscreenBackdropOpacity: root.fullscreenBackdropOpacity
+            transparencyCheckerboardEnabled: root.transparencyCheckerboardEnabled
+            transparencyCheckerboardOpacity: root.transparencyCheckerboardOpacity
+            windowedTransparencyCheckerboardEnabled: root.windowedTransparencyCheckerboardEnabled
+            windowedTransparencyOpacity: root.windowedTransparencyOpacity
+            hasImage: root.hasImage()
+            imageAccessibleName: root.displayedFileName || root.currentFileName
 
-        providerSource: root.renderedProviderSource
-        previewPhase: root.previewPhase
-        fullBaseHandoffEnabled: root.fullResolutionRenderingEnabled
-            && !root.imageLimitedToPreview && !root.currentImageAnimated
-            && !root.browseBurstActive && !root.browseAwaitingFrame
-        rawFastPhase: root.rawFastPhase
-        rawPreviewFirst: root.rawPreviewFirst
-        parallelFullResolutionEnabled: root.previewPhase && !root.browseBurstActive
-            && !root.browseAwaitingFrame
-            && !root.imageLimitedToPreview
-            && !root.currentImageAnimated
-            && root.fullResolutionRenderingEnabled
-            && root.parallelOpeningWorthwhile()
-        previewFirstPreloadEnabled: !root.browseBurstActive && !root.browseAwaitingFrame
-            && !root.imageLimitedToPreview && !root.currentImageAnimated
-            && root.fullResolutionRenderingEnabled
-            && FileUrls.previewFirstFullResolution(root.residentImageUrl,
-                root.naturalImageSize.width * root.naturalImageSize.height, root.reusableWebpBase)
-        previewSourceWidth: root.browseAwaitingFrame || root.browseBurstActive
-            ? root.burstPreviewSize().width : root.previewSourceWidth()
-        previewSourceHeight: root.browseAwaitingFrame || root.browseBurstActive
-            ? root.burstPreviewSize().height : root.previewSourceHeight()
-        rapidBrowseMode: root.browseAwaitingFrame || root.browseBurstActive
-        animatedSource: root.residentImageUrl
-        animationController: root.animationController
-        motionPhotoSession: root.motionPhotoSession
-        animatedPlaybackActive: root.animatedPlaybackActive
-        floatingPlaybackEnabled: !root.currentImageAnimated
-            && root.motionPhotoSession !== null && root.motionPhotoSession.available
-            && !root.editPanelOpen && !root.editorHasAdjustments
-        playbackInteractionEnabled: root.playbackInteractionEnabled
-        onPlaybackToggleRequested: {
-            if (root.motionPhotoSession)
-                root.motionPhotoSession.togglePlayback()
-        }
-        animationSpeed: root.viewerPreferences.animationSpeed
-        smoothScalingEnabled: root.smoothImageScalingEnabled
-        mipmapScalingEnabled: root.mipmapImageScalingEnabled
-        pixelAlignedRenderingEnabled: root.pixelAlignedRenderingEnabled
-        devicePixelRatio: root.effectiveDpr()
+            imageX: root.imageX()
+            imageY: root.imageY()
+            imageWidth: root.imageWidth()
+            imageHeight: root.imageHeight()
+            currentScale: root.currentScale
+            windowedInspectionMode: !root.fullScreenMode && windowedZoom.inspectionMode
+            rasterPixelZoomEnabled: root.rasterPixelZoomEnabled
 
-        fullScreenWheelSensitivity: root.fullScreenWheelSensitivity
-        windowedWheelSensitivity: root.windowedWheelSensitivity
-        maxWheelDeltaPerEvent: root.maxWheelDeltaPerEvent
-        interactionBlocked: root.editorCropMode
-            || editorSidePanel.pointerInsidePanel
-            || fullscreenSideMenu.pointerInsidePanel
-
-        canOpen: function(u) {
-            return root.formatSupport.canOpen(u)
-        }
-
-        onPanRequested: function(dx, dy) {
-            if (root.fullScreenMode) {
-                root.panX += dx
-                root.panY += dy
-            } else if (windowedZoom.inspectionMode) {
-                windowedZoom.panBy(dx, dy)
+            providerSource: root.renderedProviderSource
+            previewPhase: root.previewPhase
+            fullBaseHandoffEnabled: root.fullResolutionRenderingEnabled
+                && !root.imageLimitedToPreview && !root.currentImageAnimated
+                && !root.browseBurstActive && !root.browseAwaitingFrame
+            rawFastPhase: root.rawFastPhase
+            rawPreviewFirst: root.rawPreviewFirst
+            parallelFullResolutionEnabled: root.previewPhase && !root.browseBurstActive
+                && !root.browseAwaitingFrame
+                && !root.imageLimitedToPreview
+                && !root.currentImageAnimated
+                && root.fullResolutionRenderingEnabled
+                && root.parallelOpeningWorthwhile()
+            previewFirstPreloadEnabled: !root.browseBurstActive && !root.browseAwaitingFrame
+                && !root.imageLimitedToPreview && !root.currentImageAnimated
+                && root.fullResolutionRenderingEnabled
+                && FileUrls.previewFirstFullResolution(root.residentImageUrl,
+                    root.naturalImageSize.width * root.naturalImageSize.height, root.reusableWebpBase)
+            previewSourceWidth: root.browseAwaitingFrame || root.browseBurstActive
+                ? root.burstPreviewSize().width : root.previewSourceWidth()
+            previewSourceHeight: root.browseAwaitingFrame || root.browseBurstActive
+                ? root.burstPreviewSize().height : root.previewSourceHeight()
+            rapidBrowseMode: root.browseAwaitingFrame || root.browseBurstActive
+            animatedSource: root.residentImageUrl
+            animationController: root.animationController
+            motionPhotoSession: root.motionPhotoSession
+            animatedPlaybackActive: root.animatedPlaybackActive
+            floatingPlaybackEnabled: !root.currentImageAnimated
+                && root.motionPhotoSession !== null && root.motionPhotoSession.available
+                && !root.editPanelOpen && !root.editorHasAdjustments
+            playbackInteractionEnabled: root.playbackInteractionEnabled
+            onPlaybackToggleRequested: {
+                if (root.motionPhotoSession)
+                    root.motionPhotoSession.togglePlayback()
             }
-        }
+            animationSpeed: root.viewerPreferences.animationSpeed
+            smoothScalingEnabled: root.smoothImageScalingEnabled
+            mipmapScalingEnabled: root.mipmapImageScalingEnabled
+            pixelAlignedRenderingEnabled: root.pixelAlignedRenderingEnabled
+            devicePixelRatio: root.effectiveDpr()
 
-        onPixelSampleRequested: function(viewportX, viewportY, pixelX, pixelY) {
-            const sample = windowManager.sampleDisplayedPixel(root, viewportX, viewportY)
-            imageViewport.sampledPixelColor = sample && sample.red !== undefined
-                ? sample : null
-            imageViewport.sampledPixelX = pixelX
-            imageViewport.sampledPixelY = pixelY
-        }
+            fullScreenWheelSensitivity: root.fullScreenWheelSensitivity
+            windowedWheelSensitivity: root.windowedWheelSensitivity
+            maxWheelDeltaPerEvent: root.maxWheelDeltaPerEvent
+            interactionBlocked: root.editorCropMode
+                || editorSidePanel.pointerInsidePanel
+                || fullscreenSideMenu.pointerInsidePanel
 
-        onDisableFitModeRequested: {
-            root.cancelZoomAnimations()
-            root.fitMode = false
-        }
-
-        onCancelZoomAnimationRequested: root.cancelZoomAnimations()
-
-        onWindowMoveStarted: windowedMove.begin()
-        onWindowMoveUpdated: windowedMove.update()
-        onWindowMoveFinished: windowedMove.finish()
-
-        onClampPanRequested: {
-            root.clampPanToViewport()
-        }
-
-        onPromoteFullResRequested: {
-            root.promoteFullRes()
-        }
-
-        onImageRequestFailed: {
-            // If the embedded preview cannot be decoded, the already-running
-            // full reader is the shortest route to pixels. Avoid queueing a
-            // half-size RAW development behind that full reader's memory gate.
-            if (!root.hasImage() && imageViewport.speculativeFullAvailable
-                    && (root.previewPhase || root.rawFastPhase)
-                    && !root.imageLimitedToPreview) {
-                root.promoteFullRes()
-                return
+            canOpen: function(u) {
+                return root.formatSupport.canOpen(u)
             }
-            // If LibRaw cannot expose a usable embedded thumbnail (common with
-            // some CR2/other camera RAWs), do a bounded half-size development
-            // first. That replaces the grey loading card with real image pixels
-            // before the expensive final development starts.
-            if (root.rawPreviewFirst
-                    && root.previewPhase
-                    && !root.imageLimitedToPreview
-                    && !root.rawFullDetailRequested) {
-                notificationCenter.update("image", qsTr("Loading RAW preview"),
-                                          qsTr("Trying a compatible preview…"))
-                root.requestRawFastFallback()
-                return
-            }
-            // The fast stage is opportunistic. If a backend cannot produce it,
-            // continue to the normal full-detail path rather than getting stuck.
-            if (root.rawPreviewFirst
-                    && root.rawFastPhase
-                    && !root.imageLimitedToPreview
-                    && !root.rawFullDetailRequested) {
-                notificationCenter.update("image", qsTr("Loading RAW image"),
-                                          qsTr("Developing the full image…"))
-                root.promoteFullRes()
-                return
-            }
-            if (root.browseAwaitingFrame && root.previewPhase
-                    && !root.imageLimitedToPreview) {
-                root.promoteFullRes()
-                return
-            }
-            if (root.browseAwaitingFrame)
-                root.finishBrowseStep()
-            root.pendingNavigationFit = false
-            const previewAvailable = root.hasImage()
-            const openingImage = root.imageOpenStartedMs >= 0
-                && notificationCenter.isLoading("image")
-            root.imageOpenStartedMs = -1
-            notificationCenter.finish("image", "error",
-                                      openingImage
-                                          ? (previewAvailable ? qsTr("Full resolution could not load")
-                                                              : qsTr("Image could not be opened"))
-                                          : qsTr("Image update failed"),
-                                      previewAvailable
-                                          ? (openingImage ? qsTr("The preview is still available.")
-                                                          : qsTr("The current image is still available."))
-                                          : root.currentFileName)
-            if (root.pendingImageReveal)
-                root.revealLoadedImage()
-            if (!previewAvailable)
-                root.scheduleOpenActionFocus()
-        }
 
-        onZoomRequested: function(factor, px, py) {
-            root.zoomByFactor(factor, px, py)
-        }
-
-        onOpenDialogRequested: root.openFileDialog()
-
-        onExitFullscreenToImageRequested: {
-            root.exitFullScreenToImage()
-        }
-
-        onEnterFullscreenRequested: {
-            root.enterFullScreen()
-        }
-
-        onOpenUrlRequested: function(url) {
-            root.loadImageUrl(url)
-        }
-
-        onImageReady: {
-            if (root.nearbyPreviewsAwaitingFrame)
-                root.nearbyPreviewsReadyForFrame = true
-            root.decodedFullBaseReady = root.previewPhase
-                && root.windowManager.hasDecodedFullBase(root.residentImageUrl)
-            if (root.browseAwaitingFrame)
-                root.browseImageReadyForFrame = true
-            if (!root.animatedPlaybackActive)
-                nearbyPreviewTimer.restart()
-            const shouldReveal = root.pendingImageReveal
-            if (root.pendingNavigationFit) {
-                root.pendingNavigationFit = false
-                root.fitMode = true
-                root.fitPadding = root.openFitPadding
-                root.panX = 0
-                root.panY = 0
-            }
-            root.displayedNaturalImageSize = root.naturalImageSize
-            root.displayedFileName = root.currentFileName
-            root.displayedQuarterTurns = root.effectiveEditorQuarterTurns()
-            root.displayedCropX = root.effectiveEditorCropX()
-            root.displayedCropY = root.effectiveEditorCropY()
-            root.displayedCropWidth = root.effectiveEditorCropWidth()
-            root.displayedCropHeight = root.effectiveEditorCropHeight()
-
-            const readyWidth = root.imageWidth()
-            const readyHeight = root.imageHeight()
-            const geometryChanged = Math.abs(readyWidth - root.lastReadyImageWidth) > 0.5
-                || Math.abs(readyHeight - root.lastReadyImageHeight) > 0.5
-            root.lastReadyImageWidth = readyWidth
-            root.lastReadyImageHeight = readyHeight
-
-            if (root.fitMode) {
+            onPanRequested: function(dx, dy) {
                 if (root.fullScreenMode) {
-                    if (geometryChanged && !editorLayoutAnimation.running)
-                        root.applyFit(root.fitPadding)
-                } else if (geometryChanged || shouldReveal) {
-                    windowedZoom.applyOpenScale(shouldReveal)
-                }
-            } else if (!root.fullScreenMode && geometryChanged) {
-                windowedZoom.applyState()
-            }
-
-            // Progressive loading keeps the currently ready raster visible
-            // while the next stage decodes in the spare image slot. After the
-            // first preview paint, automatically request full detail for every
-            // eligible still image, including RAW. Zoom only changes the view;
-            // it no longer controls whether the full sensor raster is loaded.
-            if ((root.previewPhase || root.rawFastPhase)
-                    && !root.imageLimitedToPreview
-                    && !root.animatedPlaybackActive
-                    && root.fullResolutionRenderingEnabled
-                    && !root.browseBurstActive && !root.browseAwaitingFrame)
-                fullResTimer.restart()
-
-            if (root.imageOpenStartedMs >= 0 && notificationCenter.isLoading("image")) {
-                if (root.rawMetadataProbePending
-                        || ((root.previewPhase || root.rawFastPhase)
-                            && !root.imageLimitedToPreview
-                            && !root.animatedPlaybackActive
-                            && root.fullResolutionRenderingEnabled)) {
-                    notificationCenter.update("image", qsTr("Opening image"),
-                                              root.currentFileName + qsTr(" · Loading full resolution…"))
-                } else {
-                    const openingDurationMs = Math.max(0, Date.now() - root.imageOpenStartedMs)
-                    root.imageOpenStartedMs = -1
-                    const detail = root.currentFileName + " · " + openingDurationMs + " ms"
-                        + (root.imageLimitedToPreview
-                            ? qsTr(" · Full resolution exceeds the image memory limit") : "")
-                    notificationCenter.finish("image", "success",
-                                              root.imageLimitedToPreview
-                                                  ? qsTr("Preview ready") : qsTr("Image ready"),
-                                              detail)
+                    root.panX += dx
+                    root.panY += dy
+                } else if (windowedZoom.inspectionMode) {
+                    windowedZoom.panBy(dx, dy)
                 }
             }
 
-            if (root.fullScreenMode)
-                fullscreenRecoveryTimer.restart()
-
-            if (shouldReveal)
-                root.revealLoadedImage()
-
-            if (root.rawMetadataProbePending)
-                rawMetadataProbeTimer.restart()
-
-            // Defer one event-loop turn after Image.Ready so first-paint and
-            // first-preview telemetry are never competing with metadata I/O.
-            Qt.callLater(root.requestPhotoAssetProbeIfNeeded)
-        }
-    }
-
-    CropOverlay {
-        id: cropOverlay
-        anchors.fill: parent
-        z: 1050
-
-        active: root.fullScreenMode && root.editPanelOpen
-            && root.editorCropMode && root.hasImage()
-        imageX: root.imageX()
-        imageY: root.imageY()
-        imageWidth: root.imageWidth() * root.currentScale
-        imageHeight: root.imageHeight() * root.currentScale
-        cropX: root.draftCropX
-        cropY: root.draftCropY
-        cropWidth: root.draftCropWidth
-        cropHeight: root.draftCropHeight
-        aspectRatio: root.cropAspectRatio
-        outputWidth: root.draftCropOutputWidth()
-        outputHeight: root.draftCropOutputHeight()
-        estimatedFileSize: root.draftCropEstimatedFileSize()
-        shieldOpacity: root.cropShieldOpacity
-
-        onCropRequested: function(x, y, width, height) {
-            root.updateDraftCrop(x, y, width, height)
-        }
-    }
-
-    InfoOverlays {
-        objectName: "infoOverlays"
-        anchors.fill: parent
-        z: 150
-
-        fullScreenMode: root.fullScreenMode
-        infoOverlayEnabled: root.infoOverlayEnabled
-        editorPanelVisible: root.fullScreenMode && editorSidePanel.panelVisible
-        smoothMotionEnabled: root.smoothMenuMotionEnabled
-        compareOriginal: root.compareOriginal
-        imageReady: root.hasImage()
-        limitedToPreview: root.imageLimitedToPreview
-
-        currentFileName: root.displayedFileName
-        imageWidth: root.imageWidth()
-        imageHeight: root.imageHeight()
-        currentScale: root.currentScale
-    }
-
-    Loader {
-        id: temporalControlsLoader
-        objectName: "temporalControlsLoader"
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: root.fullScreenMode && root.infoOverlayEnabled ? 92 : 18
-        width: Math.min(540, Math.max(280, parent.width - 48))
-        height: active ? 58 : 0
-        z: 210
-
-        // Keep the ordinary still-image path allocation-free for temporal UI.
-        // The tray is instantiated only for a live animated-image controller or
-        // a validated Motion Photo session. Merely probing motion metadata does
-        // not load Qt Multimedia; first playback intent remains the lazy boundary.
-        active: root.fullScreenMode && root.hasImage()
-            && !root.editPanelOpen
-            && !root.editorHasAdjustments
-            && ((root.currentImageAnimated && root.animationController !== null)
-                || (root.motionPhotoSession && root.motionPhotoSession.available))
-        visible: active
-
-        onActiveChanged: {
-            if (!active) {
-                source = ""
-                return
+            onPixelSampleRequested: function(viewportX, viewportY, pixelX, pixelY) {
+                const sample = windowManager.sampleDisplayedPixel(root, viewportX, viewportY)
+                imageViewport.sampledPixelColor = sample && sample.red !== undefined
+                    ? sample : null
+                imageViewport.sampledPixelX = pixelX
+                imageViewport.sampledPixelY = pixelY
             }
-            setSource(Qt.resolvedUrl("ViewerTemporalControls.qml"), {
-                motionSession: Qt.binding(function() { return root.motionPhotoSession }),
-                frameSaveCoordinator: Qt.binding(function() {
-                    return root.motionPhotoFrameSaveCoordinator
-                }),
-                motionExportService: Qt.binding(function() {
-                    return root.motionPhotoExportService
-                }),
-                animationExportService: Qt.binding(function() {
-                    return root.animationExportService
-                }),
-                animationController: Qt.binding(function() { return root.animationController }),
-                imageAnimated: Qt.binding(function() { return root.currentImageAnimated }),
-                windowManager: root.windowManager,
-                viewerRoot: root,
-                interactionEnabled: Qt.binding(function() {
-                    return root.playbackInteractionEnabled
-                })
-            })
-        }
-    }
 
-    Connections {
-        target: temporalControlsLoader.item
-        enabled: temporalControlsLoader.item !== null
+            onDisableFitModeRequested: {
+                root.cancelZoomAnimations()
+                root.fitMode = false
+            }
 
-        function onSaveFrameAsRequested() {
-            root.openFrameSaveAsDialog()
-        }
+            onCancelZoomAnimationRequested: root.cancelZoomAnimations()
 
-        function onExportMotionAsRequested() {
-            const service = root.windowManager.ensureMotionPhotoExportService(root)
-            if (!service)
-                return
-            root.motionPhotoExportService = service
-            temporalExportCoordinatorLoader.requestExport("motion")
-        }
+            onWindowMoveStarted: windowedMove.begin()
+            onWindowMoveUpdated: windowedMove.update()
+            onWindowMoveFinished: windowedMove.finish()
 
-        function onExportAnimationAsRequested() {
-            const service = root.windowManager.ensureAnimationExportService(root)
-            if (!service)
-                return
-            root.animationExportService = service
-            temporalExportCoordinatorLoader.requestExport("animation")
-        }
-    }
+            onClampPanRequested: {
+                root.clampPanToViewport()
+            }
 
-    Loader {
-        id: temporalExportCoordinatorLoader
-
-        // Keep Item 12 export presentation completely cold until the user
-        // explicitly asks to export. Motion Photo capability becoming
-        // available must not compete with first-frame playback startup.
-        active: false
-        asynchronous: true
-        property string pendingExportKind: ""
-
-        function dispatchExport(kind) {
-            if (!item)
-                return false
-            if (kind === "motion")
-                item.openMotionExportDialog()
-            else if (kind === "animation")
-                item.openAnimationExportDialog()
-            else
-                return false
-            return true
-        }
-
-        function requestExport(kind) {
-            root.rememberDialogFocus()
-            if (dispatchExport(kind))
-                return
-
-            pendingExportKind = kind
-            if (active)
-                return
-
-            setSource(Qt.resolvedUrl("TemporalExportCoordinator.qml"), {
-                sourceUrl: Qt.binding(function() { return root.residentImageUrl }),
-                imageAnimated: Qt.binding(function() { return root.currentImageAnimated }),
-                motionExportService: Qt.binding(function() { return root.motionPhotoExportService }),
-                animationExportService: Qt.binding(function() { return root.animationExportService })
-            })
-            active = true
-        }
-
-        onStatusChanged: root.resetFailedDialog(temporalExportCoordinatorLoader)
-
-        onLoaded: {
-            item.dialogFailed.connect(root.reportDialogFailure)
-            item.dialogClosed.connect(root.restoreDialogFocus)
-            const kind = pendingExportKind
-            pendingExportKind = ""
-            dispatchExport(kind)
-        }
-    }
-
-    // Qt 6.4's fallback ignores the window modality requested by FileDialog.
-    // The picker lives in Qt's overlay above this shield; background actions
-    // must not close a photo or change edits while its destination is pending.
-    MouseArea {
-        anchors.fill: parent
-        z: 100000
-        visible: root.fileDialogVisible
-        acceptedButtons: Qt.AllButtons
-        hoverEnabled: true
-        onWheel: function(event) { event.accepted = true }
-    }
-
-    OverlayControls {
-        anchors.fill: parent
-        z: 200
-
-        appVisible: root.visible
-        fullScreenMode: root.fullScreenMode
-        hasImage: root.hasImage()
-        windowedCloseButtonX: root.windowedCloseButtonX(36)
-        windowedCloseButtonY: root.windowedCloseButtonY(36)
-        cornerControlSize: root.cornerControlSize
-        cornerControlMargin: root.cornerControlMargin
-
-        onToggleFullScreenRequested: root.toggleFullScreen()
-        onCloseRequested: root.hideToBackground()
-    }
-
-    NotificationCenter {
-        id: notificationCenter
-        objectName: "notificationCenter"
-        anchors.fill: parent
-        z: fullscreenSideMenu.panelVisible || editorSidePanel.panelVisible ? 900 : 1600
-        appVisible: root.visible
-        fullScreenMode: root.fullScreenMode
-        cornerControlMargin: root.cornerControlMargin
-        closeButtonSize: root.fullScreenMode ? root.cornerControlSize : 36
-    }
-
-    FullscreenSideMenu {
-        id: fullscreenSideMenu
-        launcherBlocked: editorSidePanel.panelVisible
-        anchors.fill: parent
-        z: 1000
-        fullscreen: root.fullScreenMode
-        backgroundModeManager: root.backgroundModeManager
-        appVersion: root.appInfo.version
-        releaseDate: root.languageManager ? root.languageManager.releaseDate : root.appInfo.releaseDate
-        languageManager: root.languageManager
-        installedAsSnap: root.appInfo.installedAsSnap === true
-        onQuitRequested: root.quitApp()
-        onExternalUrlRequested: function(targetUrl) {
-            Qt.openUrlExternally(targetUrl)
-        }
-        onPanelOpenChanged: {
-            if (panelOpen)
-                notificationCenter.historyOpen = false
-            else if (!root.hasAssignedImage())
-                root.scheduleOpenActionFocus()
-        }
-        cornerControlSize: root.cornerControlSize
-        cornerControlMargin: root.cornerControlMargin
-
-        infoOverlayEnabled: root.infoOverlayEnabled
-        smoothMotionEnabled: root.smoothMenuMotionEnabled
-        startInFullscreenEnabled: root.viewerPreferences.startInFullscreen
-        fullscreenBackgroundOpacity: root.viewerPreferences.fullscreenBackgroundOpacity
-        transparencyCheckerboardEnabled: root.viewerPreferences.transparencyCheckerboardEnabled
-        transparencyCheckerboardOpacity: root.viewerPreferences.transparencyCheckerboardOpacity
-        windowedTransparencyCheckerboardEnabled:
-            root.viewerPreferences.windowedTransparencyCheckerboardEnabled
-        windowedTransparencyOpacity: root.viewerPreferences.windowedTransparencyOpacity
-        animatedImagePlaybackEnabled:
-            root.viewerPreferences.animatedImagePlaybackEnabled
-        animationSpeed: root.viewerPreferences.animationSpeed
-        smoothImageScalingEnabled: root.viewerPreferences.smoothImageScalingEnabled
-        mipmapImageScalingEnabled: root.viewerPreferences.mipmapImageScalingEnabled
-        pixelAlignedRenderingEnabled:
-            root.viewerPreferences.pixelAlignedRenderingEnabled
-        fullResolutionRenderingEnabled:
-            root.viewerPreferences.fullResolutionRenderingEnabled
-        colorManagedRenderingEnabled:
-            root.viewerPreferences.colorManagedRenderingEnabled
-        maximumImageMemoryMiB:
-            root.viewerPreferences.maximumImageMemoryMiB
-        minimumImageMemoryMiB:
-            root.viewerPreferences.minimumImageMemoryMiB
-        maximumImageMemoryLimitMiB:
-            root.viewerPreferences.maximumImageMemoryLimitMiB
-        currentImageMegapixels: root.currentImageMegapixels()
-        currentImageLimitedToPreview: root.imageLimitedToPreview
-        cropShieldOpacity: root.viewerPreferences.cropShieldOpacity
-
-        onInfoOverlayChanged: function(enabled) {
-            root.infoOverlayEnabled = enabled
-        }
-
-        onSmoothMotionChanged: function(enabled) {
-            root.smoothMenuMotionEnabled = enabled
-        }
-
-        onStartInFullscreenChanged: function(enabled) {
-            root.viewerPreferences.startInFullscreen = enabled
-        }
-
-        onFullscreenBackgroundOpacityRequested: function(value) {
-            root.viewerPreferences.fullscreenBackgroundOpacity = value
-        }
-
-        onTransparencyCheckerboardChanged: function(enabled) {
-            root.viewerPreferences.transparencyCheckerboardEnabled = enabled
-        }
-
-        onTransparencyCheckerboardOpacityRequested: function(value) {
-            root.viewerPreferences.transparencyCheckerboardOpacity = value
-        }
-
-        onWindowedTransparencyCheckerboardChanged: function(enabled) {
-            root.viewerPreferences.windowedTransparencyCheckerboardEnabled = enabled
-        }
-
-        onWindowedTransparencyOpacityRequested: function(value) {
-            root.viewerPreferences.windowedTransparencyOpacity = value
-        }
-
-        onAnimatedImagePlaybackChanged: function(enabled) {
-            root.viewerPreferences.animatedImagePlaybackEnabled = enabled
-        }
-
-        onAnimationSpeedRequested: function(value) {
-            root.viewerPreferences.animationSpeed = value
-        }
-
-        onSmoothImageScalingChanged: function(enabled) {
-            root.viewerPreferences.smoothImageScalingEnabled = enabled
-        }
-
-        onMipmapImageScalingChanged: function(enabled) {
-            root.viewerPreferences.mipmapImageScalingEnabled = enabled
-        }
-
-        onPixelAlignedRenderingChanged: function(enabled) {
-            root.viewerPreferences.pixelAlignedRenderingEnabled = enabled
-        }
-
-        onFullResolutionRenderingChanged: function(enabled) {
-            root.viewerPreferences.fullResolutionRenderingEnabled = enabled
-            if (enabled)
+            onPromoteFullResRequested: {
                 root.promoteFullRes()
+            }
+
+            onImageRequestFailed: {
+                // If the embedded preview cannot be decoded, the already-running
+                // full reader is the shortest route to pixels. Avoid queueing a
+                // half-size RAW development behind that full reader's memory gate.
+                if (!root.hasImage() && imageViewport.speculativeFullAvailable
+                        && (root.previewPhase || root.rawFastPhase)
+                        && !root.imageLimitedToPreview) {
+                    root.promoteFullRes()
+                    return
+                }
+                // If LibRaw cannot expose a usable embedded thumbnail (common with
+                // some CR2/other camera RAWs), do a bounded half-size development
+                // first. That replaces the grey loading card with real image pixels
+                // before the expensive final development starts.
+                if (root.rawPreviewFirst
+                        && root.previewPhase
+                        && !root.imageLimitedToPreview
+                        && !root.rawFullDetailRequested) {
+                    notificationCenter.update("image", qsTr("Loading RAW preview"),
+                                              qsTr("Trying a compatible preview…"))
+                    root.requestRawFastFallback()
+                    return
+                }
+                // The fast stage is opportunistic. If a backend cannot produce it,
+                // continue to the normal full-detail path rather than getting stuck.
+                if (root.rawPreviewFirst
+                        && root.rawFastPhase
+                        && !root.imageLimitedToPreview
+                        && !root.rawFullDetailRequested) {
+                    notificationCenter.update("image", qsTr("Loading RAW image"),
+                                              qsTr("Developing the full image…"))
+                    root.promoteFullRes()
+                    return
+                }
+                if (root.browseAwaitingFrame && root.previewPhase
+                        && !root.imageLimitedToPreview) {
+                    root.promoteFullRes()
+                    return
+                }
+                if (root.browseAwaitingFrame)
+                    root.finishBrowseStep()
+                root.pendingNavigationFit = false
+                const previewAvailable = root.hasImage()
+                const openingImage = root.imageOpenStartedMs >= 0
+                    && notificationCenter.isLoading("image")
+                root.imageOpenStartedMs = -1
+                notificationCenter.finish("image", "error",
+                                          openingImage
+                                              ? (previewAvailable ? qsTr("Full resolution could not load")
+                                                                  : qsTr("Image could not be opened"))
+                                              : qsTr("Image update failed"),
+                                          previewAvailable
+                                              ? (openingImage ? qsTr("The preview is still available.")
+                                                              : qsTr("The current image is still available."))
+                                              : root.currentFileName)
+                if (root.pendingImageReveal)
+                    root.revealLoadedImage()
+                if (!previewAvailable)
+                    root.scheduleOpenActionFocus()
+            }
+
+            onZoomRequested: function(factor, px, py) {
+                root.zoomByFactor(factor, px, py)
+            }
+
+            onOpenDialogRequested: root.openFileDialog()
+
+            onExitFullscreenToImageRequested: {
+                root.exitFullScreenToImage()
+            }
+
+            onEnterFullscreenRequested: {
+                root.enterFullScreen()
+            }
+
+            onOpenUrlRequested: function(url) {
+                root.loadImageUrl(url)
+            }
+
+            onImageReady: {
+                if (root.nearbyPreviewsAwaitingFrame)
+                    root.nearbyPreviewsReadyForFrame = true
+                root.decodedFullBaseReady = root.previewPhase
+                    && root.windowManager.hasDecodedFullBase(root.residentImageUrl)
+                if (root.browseAwaitingFrame)
+                    root.browseImageReadyForFrame = true
+                if (!root.animatedPlaybackActive)
+                    nearbyPreviewTimer.restart()
+                const shouldReveal = root.pendingImageReveal
+                if (root.pendingNavigationFit) {
+                    root.pendingNavigationFit = false
+                    root.fitMode = true
+                    root.fitPadding = root.openFitPadding
+                    root.panX = 0
+                    root.panY = 0
+                }
+                root.displayedNaturalImageSize = root.naturalImageSize
+                root.displayedFileName = root.currentFileName
+                root.displayedQuarterTurns = root.effectiveEditorQuarterTurns()
+                root.displayedCropX = root.effectiveEditorCropX()
+                root.displayedCropY = root.effectiveEditorCropY()
+                root.displayedCropWidth = root.effectiveEditorCropWidth()
+                root.displayedCropHeight = root.effectiveEditorCropHeight()
+
+                const readyWidth = root.imageWidth()
+                const readyHeight = root.imageHeight()
+                const geometryChanged = Math.abs(readyWidth - root.lastReadyImageWidth) > 0.5
+                    || Math.abs(readyHeight - root.lastReadyImageHeight) > 0.5
+                root.lastReadyImageWidth = readyWidth
+                root.lastReadyImageHeight = readyHeight
+
+                if (root.fitMode) {
+                    if (root.fullScreenMode) {
+                        if (geometryChanged && !editorLayoutAnimation.running)
+                            root.applyFit(root.fitPadding)
+                    } else if (geometryChanged || shouldReveal) {
+                        windowedZoom.applyOpenScale(shouldReveal)
+                    }
+                } else if (!root.fullScreenMode && geometryChanged) {
+                    windowedZoom.applyState()
+                }
+
+                // Progressive loading keeps the currently ready raster visible
+                // while the next stage decodes in the spare image slot. After the
+                // first preview paint, automatically request full detail for every
+                // eligible still image, including RAW. Zoom only changes the view;
+                // it no longer controls whether the full sensor raster is loaded.
+                if ((root.previewPhase || root.rawFastPhase)
+                        && !root.imageLimitedToPreview
+                        && !root.animatedPlaybackActive
+                        && root.fullResolutionRenderingEnabled
+                        && !root.browseBurstActive && !root.browseAwaitingFrame)
+                    fullResTimer.restart()
+
+                if (root.imageOpenStartedMs >= 0 && notificationCenter.isLoading("image")) {
+                    if (root.rawMetadataProbePending
+                            || ((root.previewPhase || root.rawFastPhase)
+                                && !root.imageLimitedToPreview
+                                && !root.animatedPlaybackActive
+                                && root.fullResolutionRenderingEnabled)) {
+                        notificationCenter.update("image", qsTr("Opening image"),
+                                                  root.currentFileName + qsTr(" · Loading full resolution…"))
+                    } else {
+                        const openingDurationMs = Math.max(0, Date.now() - root.imageOpenStartedMs)
+                        root.imageOpenStartedMs = -1
+                        const detail = root.currentFileName + " · " + openingDurationMs + " ms"
+                            + (root.imageLimitedToPreview
+                                ? qsTr(" · Full resolution exceeds the image memory limit") : "")
+                        notificationCenter.finish("image", "success",
+                                                  root.imageLimitedToPreview
+                                                      ? qsTr("Preview ready") : qsTr("Image ready"),
+                                                  detail)
+                    }
+                }
+
+                if (root.fullScreenMode)
+                    fullscreenRecoveryTimer.restart()
+
+                if (shouldReveal)
+                    root.revealLoadedImage()
+
+                if (root.rawMetadataProbePending)
+                    rawMetadataProbeTimer.restart()
+
+                // Defer one event-loop turn after Image.Ready so first-paint and
+                // first-preview telemetry are never competing with metadata I/O.
+                Qt.callLater(root.requestPhotoAssetProbeIfNeeded)
+            }
         }
 
-        onColorManagedRenderingChanged: function(enabled) {
-            root.viewerPreferences.colorManagedRenderingEnabled = enabled
-            root.imageRevision += 1
-            root.refreshEditedPreviewSource()
+        CropOverlay {
+            id: cropOverlay
+            anchors.fill: parent
+            z: 1050
+
+            active: root.fullScreenMode && root.editPanelOpen
+                && root.editorCropMode && root.hasImage()
+            imageX: root.imageX()
+            imageY: root.imageY()
+            imageWidth: root.imageWidth() * root.currentScale
+            imageHeight: root.imageHeight() * root.currentScale
+            cropX: root.draftCropX
+            cropY: root.draftCropY
+            cropWidth: root.draftCropWidth
+            cropHeight: root.draftCropHeight
+            aspectRatio: root.cropAspectRatio
+            outputWidth: root.draftCropOutputWidth()
+            outputHeight: root.draftCropOutputHeight()
+            estimatedFileSize: root.draftCropEstimatedFileSize()
+            shieldOpacity: root.cropShieldOpacity
+
+            onCropRequested: function(x, y, width, height) {
+                root.updateDraftCrop(x, y, width, height)
+            }
         }
 
-        onMaximumImageMemoryMiBRequested: function(value) {
-            root.viewerPreferences.maximumImageMemoryMiB = value
+        InfoOverlays {
+            objectName: "infoOverlays"
+            anchors.fill: parent
+            z: 150
+
+            fullScreenMode: root.fullScreenMode
+            infoOverlayEnabled: root.infoOverlayEnabled
+            editorPanelVisible: root.fullScreenMode && editorSidePanel.panelVisible
+            smoothMotionEnabled: root.smoothMenuMotionEnabled
+            compareOriginal: root.compareOriginal
+            imageReady: root.hasImage()
+            limitedToPreview: root.imageLimitedToPreview
+
+            currentFileName: root.displayedFileName
+            imageWidth: root.imageWidth()
+            imageHeight: root.imageHeight()
+            currentScale: root.currentScale
         }
 
-        onCropShieldOpacityRequested: function(value) {
-            root.viewerPreferences.cropShieldOpacity = value
+        Loader {
+            id: temporalControlsLoader
+            objectName: "temporalControlsLoader"
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: root.fullScreenMode && root.infoOverlayEnabled ? 92 : 18
+            width: Math.min(540, Math.max(280, parent.width - 48))
+            height: active ? 58 : 0
+            z: 210
+
+            // Keep the ordinary still-image path allocation-free for temporal UI.
+            // The tray is instantiated only for a live animated-image controller or
+            // a validated Motion Photo session. Merely probing motion metadata does
+            // not load Qt Multimedia; first playback intent remains the lazy boundary.
+            active: root.fullScreenMode && root.hasImage()
+                && !root.editPanelOpen
+                && !root.editorHasAdjustments
+                && ((root.currentImageAnimated && root.animationController !== null)
+                    || (root.motionPhotoSession && root.motionPhotoSession.available))
+            visible: active
+
+            onActiveChanged: {
+                if (!active) {
+                    source = ""
+                    return
+                }
+                setSource(Qt.resolvedUrl("ViewerTemporalControls.qml"), {
+                    motionSession: Qt.binding(function() { return root.motionPhotoSession }),
+                    frameSaveCoordinator: Qt.binding(function() {
+                        return root.motionPhotoFrameSaveCoordinator
+                    }),
+                    motionExportService: Qt.binding(function() {
+                        return root.motionPhotoExportService
+                    }),
+                    animationExportService: Qt.binding(function() {
+                        return root.animationExportService
+                    }),
+                    animationController: Qt.binding(function() { return root.animationController }),
+                    imageAnimated: Qt.binding(function() { return root.currentImageAnimated }),
+                    windowManager: root.windowManager,
+                    viewerRoot: root,
+                    interactionEnabled: Qt.binding(function() {
+                        return root.playbackInteractionEnabled
+                    })
+                })
+            }
         }
+
+        Connections {
+            target: temporalControlsLoader.item
+            enabled: temporalControlsLoader.item !== null
+
+            function onSaveFrameAsRequested() {
+                root.openFrameSaveAsDialog()
+            }
+
+            function onExportMotionAsRequested() {
+                const service = root.windowManager.ensureMotionPhotoExportService(root)
+                if (!service)
+                    return
+                root.motionPhotoExportService = service
+                temporalExportCoordinatorLoader.requestExport("motion")
+            }
+
+            function onExportAnimationAsRequested() {
+                const service = root.windowManager.ensureAnimationExportService(root)
+                if (!service)
+                    return
+                root.animationExportService = service
+                temporalExportCoordinatorLoader.requestExport("animation")
+            }
+        }
+
+        Loader {
+            id: temporalExportCoordinatorLoader
+
+            // Keep Item 12 export presentation completely cold until the user
+            // explicitly asks to export. Motion Photo capability becoming
+            // available must not compete with first-frame playback startup.
+            active: false
+            asynchronous: true
+            property string pendingExportKind: ""
+
+            function dispatchExport(kind) {
+                if (!item)
+                    return false
+                if (kind === "motion")
+                    item.openMotionExportDialog()
+                else if (kind === "animation")
+                    item.openAnimationExportDialog()
+                else
+                    return false
+                return true
+            }
+
+            function requestExport(kind) {
+                root.rememberDialogFocus()
+                if (dispatchExport(kind))
+                    return
+
+                pendingExportKind = kind
+                if (active)
+                    return
+
+                setSource(Qt.resolvedUrl("TemporalExportCoordinator.qml"), {
+                    sourceUrl: Qt.binding(function() { return root.residentImageUrl }),
+                    imageAnimated: Qt.binding(function() { return root.currentImageAnimated }),
+                    motionExportService: Qt.binding(function() { return root.motionPhotoExportService }),
+                    animationExportService: Qt.binding(function() { return root.animationExportService })
+                })
+                active = true
+            }
+
+            onStatusChanged: root.resetFailedDialog(temporalExportCoordinatorLoader)
+
+            onLoaded: {
+                item.dialogFailed.connect(root.reportDialogFailure)
+                item.dialogClosed.connect(root.restoreDialogFocus)
+                const kind = pendingExportKind
+                pendingExportKind = ""
+                dispatchExport(kind)
+            }
+        }
+
+        // Qt 6.4's fallback ignores the window modality requested by FileDialog.
+        // The picker lives in Qt's overlay above this shield; background actions
+        // must not close a photo or change edits while its destination is pending.
+        MouseArea {
+            anchors.fill: parent
+            z: 100000
+            visible: root.fileDialogVisible
+            acceptedButtons: Qt.AllButtons
+            hoverEnabled: true
+            onWheel: function(event) { event.accepted = true }
+        }
+
+        OverlayControls {
+            anchors.fill: parent
+            z: 200
+
+            appVisible: root.visible
+            fullScreenMode: root.fullScreenMode
+            hasImage: root.hasImage()
+            windowedCloseButtonX: root.windowedCloseButtonX(36)
+            windowedCloseButtonY: root.windowedCloseButtonY(36)
+            cornerControlSize: root.cornerControlSize
+            cornerControlMargin: root.cornerControlMargin
+
+            onToggleFullScreenRequested: root.toggleFullScreen()
+            onCloseRequested: root.hideToBackground()
+        }
+
+        NotificationCenter {
+            id: notificationCenter
+            objectName: "notificationCenter"
+            anchors.fill: parent
+            z: fullscreenSideMenu.panelVisible || editorSidePanel.panelVisible ? 900 : 1600
+            appVisible: root.visible
+            fullScreenMode: root.fullScreenMode
+            cornerControlMargin: root.cornerControlMargin
+            closeButtonSize: root.fullScreenMode ? root.cornerControlSize : 36
+        }
+
+        FullscreenSideMenu {
+            id: fullscreenSideMenu
+            launcherBlocked: editorSidePanel.panelVisible
+            anchors.fill: parent
+            z: 1000
+            fullscreen: root.fullScreenMode
+            backgroundModeManager: root.backgroundModeManager
+            appVersion: root.appInfo.version
+            releaseDate: root.languageManager ? root.languageManager.releaseDate : root.appInfo.releaseDate
+            languageManager: root.languageManager
+            installedAsSnap: root.appInfo.installedAsSnap === true
+            onKeyboardShortcutsRequested: root.openKeyboardShortcuts()
+            onQuitRequested: root.quitApp()
+            onExternalUrlRequested: function(targetUrl) {
+                Qt.openUrlExternally(targetUrl)
+            }
+            onPanelOpenChanged: {
+                if (panelOpen)
+                    notificationCenter.historyOpen = false
+                else if (!root.hasAssignedImage())
+                    root.scheduleOpenActionFocus()
+            }
+            cornerControlSize: root.cornerControlSize
+            cornerControlMargin: root.cornerControlMargin
+
+            infoOverlayEnabled: root.infoOverlayEnabled
+            smoothMotionEnabled: root.smoothMenuMotionEnabled
+            startInFullscreenEnabled: root.viewerPreferences.startInFullscreen
+            fullscreenBackgroundOpacity: root.viewerPreferences.fullscreenBackgroundOpacity
+            transparencyCheckerboardEnabled: root.viewerPreferences.transparencyCheckerboardEnabled
+            transparencyCheckerboardOpacity: root.viewerPreferences.transparencyCheckerboardOpacity
+            windowedTransparencyCheckerboardEnabled:
+                root.viewerPreferences.windowedTransparencyCheckerboardEnabled
+            windowedTransparencyOpacity: root.viewerPreferences.windowedTransparencyOpacity
+            animatedImagePlaybackEnabled:
+                root.viewerPreferences.animatedImagePlaybackEnabled
+            animationSpeed: root.viewerPreferences.animationSpeed
+            smoothImageScalingEnabled: root.viewerPreferences.smoothImageScalingEnabled
+            mipmapImageScalingEnabled: root.viewerPreferences.mipmapImageScalingEnabled
+            pixelAlignedRenderingEnabled:
+                root.viewerPreferences.pixelAlignedRenderingEnabled
+            fullResolutionRenderingEnabled:
+                root.viewerPreferences.fullResolutionRenderingEnabled
+            colorManagedRenderingEnabled:
+                root.viewerPreferences.colorManagedRenderingEnabled
+            maximumImageMemoryMiB:
+                root.viewerPreferences.maximumImageMemoryMiB
+            minimumImageMemoryMiB:
+                root.viewerPreferences.minimumImageMemoryMiB
+            maximumImageMemoryLimitMiB:
+                root.viewerPreferences.maximumImageMemoryLimitMiB
+            currentImageMegapixels: root.currentImageMegapixels()
+            currentImageLimitedToPreview: root.imageLimitedToPreview
+            cropShieldOpacity: root.viewerPreferences.cropShieldOpacity
+
+            onInfoOverlayChanged: function(enabled) {
+                root.infoOverlayEnabled = enabled
+            }
+
+            onSmoothMotionChanged: function(enabled) {
+                root.smoothMenuMotionEnabled = enabled
+            }
+
+            onStartInFullscreenChanged: function(enabled) {
+                root.viewerPreferences.startInFullscreen = enabled
+            }
+
+            onFullscreenBackgroundOpacityRequested: function(value) {
+                root.viewerPreferences.fullscreenBackgroundOpacity = value
+            }
+
+            onTransparencyCheckerboardChanged: function(enabled) {
+                root.viewerPreferences.transparencyCheckerboardEnabled = enabled
+            }
+
+            onTransparencyCheckerboardOpacityRequested: function(value) {
+                root.viewerPreferences.transparencyCheckerboardOpacity = value
+            }
+
+            onWindowedTransparencyCheckerboardChanged: function(enabled) {
+                root.viewerPreferences.windowedTransparencyCheckerboardEnabled = enabled
+            }
+
+            onWindowedTransparencyOpacityRequested: function(value) {
+                root.viewerPreferences.windowedTransparencyOpacity = value
+            }
+
+            onAnimatedImagePlaybackChanged: function(enabled) {
+                root.viewerPreferences.animatedImagePlaybackEnabled = enabled
+            }
+
+            onAnimationSpeedRequested: function(value) {
+                root.viewerPreferences.animationSpeed = value
+            }
+
+            onSmoothImageScalingChanged: function(enabled) {
+                root.viewerPreferences.smoothImageScalingEnabled = enabled
+            }
+
+            onMipmapImageScalingChanged: function(enabled) {
+                root.viewerPreferences.mipmapImageScalingEnabled = enabled
+            }
+
+            onPixelAlignedRenderingChanged: function(enabled) {
+                root.viewerPreferences.pixelAlignedRenderingEnabled = enabled
+            }
+
+            onFullResolutionRenderingChanged: function(enabled) {
+                root.viewerPreferences.fullResolutionRenderingEnabled = enabled
+                if (enabled)
+                    root.promoteFullRes()
+            }
+
+            onColorManagedRenderingChanged: function(enabled) {
+                root.viewerPreferences.colorManagedRenderingEnabled = enabled
+                root.imageRevision += 1
+                root.refreshEditedPreviewSource()
+            }
+
+            onMaximumImageMemoryMiBRequested: function(value) {
+                root.viewerPreferences.maximumImageMemoryMiB = value
+            }
+
+            onCropShieldOpacityRequested: function(value) {
+                root.viewerPreferences.cropShieldOpacity = value
+            }
+        }
+
+        EditorSidePanel {
+            id: editorSidePanel
+            launcherBlocked: fullscreenSideMenu.panelVisible
+            anchors.fill: parent
+            z: 1100
+
+            hasImage: root.fullScreenMode && root.hasAssignedImage()
+            panelOpen: root.editPanelOpen
+            imageSource: root.residentImageUrl || ""
+            smoothMotionEnabled: root.smoothMenuMotionEnabled
+            cornerControlSize: root.cornerControlSize
+            cornerControlMargin: root.cornerControlMargin
+
+            exposure: root.editorExposure
+            contrast: root.editorContrast
+            highlights: root.editorHighlights
+            shadows: root.editorShadows
+            saturation: root.editorSaturation
+            vibrance: root.editorVibrance
+            warmth: root.editorWarmth
+            tint: root.editorTint
+            blur: root.editorBlur
+            sharpen: root.editorSharpen
+            vignette: root.editorVignette
+
+            flipHorizontal: root.editorFlipHorizontal
+            flipVertical: root.editorFlipVertical
+            rotationQuarterTurns: root.normalizedQuarterTurns(root.editorQuarterTurns)
+            cropMode: root.editorCropMode
+            cropAspectPreset: root.cropAspectPreset
+            cropOutputWidth: root.draftCropOutputWidth()
+            cropOutputHeight: root.draftCropOutputHeight()
+            cropImageWidth: root.transformedNaturalWidth(root.editorQuarterTurns)
+            cropImageHeight: root.transformedNaturalHeight(root.editorQuarterTurns)
+            cropEstimatedFileSize: root.draftCropEstimatedFileSize()
+            compareOriginal: root.compareOriginal
+            hasAdjustments: root.editorHasAdjustments
+            saveBusy: root.imageSaveService.busy
+            sourceChanged: root.editorSourceChanged
+            onHistoryRequested: function(redo) { if (redo) root.redoEditorChange(); else root.undoEditorChange() }
+            saveStatus: root.editorSaveStatus
+            exportFormat: root.editorExportFormat
+            exportScale: root.editorExportScale
+            exportQuality: root.editorExportQuality
+            exportSettings: editorSession.exportSettings
+            exportFormats: root.formatSupport.exportFormats || []
+            exportSourceFormat: {
+                const suffix = FileUrls.parts(root.residentImageUrl).suffix
+                const key = suffix === "jpg" || suffix === "jfif" ? "jpeg" : suffix === "tif" ? "tiff" : suffix
+                for (const item of (root.formatSupport.exportFormats || [])) if (item.key === key) return key
+                return "png"
+            }
+            estimatedSize: root.exportEstimateText
+            onExportSettingRequested: function(name, value) { editorSession.setExportSetting(name, value) }
+            onExportRequested: root.openSaveAsDialog(true)
+            unscaledOutputWidth: root.editedOutputWidth(1)
+            unscaledOutputHeight: root.editedOutputHeight(1)
+            outputWidth: root.editedOutputWidth(root.editorExportScale)
+            outputHeight: root.editedOutputHeight(root.editorExportScale)
+
+            onPanelOpenChangedByUser: function(open) {
+                root.setEditPanelOpen(open)
+            }
+
+            onToolActivated: {
+                root.refitEditorWorkspace()
+                root.invalidateExportEstimate()
+            }
+
+            onExposureRequested: function(value) {
+                editorSession.setAdjustment("exposure", value)
+            }
+
+            onContrastRequested: function(value) {
+                editorSession.setAdjustment("contrast", value)
+            }
+
+            onHighlightsRequested: function(value) {
+                editorSession.setAdjustment("highlights", value)
+            }
+
+            onShadowsRequested: function(value) {
+                editorSession.setAdjustment("shadows", value)
+            }
+
+            onSaturationRequested: function(value) {
+                editorSession.setAdjustment("saturation", value)
+            }
+
+            onVibranceRequested: function(value) {
+                editorSession.setAdjustment("vibrance", value)
+            }
+
+            onWarmthRequested: function(value) {
+                editorSession.setAdjustment("warmth", value)
+            }
+
+            onTintRequested: function(value) {
+                editorSession.setAdjustment("tint", value)
+            }
+
+            onBlurRequested: function(value) {
+                editorSession.setAdjustment("blur", value)
+            }
+
+            onSharpenRequested: function(value) {
+                editorSession.setAdjustment("sharpen", value)
+            }
+
+            onVignetteRequested: function(value) {
+                editorSession.setAdjustment("vignette", value)
+            }
+
+            onAdjustmentInteractionStarted: root.beginEditorInteraction()
+            onAdjustmentInteractionFinished: root.finishEditorInteraction()
+
+            onFlipHorizontalToggled: editorSession.toggleFlipHorizontal()
+            onFlipVerticalToggled: editorSession.toggleFlipVertical()
+            onRotateLeftRequested: editorSession.rotateLeft()
+            onRotateRightRequested: editorSession.rotateRight()
+            onRotationResetRequested: editorSession.resetRotation()
+
+            onCompareOriginalPressed: {
+                if (!root.compareOriginal) {
+                    root.compareOriginal = true
+                    root.scheduleEditedPreviewRefresh()
+                }
+            }
+
+            onCompareOriginalReleased: {
+                if (root.compareOriginal) {
+                    root.compareOriginal = false
+                    root.scheduleEditedPreviewRefresh()
+                }
+            }
+
+            onResetRequested: {
+                root.resetEditorAdjustments()
+            }
+
+            onCropStarted: root.beginCropMode()
+            onCropCanceled: root.cancelCropMode()
+            onCropApplied: root.applyDraftCrop()
+            onCropPresetRequested: function(name) { root.applyCropPreset(name) }
+            onCustomCropAspectRatioRequested: function(ratio) {
+                root.applyCustomCropAspectRatio(ratio)
+            }
+
+            onExportFormatRequested: function(format) {
+                root.finishPendingEditorInput(true)
+                root.editorExportFormat = format
+            }
+
+            onExportScaleRequested: function(value) {
+                root.editorExportScale = root.clamp(value, 0.01, 2.0)
+            }
+
+            onExportQualityRequested: function(value) {
+                root.editorExportQuality = Math.round(root.clamp(value, 1, 100))
+                editorSession.setExportSetting("quality", root.editorExportQuality)
+            }
+
+            onSaveRequested: root.saveCurrentImage()
+            onSaveAsRequested: root.openSaveAsDialog()
+
+            onPresetRequested: function(name) {
+                root.applyEditorPreset(name)
+            }
+        }
+
     }
 
-    EditorSidePanel {
-        id: editorSidePanel
-        launcherBlocked: fullscreenSideMenu.panelVisible
+    Loader {
+        id: shortcutsLoader
+        objectName: "shortcutsLoader"
         anchors.fill: parent
-        z: 1100
-
-        hasImage: root.fullScreenMode && root.hasAssignedImage()
-        panelOpen: root.editPanelOpen
-        imageSource: root.residentImageUrl || ""
-        smoothMotionEnabled: root.smoothMenuMotionEnabled
-        cornerControlSize: root.cornerControlSize
-        cornerControlMargin: root.cornerControlMargin
-
-        exposure: root.editorExposure
-        contrast: root.editorContrast
-        highlights: root.editorHighlights
-        shadows: root.editorShadows
-        saturation: root.editorSaturation
-        vibrance: root.editorVibrance
-        warmth: root.editorWarmth
-        tint: root.editorTint
-        blur: root.editorBlur
-        sharpen: root.editorSharpen
-        vignette: root.editorVignette
-
-        flipHorizontal: root.editorFlipHorizontal
-        flipVertical: root.editorFlipVertical
-        rotationQuarterTurns: root.normalizedQuarterTurns(root.editorQuarterTurns)
-        cropMode: root.editorCropMode
-        cropAspectPreset: root.cropAspectPreset
-        cropOutputWidth: root.draftCropOutputWidth()
-        cropOutputHeight: root.draftCropOutputHeight()
-        cropImageWidth: root.transformedNaturalWidth(root.editorQuarterTurns)
-        cropImageHeight: root.transformedNaturalHeight(root.editorQuarterTurns)
-        cropEstimatedFileSize: root.draftCropEstimatedFileSize()
-        compareOriginal: root.compareOriginal
-        hasAdjustments: root.editorHasAdjustments
-        saveBusy: root.imageSaveService.busy
-        sourceChanged: root.editorSourceChanged
-        onHistoryRequested: function(redo) { if (redo) root.redoEditorChange(); else root.undoEditorChange() }
-        saveStatus: root.editorSaveStatus
-        exportFormat: root.editorExportFormat
-        exportScale: root.editorExportScale
-        exportQuality: root.editorExportQuality
-        exportSettings: editorSession.exportSettings
-        exportFormats: root.formatSupport.exportFormats || []
-        exportSourceFormat: {
-            const suffix = FileUrls.parts(root.residentImageUrl).suffix
-            const key = suffix === "jpg" || suffix === "jfif" ? "jpeg" : suffix === "tif" ? "tiff" : suffix
-            for (const item of (root.formatSupport.exportFormats || [])) if (item.key === key) return key
-            return "png"
-        }
-        estimatedSize: root.exportEstimateText
-        onExportSettingRequested: function(name, value) { editorSession.setExportSetting(name, value) }
-        onExportRequested: root.openSaveAsDialog(true)
-        unscaledOutputWidth: root.editedOutputWidth(1)
-        unscaledOutputHeight: root.editedOutputHeight(1)
-        outputWidth: root.editedOutputWidth(root.editorExportScale)
-        outputHeight: root.editedOutputHeight(root.editorExportScale)
-
-        onPanelOpenChangedByUser: function(open) {
-            root.setEditPanelOpen(open)
-        }
-
-        onToolActivated: {
-            root.refitEditorWorkspace()
-            root.invalidateExportEstimate()
-        }
-
-        onExposureRequested: function(value) {
-            editorSession.setAdjustment("exposure", value)
-        }
-
-        onContrastRequested: function(value) {
-            editorSession.setAdjustment("contrast", value)
-        }
-
-        onHighlightsRequested: function(value) {
-            editorSession.setAdjustment("highlights", value)
-        }
-
-        onShadowsRequested: function(value) {
-            editorSession.setAdjustment("shadows", value)
-        }
-
-        onSaturationRequested: function(value) {
-            editorSession.setAdjustment("saturation", value)
-        }
-
-        onVibranceRequested: function(value) {
-            editorSession.setAdjustment("vibrance", value)
-        }
-
-        onWarmthRequested: function(value) {
-            editorSession.setAdjustment("warmth", value)
-        }
-
-        onTintRequested: function(value) {
-            editorSession.setAdjustment("tint", value)
-        }
-
-        onBlurRequested: function(value) {
-            editorSession.setAdjustment("blur", value)
-        }
-
-        onSharpenRequested: function(value) {
-            editorSession.setAdjustment("sharpen", value)
-        }
-
-        onVignetteRequested: function(value) {
-            editorSession.setAdjustment("vignette", value)
-        }
-
-        onAdjustmentInteractionStarted: root.beginEditorInteraction()
-        onAdjustmentInteractionFinished: root.finishEditorInteraction()
-
-        onFlipHorizontalToggled: editorSession.toggleFlipHorizontal()
-        onFlipVerticalToggled: editorSession.toggleFlipVertical()
-        onRotateLeftRequested: editorSession.rotateLeft()
-        onRotateRightRequested: editorSession.rotateRight()
-        onRotationResetRequested: editorSession.resetRotation()
-
-        onCompareOriginalPressed: {
-            if (!root.compareOriginal) {
-                root.compareOriginal = true
-                root.scheduleEditedPreviewRefresh()
+        z: 3000
+        active: false
+        onStatusChanged: {
+            if (status === Loader.Error) {
+                root.dismissKeyboardShortcuts(true)
+                notificationCenter.finish("shortcuts", "error", qsTr("Keyboard shortcuts unavailable"),
+                    qsTr("The shortcut reference could not be opened. Check the installation and try again."))
             }
         }
-
-        onCompareOriginalReleased: {
-            if (root.compareOriginal) {
-                root.compareOriginal = false
-                root.scheduleEditedPreviewRefresh()
-            }
-        }
-
-        onResetRequested: {
-            root.resetEditorAdjustments()
-        }
-
-        onCropStarted: root.beginCropMode()
-        onCropCanceled: root.cancelCropMode()
-        onCropApplied: root.applyDraftCrop()
-        onCropPresetRequested: function(name) { root.applyCropPreset(name) }
-        onCustomCropAspectRatioRequested: function(ratio) {
-            root.applyCustomCropAspectRatio(ratio)
-        }
-
-        onExportFormatRequested: function(format) {
-            root.finishPendingEditorInput(true)
-            root.editorExportFormat = format
-        }
-
-        onExportScaleRequested: function(value) {
-            root.editorExportScale = root.clamp(value, 0.01, 2.0)
-        }
-
-        onExportQualityRequested: function(value) {
-            root.editorExportQuality = Math.round(root.clamp(value, 1, 100))
-            editorSession.setExportSetting("quality", root.editorExportQuality)
-        }
-
-        onSaveRequested: root.saveCurrentImage()
-        onSaveAsRequested: root.openSaveAsDialog()
-
-        onPresetRequested: function(name) {
-            root.applyEditorPreset(name)
-        }
+    }
+    Connections {
+        target: shortcutsLoader.item
+        function onDismissed() { root.dismissKeyboardShortcuts(true) }
     }
 
     Loader {

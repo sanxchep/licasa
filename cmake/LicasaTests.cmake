@@ -543,7 +543,12 @@ target_include_directories(licasa_qml_tests PRIVATE src)
 qt_add_resources(licasa_qml_tests "editor_dialog_fixtures"
         PREFIX "/Licasa/qml"
         BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
-        FILES qml/SaveDialog.qml qml/FileUrls.js qml/DialogRuntime.js)
+        FILES qml/SaveDialog.qml qml/FileUrls.js qml/DialogRuntime.js
+        qml/ShortcutsDialog.qml qml/ShortcutCatalog.js
+        qml/components/RoundIconButton.qml qml/components/InteractiveScrollBar.qml)
+qt_add_resources(licasa_qml_tests "shortcut_visual_fixtures"
+        PREFIX "/Licasa"
+        FILES assets/icons/close.svg assets/shaders/shortcuts-blur.frag.qsb)
 
 # The harness uses Qt Gui/Qml APIs directly; the production service target
 # additionally propagates its Qt Quick requirements.
@@ -844,6 +849,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_tests_properties(licasa_release_hardening PROPERTIES LABELS "security;packaging")
     if(LICASA_BUILD_DIAGNOSTICS)
         list(APPEND LICASA_TEST_TARGETS licasa_diagnostics)
+        add_test(NAME licasa_qml_startup_cache
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_qml_startup_cache.py
+                $<TARGET_FILE:licasa_diagnostics>)
+        set_tests_properties(licasa_qml_startup_cache PROPERTIES
+                TIMEOUT 45 LABELS "core;startup;qml;integration")
         add_test(NAME licasa_navigation_transition
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_navigation_transition.py
                 $<TARGET_FILE:licasa_diagnostics>

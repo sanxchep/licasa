@@ -33,8 +33,7 @@ RECOVERY_SCENARIOS = {
 
 
 def sha256(path: Path) -> str:
-    with path.open("rb") as source:
-        return hashlib.file_digest(source, "sha256").hexdigest()
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def application_executable(app: Path) -> Path:

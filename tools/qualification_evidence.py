@@ -167,13 +167,14 @@ def validate_unsupported_report(payload: dict, target: dict) -> None:
         version = qualifier[qualifier.index("--ubuntu-version") + 1]
     except (ValueError, IndexError) as error:
         raise ValueError("Unsupported installation contract lacks its userspace") from error
-    if version not in {"22.04", "26.04"} or (("--appimage" in qualifier) != (version == "22.04")):
+    legacy_appimage = "--appimage" in qualifier
+    if version not in {"22.04", "26.04"} or (legacy_appimage and version != "22.04"):
         raise ValueError("Unsupported installation contract has an invalid userspace or artifact selection")
     if (payload.get("ubuntu_version") != version
             or payload.get("native_deb") != "unsupported_dependency_rejection_confirmed"
             or not re.fullmatch(r"[a-f0-9]{64}", payload.get("package_sha256", "") or "")):
         raise ValueError("Missing explicit native dependency rejection for the requested candidate and userspace")
-    if version == "22.04" and (
+    if legacy_appimage and (
             payload.get("appimage") != "unsupported_glibc_rejection_confirmed"
             or not re.fullmatch(r"[a-f0-9]{64}", payload.get("appimage_sha256", "") or "")):
         raise ValueError("Ubuntu 22.04 rejection must prove the AppImage glibc baseline too")

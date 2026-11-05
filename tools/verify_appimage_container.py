@@ -30,8 +30,8 @@ HOST_RUNTIME_PACKAGES = (
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("appimage", type=Path)
-    parser.add_argument("--ubuntu-version", choices=("24.04", "26.04"))
-    parser.add_argument("--target", choices=("ubuntu-24.04", "ubuntu-26.04", "debian-13"))
+    parser.add_argument("--ubuntu-version", choices=("22.04", "24.04", "26.04"))
+    parser.add_argument("--target", choices=("ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04", "debian-13"))
     parser.add_argument("--output", type=Path,
                         default=ROOT / "build/qualification/appimage/install-smoke.json")
     args = parser.parse_args()
@@ -188,7 +188,7 @@ def main() -> None:
         report["runtime_dependencies_checked_before_desktop_tools"] = True
         report["host_runtime_packages"] = HOST_RUNTIME_PACKAGES
         report["appimage_sha256"] = hashlib.sha256(appimage.read_bytes()).hexdigest()
-    target_id = {"debian-13": "debian13-appimage", "ubuntu-24.04": "ubuntu24-appimage",
+    target_id = {"debian-13": "debian13-appimage", "ubuntu-22.04": "ubuntu22-appimage", "ubuntu-24.04": "ubuntu24-appimage",
                  "ubuntu-26.04": "ubuntu26-appimage"}[args.target]
     write_checked_report(report, target_id=target_id, package=appimage, output=args.output)
     print(f"Clean AppImage launched the viewer and decoded {len(samples)} samples: {args.output}")

@@ -50,8 +50,14 @@ case "$protocol" in
         ;;
     wayland)
         export WAYLAND_DISPLAY=wayland-dialog-test QT_QPA_PLATFORM=wayland
-        weston --backend=x11 --renderer=pixman --socket="$WAYLAND_DISPLAY" \
-            --idle-time=0 >"$log_directory/dialog-weston.log" 2>&1 &
+        (
+            if weston --help 2>&1 | grep -q -- '--renderer'; then
+                set -- --backend=x11 --renderer=pixman
+            else
+                set -- --backend=x11-backend.so --use-pixman
+            fi
+            exec weston "$@" --socket="$WAYLAND_DISPLAY" --idle-time=0
+        ) >"$log_directory/dialog-weston.log" 2>&1 &
         wayland_pid=$!
         attempt=0
         while [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ] && [ "$attempt" -lt 50 ]; do

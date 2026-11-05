@@ -671,6 +671,70 @@ Item {
             compare(manager.prepared[0], "file:///prepared-neighbor.png")
         }
 
+        function test_mainLateFullPreloadUsesReadyPromotionDelay_data() {
+            return [
+                { tag: "jpeg", suffix: "jpg", extent: 640, delay: 32 },
+                { tag: "png", suffix: "png", extent: 640, delay: 32 },
+                { tag: "jpeg-full-first", suffix: "jpg", extent: 640, delay: 32,
+                  fullFirst: true },
+                { tag: "jpeg-full-error", suffix: "jpg", extent: 640, delay: 80,
+                  fullError: true },
+                { tag: "png-full-error", suffix: "png", extent: 640, delay: 80,
+                  fullError: true },
+                { tag: "large-jpeg", suffix: "jpg", extent: 10000, delay: 220 },
+                { tag: "large-tiff", suffix: "tiff", extent: 10000, delay: 120 }
+            ]
+        }
+
+        function test_mainLateFullPreloadUsesReadyPromotionDelay(data) {
+            const main = makeMain()
+            // Hold automatic promotion while the real viewport/provider controls
+            // the order. The cache snapshot is deliberately still unavailable.
+            main.viewerPreferences.fullResolutionRenderingEnabled = false
+            main.residentImageUrl = "file:///timing." + data.suffix
+            main.naturalImageSize = Qt.size(data.extent, data.extent)
+            main.previewPhase = true
+            const image = findChild(main, "imageViewport")
+            image.providerSource = "image://previewtest/timing." + data.suffix
+            image.sourceOverride = ""
+            image.previewFirstPreloadEnabled = data.suffix === "png"
+            image.parallelFullResolutionEnabled = !image.previewFirstPreloadEnabled
+            const preview = requests(1).filter(function(request) {
+                return stage(request) === "preview"
+            })[0]
+            verify(preview)
+            if (data.fullFirst) {
+                const readyFull = requests(2).filter(function(request) {
+                    return stage(request) === "full"
+                })[0]
+                release(readyFull)
+                tryCompare(findChild(image, "staticImageC"), "status", Image.Ready, 5000)
+            }
+            release(preview)
+            tryCompare(image, "imageStatus", Image.Ready, 5000)
+            compare(main.decodedFullBaseReady, false)
+            if (data.delay === 32 && !data.fullFirst)
+                compare(main.fullResUpgradeDelayMs, 80)
+            const full = requests(2).filter(function(request) {
+                return stage(request) === "full"
+            })[0]
+            verify(full)
+            if (!data.fullFirst)
+                release(full, data.fullError)
+            tryCompare(findChild(image, "staticImageC"), "status",
+                       data.fullError ? Image.Error : Image.Ready, 5000)
+            compare(main.decodedFullBaseReady, false)
+            compare(main.fullResUpgradeDelayMs, data.delay)
+            verify(image.activeImageSlot !== 2)
+            compare(testPreviewRequests.requests().length, 2)
+            if (data.delay === 32) {
+                // A ready full slot from a different request must not shorten
+                // the new request's fallback delay, even before its next turn.
+                image.providerSource = "image://previewtest/replacement." + data.suffix
+                compare(main.fullResUpgradeDelayMs, 80)
+            }
+        }
+
         function test_mainLoadAndClearRetirePendingNeighborRefresh() {
             const main = makeMain()
             const manager = main.windowManager

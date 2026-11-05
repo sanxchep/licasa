@@ -171,6 +171,35 @@ class AppImagePackagingTests(unittest.TestCase):
         digest = hashlib.sha256(image.read_bytes()).hexdigest()
         self.assertEqual(image.with_name(image.name + ".sha256").read_text(), f"{digest}  {image.name}\n")
 
+    def test_jammy_checks_version_needs_in_lazy_plugins(self):
+        plugin = self.payload / "usr/lib/licasa/plugins/imageformats/lazy.so"
+        self.write(plugin, b"\x7fELF fixture")
+        versions = ("Version definition section '.gnu.version_d':\n  Name: GLIBC_2.38\n"
+                    "Version needs section '.gnu.version_r':\n  Name: GLIBC_2.35\n"
+                    "  Name: GLIBCXX_3.4.30\n  Name: CXXABI_1.3.13\n")
+        with patch.object(packager.subprocess, "check_output", return_value=versions) as readelf:
+            report = packager.check_jammy_abi(self.payload)
+            self.assertEqual(report["maximum_required"],
+                             {"GLIBC": "2.35", "GLIBCXX": "3.4.30", "CXXABI": "1.3.13"})
+            self.assertEqual(report["elf_files"], 1)
+            self.assertEqual(readelf.call_args.args[0][-1], str(plugin))
+            for requirement in ("GLIBC_2.36", "GLIBCXX_3.4.31", "GLIBC_ABI_DT_RELR"):
+                with self.subTest(requirement=requirement):
+                    readelf.return_value = versions + f"  Name: {requirement}\n"
+                    with self.assertRaisesRegex(RuntimeError, "lazy.so requires.*" + requirement):
+                        packager.check_jammy_abi(self.payload)
+
+    def test_jammy_rejects_a_bundled_system_cpp_runtime(self):
+        (self.payload / "usr/lib/libstdc++.so.6").symlink_to("libstdc++.so.6.0.30")
+        with self.assertRaisesRegex(RuntimeError, "host runtime for libstdc"):
+            packager.check_jammy_abi(self.payload)
+
+    def test_offline_packaging_rejects_a_missing_tool_without_fetching(self):
+        with patch.object(packager, "urlopen") as download:
+            with self.assertRaisesRegex(RuntimeError, "Offline AppImage tool missing"):
+                packager.fetch_tools(self.work / "empty-tools", offline=True)
+            download.assert_not_called()
+
     def test_native_debian_launcher_is_normalized_before_portable_assembly(self):
         self.write(self.payload / "usr/bin/licasa.bin", b"native actual ELF fixture")
         self.write(self.payload / "usr/bin/licasa", b"native root-gated wrapper")

@@ -20,7 +20,7 @@ struct Pixel {
     uchar r = 0;
     uchar g = 0;
     uchar b = 0;
-    uchar a = 255;
+    uchar a = 0;
 };
 
 struct Header {
@@ -96,6 +96,146 @@ class BufferedInput {
     qsizetype available_ = 0;
 };
 
+// Select output-width behavior once, without a per-pixel dispatch or scaled
+// sample-position bookkeeping on a full-width row. Both paths share the parser.
+template <bool FullWidth>
+bool decodePixels(QIODevice* device, QSize sourceSize, QSize outputSize, QImage& decoded)
+{
+    BufferedInput input(device);
+    std::array<Pixel, 64> index{};
+    Pixel pixel{0, 0, 0, 255};
+    int run = 0;
+    int nextOutputY = 0;
+    const int sourceWidth = sourceSize.width();
+    const int sourceHeight = sourceSize.height();
+    const int sampleDenominator = 2 * outputSize.width();
+    const int sampleStep = sourceWidth / outputSize.width();
+    const int sampleFractionStep = 2 * (sourceWidth % outputSize.width());
+    const int initialSampleFraction = sourceWidth % sampleDenominator;
+    for (int y = 0; y < sourceHeight; ++y) {
+        const bool selectedRow =
+            nextOutputY < outputSize.height() &&
+            y == (2ll * nextOutputY + 1) * sourceHeight / (2ll * outputSize.height());
+        int nextOutputX = 0;
+        int nextSourceX = sourceWidth / sampleDenominator;
+        int sampleFraction = initialSampleFraction;
+        const auto advanceSample = [&] {
+            // Exactly advance floor((2*k + 1)*sourceWidth / (2*outputWidth)).
+            // The remainder stays below sampleDenominator; one carry suffices.
+            nextSourceX += sampleStep;
+            sampleFraction += sampleFractionStep;
+            if (sampleFraction >= sampleDenominator) {
+                sampleFraction -= sampleDenominator;
+                ++nextSourceX;
+            }
+        };
+        int nextCancellationX = 0;
+        QRgb* row = selectedRow ? reinterpret_cast<QRgb*>(decoded.scanLine(nextOutputY)) : nullptr;
+        for (int x = 0; x < sourceWidth;) {
+            if (x >= nextCancellationX) {
+                if (Licasa::ImageDecodeContract::cancelled(device)) {
+                    return false;
+                }
+                nextCancellationX = x + 4096;
+            }
+            if (run == 0) {
+                const int tag = input.byte();
+                if (tag < 0) {
+                    return false;
+                }
+                if (tag == 0xfe) {
+                    if (!input.literal<3>(pixel)) {
+                        return false;
+                    }
+                } else if (tag == 0xff) {
+                    if (!input.literal<4>(pixel)) {
+                        return false;
+                    }
+                } else {
+                    switch (tag & 0xc0) {
+                    case 0x00:
+                        pixel = index[size_t(tag & 63)];
+                        break;
+                    case 0x40:
+                        pixel.r = uchar(pixel.r + ((tag >> 4 & 3) - 2));
+                        pixel.g = uchar(pixel.g + ((tag >> 2 & 3) - 2));
+                        pixel.b = uchar(pixel.b + ((tag & 3) - 2));
+                        break;
+                    case 0x80: {
+                        const int second = input.byte();
+                        if (second < 0) {
+                            return false;
+                        }
+                        const int dg = (tag & 63) - 32;
+                        pixel.r = uchar(pixel.r + dg + (second >> 4) - 8);
+                        pixel.g = uchar(pixel.g + dg);
+                        pixel.b = uchar(pixel.b + dg + (second & 15) - 8);
+                        break;
+                    }
+                    default:
+                        run = tag & 63;
+                        break;
+                    }
+                }
+                const int hash = (pixel.r * 3 + pixel.g * 5 + pixel.b * 7 + pixel.a * 11) & 63;
+                index[size_t(hash)] = pixel;
+                ++run; // The tag's pixel and any QOI_OP_RUN repetitions form one span.
+            }
+            if (run == 1) {
+                // Literal/diff/index-heavy images should keep the scalar
+                // path: form a pixel only when this source pixel is selected.
+                if constexpr (FullWidth) {
+                    if (selectedRow) {
+                        row[x] = qRgba(pixel.r, pixel.g, pixel.b, pixel.a);
+                        nextOutputX = x + 1;
+                    }
+                } else if (selectedRow && nextOutputX < outputSize.width() && x == nextSourceX) {
+                    row[nextOutputX++] = qRgba(pixel.r, pixel.g, pixel.b, pixel.a);
+                    advanceSample();
+                }
+                run = 0;
+                ++x;
+                continue;
+            }
+            const int count = std::min(run, sourceWidth - x);
+            const int spanEnd = x + count;
+            if (selectedRow) {
+                const QRgb value = qRgba(pixel.r, pixel.g, pixel.b, pixel.a);
+                if constexpr (FullWidth) {
+                    std::fill(row + x, row + spanEnd, value);
+                    nextOutputX = spanEnd;
+                    nextSourceX = spanEnd;
+                } else {
+                    // Compute a sample position only when an output pixel is
+                    // written. Long runs and unselected source pixels require
+                    // neither per-pixel division nor per-pixel expansion.
+                    while (nextOutputX < outputSize.width() && nextSourceX < spanEnd) {
+                        row[nextOutputX++] = value;
+                        advanceSample();
+                    }
+                }
+            }
+            run -= count;
+            x = spanEnd;
+        }
+        if (selectedRow) {
+            if (nextOutputX != outputSize.width()) {
+                return false;
+            }
+            ++nextOutputY;
+        }
+    }
+    if (nextOutputY != outputSize.height()) {
+        return false;
+    }
+    for (char expected : endMarker) {
+        if (input.byte() != uchar(expected)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 class QoiHandler final : public QImageIOHandler {
   public:
     bool canRead() const override
@@ -158,122 +298,12 @@ class QoiHandler final : public QImageIOHandler {
             return false;
         }
 
-        BufferedInput input(device());
-        std::array<Pixel, 64> index{};
-        Pixel pixel;
-        int run = 0;
-        int nextOutputY = 0;
-        const int sourceWidth = header.size.width();
-        const int sourceHeight = header.size.height();
-        for (int y = 0; y < sourceHeight; ++y) {
-            const bool selectedRow =
-                nextOutputY < outputSize.height() &&
-                y == (2ll * nextOutputY + 1) * sourceHeight / (2ll * outputSize.height());
-            int nextOutputX = 0;
-            int nextSourceX = sourceWidth / (2ll * outputSize.width());
-            int nextCancellationX = 0;
-            QRgb* row =
-                selectedRow ? reinterpret_cast<QRgb*>(decoded.scanLine(nextOutputY)) : nullptr;
-            for (int x = 0; x < sourceWidth;) {
-                if (x >= nextCancellationX) {
-                    if (Licasa::ImageDecodeContract::cancelled(device())) {
-                        return false;
-                    }
-                    nextCancellationX = x + 4096;
-                }
-                if (run == 0) {
-                    const int tag = input.byte();
-                    if (tag < 0) {
-                        return false;
-                    }
-                    if (tag == 0xfe) {
-                        if (!input.literal<3>(pixel)) {
-                            return false;
-                        }
-                    } else if (tag == 0xff) {
-                        if (!input.literal<4>(pixel)) {
-                            return false;
-                        }
-                    } else {
-                        switch (tag & 0xc0) {
-                        case 0x00:
-                            pixel = index[size_t(tag & 63)];
-                            break;
-                        case 0x40:
-                            pixel.r = uchar(pixel.r + ((tag >> 4 & 3) - 2));
-                            pixel.g = uchar(pixel.g + ((tag >> 2 & 3) - 2));
-                            pixel.b = uchar(pixel.b + ((tag & 3) - 2));
-                            break;
-                        case 0x80: {
-                            const int second = input.byte();
-                            if (second < 0) {
-                                return false;
-                            }
-                            const int dg = (tag & 63) - 32;
-                            pixel.r = uchar(pixel.r + dg + (second >> 4) - 8);
-                            pixel.g = uchar(pixel.g + dg);
-                            pixel.b = uchar(pixel.b + dg + (second & 15) - 8);
-                            break;
-                        }
-                        default:
-                            run = tag & 63;
-                            break;
-                        }
-                    }
-                    const int hash = (pixel.r * 3 + pixel.g * 5 + pixel.b * 7 + pixel.a * 11) & 63;
-                    index[size_t(hash)] = pixel;
-                    ++run; // The tag's pixel and any QOI_OP_RUN repetitions form one span.
-                }
-                if (run == 1) {
-                    // Literal/diff/index-heavy images should keep the scalar
-                    // path: form a pixel only when this source pixel is selected.
-                    if (selectedRow && nextOutputX < outputSize.width() && x == nextSourceX) {
-                        row[nextOutputX++] = qRgba(pixel.r, pixel.g, pixel.b, pixel.a);
-                        nextSourceX = outputSize.width() == sourceWidth
-                                          ? x + 1
-                                          : int((2ll * nextOutputX + 1) * sourceWidth /
-                                                (2ll * outputSize.width()));
-                    }
-                    run = 0;
-                    ++x;
-                    continue;
-                }
-                const int count = std::min(run, sourceWidth - x);
-                const int spanEnd = x + count;
-                if (selectedRow) {
-                    const QRgb value = qRgba(pixel.r, pixel.g, pixel.b, pixel.a);
-                    if (outputSize.width() == sourceWidth) {
-                        std::fill(row + x, row + spanEnd, value);
-                        nextOutputX = spanEnd;
-                        nextSourceX = spanEnd;
-                    } else {
-                        // Compute a sample position only when an output pixel is
-                        // written. Long runs and unselected source pixels require
-                        // neither per-pixel division nor per-pixel expansion.
-                        while (nextOutputX < outputSize.width() && nextSourceX < spanEnd) {
-                            row[nextOutputX++] = value;
-                            nextSourceX = int((2ll * nextOutputX + 1) * sourceWidth /
-                                              (2ll * outputSize.width()));
-                        }
-                    }
-                }
-                run -= count;
-                x = spanEnd;
-            }
-            if (selectedRow) {
-                if (nextOutputX != outputSize.width()) {
-                    return false;
-                }
-                ++nextOutputY;
-            }
-        }
-        if (nextOutputY != outputSize.height()) {
+        const bool decodedPixels =
+            outputSize.width() == header.size.width()
+                ? decodePixels<true>(device(), header.size, outputSize, decoded)
+                : decodePixels<false>(device(), header.size, outputSize, decoded);
+        if (!decodedPixels) {
             return false;
-        }
-        for (char expected : endMarker) {
-            if (input.byte() != uchar(expected)) {
-                return false;
-            }
         }
         decoded.setColorSpace(
             QColorSpace(header.colorSpace == 1 ? QColorSpace::SRgbLinear : QColorSpace::SRgb));

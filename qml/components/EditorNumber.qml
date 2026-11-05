@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls.Basic
 
 TextField {
@@ -15,6 +16,12 @@ TextField {
     property bool dirty: false
     signal valueRequested(real value)
     signal historyRequested(bool redo)
+
+    readonly property var focusWindow: root.Window.window
+
+    function helpIsOpen() {
+        return root.focusWindow && root.focusWindow.shortcutsVisible === true
+    }
 
     function formattedValue() {
         const rounded = Number(value.toFixed(decimals))
@@ -56,14 +63,14 @@ TextField {
     Accessible.description: minimum + qsTr(" to ") + maximum + suffix
 
     onTextEdited: dirty = true
-    onEditingFinished: finishEditing(true)
-    onActiveFocusChanged: { if (!activeFocus) finishEditing(true) }
+    onEditingFinished: { if (!helpIsOpen()) finishEditing(true) }
+    onActiveFocusChanged: { if (!activeFocus && !helpIsOpen()) finishEditing(true) }
     // An undo, reset, source switch or range change retires the old draft.
     onValueChanged: restoreValue()
     onMinimumChanged: restoreValue()
     onMaximumChanged: restoreValue()
     onVisibleChanged: { if (!visible) restoreValue() }
-    onEnabledChanged: { if (!enabled) restoreValue() }
+    onEnabledChanged: { if (!enabled && !helpIsOpen()) restoreValue() }
     Keys.onShortcutOverride: function(event) {
         const control = (event.modifiers & Qt.ControlModifier) !== 0
         const textKeys = [Qt.Key_A, Qt.Key_C, Qt.Key_V, Qt.Key_X,
@@ -71,7 +78,7 @@ TextField {
             Qt.Key_Home, Qt.Key_End, Qt.Key_Backspace, Qt.Key_Delete]
         const textUndo = event.key === Qt.Key_Z || event.key === Qt.Key_Y
         event.accepted = control ? textKeys.indexOf(event.key) >= 0 || textUndo
-            : event.key !== Qt.Key_F11 && event.key !== Qt.Key_PageUp && event.key !== Qt.Key_PageDown
+            : event.key !== Qt.Key_F1 && event.key !== Qt.Key_F11 && event.key !== Qt.Key_PageUp && event.key !== Qt.Key_PageDown
     }
     Keys.onPressed: function(event) {
         if ((event.modifiers & Qt.ControlModifier) !== 0 && !dirty

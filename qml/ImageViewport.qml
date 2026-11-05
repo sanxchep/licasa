@@ -103,6 +103,9 @@ Item {
     readonly property string parallelPairId: parallelPairOrigin + "-" + parallelPairGeneration
     readonly property bool speculativeFullAvailable: speculativeFullKey.length > 0
         && (photoC.status === Image.Loading || photoC.status === Image.Ready)
+    readonly property bool speculativeFullReady: sourceOverride.length === 0
+        && speculativeFullKey.length > 0 && speculativeFullKey === fullRequestKey()
+        && photoC.status === Image.Ready
     property bool imageLoadFailed: false
     // Rejected file types never enter the decoder, whose empty-source cleanup
     // must not erase the actionable failure shown for that open request.

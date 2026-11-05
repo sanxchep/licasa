@@ -5,10 +5,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Licasa
-        VERSION 0.9.6
+        VERSION 0.9.7
         LANGUAGES CXX
 )
-set(LICASA_RELEASE_DATE "2026-11-01")
+set(LICASA_RELEASE_DATE "2026-11-05")
 
 # Qt 6 requires C++17 or newer.
 set(CMAKE_CXX_STANDARD 17)
@@ -176,7 +176,7 @@ endif()
 if(LICASA_ENABLE_JP2)
     find_path(LICASA_OPENJPEG_INCLUDE_DIR openjpeg.h
             PATHS "${CMAKE_CURRENT_SOURCE_DIR}/build/deps/openjpeg-dev/usr/include/openjpeg-2.5"
-            PATH_SUFFIXES openjpeg-2.5 REQUIRED)
+            PATH_SUFFIXES openjpeg-2.5 openjpeg-2.4 REQUIRED)
     find_library(LICASA_OPENJPEG_LIBRARY NAMES libopenjp2.so.7 openjp2 REQUIRED)
     add_library(licasa_jp2_plugin MODULE src/plugins/jp2_plugin.cpp src/plugins/jp2.json)
     target_include_directories(licasa_jp2_plugin PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -647,6 +647,12 @@ function(licasa_add_qml target_name)
             QtQuick.Window
             QtQuick.Dialogs
             QML_FILES
+            # Compile shared scripts into both viewers. Plain resources force
+            # first-open compilation and synchronous disk-cache writes.
+            qml/ViewerMath.js
+            qml/FileUrls.js
+            qml/ShortcutCatalog.js
+            qml/DialogRuntime.js
             qml/Main.qml
             qml/OpenDialog.qml
             qml/SaveDialog.qml
@@ -656,6 +662,7 @@ function(licasa_add_qml target_name)
             qml/TemporalExportCoordinator.qml
             qml/FullscreenSideMenu.qml
             qml/FullscreenSettingsContent.qml
+            qml/ShortcutsDialog.qml
             qml/EditorSidePanel.qml
             qml/EditorPanelContent.qml
             qml/EditorAdjustContent.qml
@@ -687,9 +694,8 @@ function(licasa_add_qml target_name)
             src/media/motion/motion_photo_frame_surface.cpp
             src/media/motion/motion_photo_frame_surface.h
             RESOURCES
-            qml/ViewerMath.js
-            qml/DialogRuntime.js
-            qml/FileUrls.js
+            assets/shaders/shortcuts-blur.frag
+            assets/shaders/shortcuts-blur.frag.qsb
             qml/MotionPhotoFrameSurfaceHost.qml
             assets/icons/settings.svg
             assets/icons/edit.svg

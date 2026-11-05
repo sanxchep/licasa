@@ -262,14 +262,15 @@ type, plus the exact command/error and support report when applicable.
 | ubuntu-deb / Ubuntu 24.04 | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
 | debian-deb / Debian 13 (Trixie) | x86-64 / glibc ≥ 2.41 | 6.8.2 | In development; not a published support claim |
 | debian-deb / Debian 13 / MATE X11 / native GTK file picker | x86-64 / glibc ≥ 2.41 | 6.8.2 | In development; not a published support claim |
-| appimage / Ubuntu 24.04 | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
-| appimage / Ubuntu 26.04 | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
-| appimage / Debian 13 (Trixie) | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
-| appimage / Debian 13 / MATE X11 / AT-SPI keyboard accessibility | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
-| appimage / Fedora 44 | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
-| appimage / Arch Linux (rolling; tested image recorded in evidence) | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
-| rpm / Fedora 44 | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
-| arch / Arch Linux (rolling; tested image recorded in evidence) | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
+| appimage / Ubuntu 22.04 | x86-64 / glibc ≥ 2.35 | 6.4.2 | Required before stable |
+| appimage / Ubuntu 24.04 | x86-64 / glibc ≥ 2.35 | 6.4.2 | Required before stable |
+| appimage / Ubuntu 26.04 | x86-64 / glibc ≥ 2.35 | 6.4.2 | Required before stable |
+| appimage / Debian 13 (Trixie) | x86-64 / glibc ≥ 2.35 | 6.4.2 | Required before stable |
+| appimage / Debian 13 / MATE X11 / AT-SPI keyboard accessibility | x86-64 / glibc ≥ 2.35 | 6.4.2 | Required before stable |
+| appimage / Fedora 44 | x86-64 / glibc ≥ 2.35 | 6.4.2 | Required before stable |
+| appimage / Arch Linux (rolling; tested image recorded in evidence) | x86-64 / glibc ≥ 2.35 | 6.4.2 | Required before stable |
+| rpm / Fedora 44 | x86-64 / glibc ≥ 2.35 | 6.4.2 | Required before stable |
+| arch / Arch Linux (rolling; tested image recorded in evidence) | x86-64 / glibc ≥ 2.35 | 6.4.2 | Required before stable |
 | snap / Ubuntu 24.04 / GNOME X11 and Wayland | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
 | snap / Ubuntu 24.04 / Plasma X11 and Wayland | x86-64 / glibc ≥ 2.39 | 6.4.2 | Required before stable |
 <!-- support-matrix:end -->
@@ -287,14 +288,24 @@ docker run --rm -v "$PWD:/source:ro" -v "$PWD/build/deb-output:/output" \
   licasa-deb-builder bash /source/packaging/verify-fresh-build.sh
 ```
 
-The Ubuntu `.deb`, AppImage, installer and SHA-256 files appear in
-`build/deb-output/`. Docker is needed for this build recipe; installing the
-published packages does not require it. To check the local files:
+Build the AppImage and its portable runtime in the Ubuntu 22.04 builder.
 
 ```sh
-(cd build/deb-output && sha256sum -c licasa_0.9.5-1_amd64.deb.sha256)
-(cd build/deb-output && sha256sum -c Licasa-0.9.5-x86_64.AppImage.sha256)
-(cd build/deb-output && sha256sum -c install-licasa-appimage.sh.sha256)
+docker build -f packaging/build-appimage.Dockerfile -t licasa-appimage-builder packaging
+mkdir -p build/appimage-work build/appimage-output
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/work -e PYTHONDONTWRITEBYTECODE=1 \
+  -v "$PWD:/source:ro" -v "$PWD/build/appimage-work:/work" \
+  -v "$PWD/build/appimage-output:/output" licasa-appimage-builder \
+  python3 /source/tools/build_appimage.py --work-dir /work --output-dir /output --tools-dir /work/tools
+install -m 0755 packaging/install-licasa-appimage.sh build/appimage-output/
+(cd build/appimage-output && sha256sum install-licasa-appimage.sh > install-licasa-appimage.sh.sha256)
+```
+
+Verify the local package checksums.
+
+```sh
+(cd build/deb-output && sha256sum -c ./*.sha256)
+(cd build/appimage-output && sha256sum -c ./*.sha256)
 ```
 
 ### Install a Local development copy

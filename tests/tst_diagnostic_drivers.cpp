@@ -75,7 +75,9 @@ int runControlledDriver(QGuiApplication& application, const QString& driver, con
             });
         }
     } else if (driver == QStringLiteral("viewer-ready")) {
-        const QUrl source(QStringLiteral("file:///controlled/photo.png"));
+        const QUrl source = mode == QStringLiteral("no-file")
+                                ? QUrl()
+                                : QUrl(QStringLiteral("file:///controlled/photo.png"));
         window.setProperty("residentImageUrl", source);
         window.setProperty("previewPhase", false);
         window.setProperty("rawFastPhase", true);
@@ -99,17 +101,34 @@ int runControlledDriver(QGuiApplication& application, const QString& driver, con
             emit window.viewport.imageReady();
             emit window.frameSwapped();
         });
-        QTimer::singleShot(120, &window, [&window, &controlledEvents, started, mode] {
-            const QString source =
-                mode == QStringLiteral("unstaged")
-                    ? QStringLiteral("image://controlled/animation-frame")
-                    : QStringLiteral("image://controlled/photo?licasa_stage=") + mode;
-            window.viewport.setProperty("activeRequestKey", source);
-            controlledEvents["final_raster_ready_ms"] =
-                (LicasaDiagnostics::monotonicNs() - started) / 1e6;
-            emit window.viewport.imageReady();
-            emit window.frameSwapped();
-        });
+        const bool lateFrame = mode == QStringLiteral("late-frame");
+        if (lateFrame) {
+            window.viewport.setProperty("pendingImageSlot", 0);
+        }
+        QTimer::singleShot(lateFrame ? 1400 : 120, &window,
+                           [&window, &controlledEvents, started, mode, lateFrame] {
+                               const QString source =
+                                   mode == QStringLiteral("unstaged")
+                                       ? QStringLiteral("image://controlled/animation-frame")
+                                       : QStringLiteral("image://controlled/photo?licasa_stage=") +
+                                             (lateFrame || mode == QStringLiteral("no-file")
+                                                  ? QStringLiteral("full")
+                                                  : mode);
+                               window.viewport.setProperty("activeRequestKey", source);
+                               window.viewport.setProperty("pendingImageSlot", -1);
+                               controlledEvents["final_raster_ready_ms"] =
+                                   (LicasaDiagnostics::monotonicNs() - started) / 1e6;
+                               emit window.viewport.imageReady();
+                               // A completed decode can precede its first frame. The observer's
+                               // close timer must not clear the image in that interval.
+                               QTimer::singleShot(
+                                   lateFrame ? 400 : 0, &window,
+                                   [&window, &controlledEvents, started] {
+                                       controlledEvents["final_frame_submitted_ms"] =
+                                           (LicasaDiagnostics::monotonicNs() - started) / 1e6;
+                                       emit window.frameSwapped();
+                                   });
+                           });
     } else {
         return 3;
     }
@@ -281,6 +300,27 @@ class DiagnosticDriverTests final : public QObject {
         QTest::newRow("ordinary-full") << QStringLiteral("full");
         QTest::newRow("raw-interactive") << QStringLiteral("raw-interactive");
         QTest::newRow("unstaged-animation") << QStringLiteral("unstaged");
+        QTest::newRow("late-final-frame") << QStringLiteral("late-frame");
+    }
+
+    void viewerNoFileClosesWithoutFullPresentation()
+    {
+        const ChildResult child =
+            runChild(QStringLiteral("viewer-ready"), QStringLiteral("no-file"));
+        QVERIFY2(child.finished, child.errors.constData());
+        QCOMPARE(child.exitStatus, QProcess::NormalExit);
+        QCOMPARE(child.exitCode, 0);
+        const QList<QByteArray> reports = child.output.trimmed().split('\n');
+        QCOMPARE(reports.size(), 2);
+        QJsonParseError error;
+        const QJsonDocument document = QJsonDocument::fromJson(reports.at(0), &error);
+        QCOMPARE(error.error, QJsonParseError::NoError);
+        const QJsonObject report = document.object();
+        QVERIFY(!report.contains("error"));
+        QVERIFY(report.contains("full_detail_ready_ms"));
+        QVERIFY(!report.contains("full_detail_presented_ms"));
+        QVERIFY(report.contains("steady_process"));
+        QVERIFY(report.value("image").toString().isEmpty());
     }
 
     void viewerReadyWaitsForFinalRaster()
@@ -304,6 +344,7 @@ class DiagnosticDriverTests final : public QObject {
         QVERIFY(events.contains("raw_fast_ready_ms"));
         QVERIFY(events.contains("staged_preview_ready_ms"));
         QVERIFY(events.contains("final_raster_ready_ms"));
+        QVERIFY(events.contains("final_frame_submitted_ms"));
         QVERIFY(report.contains("preview_ready_ms"));
         QVERIFY(report.contains("full_detail_ready_ms"));
         QVERIFY(report.contains("full_detail_presented_ms"));
@@ -313,6 +354,8 @@ class DiagnosticDriverTests final : public QObject {
                 events.value("final_raster_ready_ms").toDouble());
         QVERIFY(report.value("full_detail_presented_ms").toDouble() >=
                 report.value("full_detail_ready_ms").toDouble());
+        QVERIFY(report.value("full_detail_presented_ms").toDouble() >=
+                events.value("final_frame_submitted_ms").toDouble());
     }
 };
 

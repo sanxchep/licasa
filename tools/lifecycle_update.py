@@ -51,8 +51,11 @@ def absolute(path: Path | str) -> Path:
 
 
 def generation(path: Path) -> str:
+    checksum = hashlib.sha256()
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        while block := stream.read(1024 * 1024):
+            checksum.update(block)
+    return checksum.hexdigest()
 
 
 def installation_id(binary: Path, root: Path, family: str) -> str:

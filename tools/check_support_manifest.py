@@ -44,8 +44,10 @@ def load_manifest(path: Path = MANIFEST) -> dict:
 
 def check_recipes(manifest: dict, root: Path = ROOT) -> None:
     for name, profile in manifest["profiles"].items():
-        if (name not in PROFILES or profile["qt"] != PROFILES[name]["qt_version"]
-                or profile.get("multimedia_lock") != PROFILES[name]["ffmpeg_lock"]):
+        runtime = PROFILES.get(profile.get("runtime_profile", name))
+        if (runtime is None or profile["qt"] != runtime["qt_version"]
+                or profile.get("multimedia_lock") != runtime["ffmpeg_lock"]
+                or profile.get("quick_lock") != runtime["quick_lock"]):
             raise ValueError(f"{name} Qt disagrees with its implemented runtime profile")
         recipe = (root / profile["build_recipe"]).read_text()
         if not re.search(rf"^FROM\s+{re.escape(profile['build_image'])}(?:\s|$)", recipe, re.MULTILINE):
@@ -55,6 +57,12 @@ def check_recipes(manifest: dict, root: Path = ROOT) -> None:
                 lock = json.loads((root / profile[lock_key]).read_text())
                 if lock["version"] != profile["qt"]:
                     raise ValueError(f"{name} Qt disagrees with {profile[lock_key]}")
+        if "portable_lock" in profile:
+            portable = json.loads((root / profile["portable_lock"]).read_text())
+            quick = json.loads((root / profile["quick_lock"]).read_text())
+            if (portable["qt_version"] != profile["qt"]
+                    or portable["qt_modules"]["qtdeclarative"] != quick["sha256"]):
+                raise ValueError(f"{name} Qt disagrees with its locked portable SDK")
     module_manifest = json.loads((root / "packaging/qt-runtime-modules.json").read_text())
     if set(module_manifest["qt_versions"]) != {profile["qt"] for profile in manifest["profiles"].values()}:
         raise ValueError("The Qt module inventory and native runtime profiles disagree")

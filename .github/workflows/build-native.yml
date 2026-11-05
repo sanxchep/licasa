@@ -38,7 +38,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v7
         with:
@@ -95,6 +95,26 @@ jobs:
           python3 tools/build_ci_packages.py --target "$TARGET" --image "licasa-verification:$TARGET" \
             --output "build/candidate-native/$TARGET" --dependencies "build/ci-package-dependencies/$TARGET" \
             --jobs 3 "${reuse[@]}" 2>&1 | tee build/candidate-build-reports/build.log
+      - name: Build the portable package on the Ubuntu 22.04 baseline
+        if: inputs.target == 'ubuntu-24.04'
+        run: |
+          set -euo pipefail
+          work="$PWD/build/ci-appimage"
+          output="$PWD/build/candidate-native/ubuntu-24.04"
+          mkdir -p "$work"
+          docker build --pull --tag licasa-verification:appimage \
+            --file packaging/build-appimage.Dockerfile packaging
+          python3 tools/build_appimage.py --work-dir "$work" --output-dir "$output" \
+            --prepare-only
+          PYTHONPATH="$PWD/tools" python3 -c 'from pathlib import Path; from package_appimage import fetch_tools; import sys; fetch_tools(Path(sys.argv[1]))' "$work/tools"
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            -e HOME=/work -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/source:ro" -v "$work:/work" -v "$output:/output" \
+            licasa-verification:appimage python3 /source/tools/build_appimage.py \
+            --work-dir /work --output-dir /output --tools-dir /work/tools \
+            --offline --jobs 3 2>&1 | tee build/candidate-build-reports/appimage-build.log
+          install -m 0755 packaging/install-licasa-appimage.sh "$output/install-licasa-appimage.sh"
+          (cd "$output" && sha256sum install-licasa-appimage.sh > install-licasa-appimage.sh.sha256)
       - name: Retain immutable packages in the support manifest layout
         env:
           TARGET: ${{ inputs.target }}
@@ -149,6 +169,7 @@ jobs:
               appimage="$directory/Licasa-${version}-x86_64.AppImage"
               python3 tools/verify_deb_container.py "$package" --target ubuntu-24.04 --output build/candidate-build-reports/pr/native.json
               python3 tools/check_package_report.py --target ubuntu24-native --package "$package" --report build/candidate-build-reports/pr/native.json
+              python3 tools/verify_appimage_container.py "$appimage" --target ubuntu-22.04 --output build/candidate-build-reports/pr/jammy.json
               python3 tools/verify_appimage_container.py "$appimage" --target debian-13 --output build/candidate-build-reports/pr/trixie.json
               python3 tools/check_package_report.py --target debian13-appimage --package "$appimage" --report build/candidate-build-reports/pr/trixie.json
               python3 tools/verify_mate_accessibility_container.py "$appimage" --output build/candidate-build-reports/pr/accessibility.json

@@ -51,29 +51,46 @@ def main():
             # Keep the measured case even when a strict assertion below fails.
             # CI uploads this file after failed CTest runs as well as passes.
             args.output.write_text(json.dumps(report, indent=2) + '\n')
-            assert 'error' not in result, (sample, result, run.stderr)
-            assert 'Binding loop detected' not in run.stderr, run.stderr
-            assert result['initial_preview_available'] == preview_available, result
-            assert result.get('raw_fast_intermediate_ready', False) == fast_intermediate, result
+            if not ('error' not in result):
+                raise AssertionError((sample, result, run.stderr))
+            if not ('Binding loop detected' not in run.stderr):
+                raise AssertionError(run.stderr)
+            if not (result['initial_preview_available'] == preview_available):
+                raise AssertionError(result)
+            if not (result.get('raw_fast_intermediate_ready', False) == fast_intermediate):
+                raise AssertionError(result)
             if sample.name == 'no-preview.dng':
-                assert result['first_raster_full_detail'], result
-            assert result['preview_max_heartbeat_gap_ms'] < 100, result
+                if not (result['first_raster_full_detail']):
+                    raise AssertionError(result)
+            if not (result['preview_max_heartbeat_gap_ms'] < 100):
+                raise AssertionError(result)
             if sample.name == 'samsung-s22.dng':
-                assert result['preview_only_verified'], result
+                if not (result['preview_only_verified']):
+                    raise AssertionError(result)
             elif develop:
-                assert result['automatic_full_detail_ready'], result
-                assert result['automatic_full_detail_ms'] > 0, result
-                assert result['explicit_full_detail_ready'], result
-                assert result['full_edit_kept_detail'], result
-                assert result['full_first_edit_ready_ms'] > 0, result
-                assert result['full_repeat_edit_ready_ms'] > 0, result
+                if not (result['automatic_full_detail_ready']):
+                    raise AssertionError(result)
+                if not (result['automatic_full_detail_ms'] > 0):
+                    raise AssertionError(result)
+                if not (result['explicit_full_detail_ready']):
+                    raise AssertionError(result)
+                if not (result['full_edit_kept_detail']):
+                    raise AssertionError(result)
+                if not (result['full_first_edit_ready_ms'] > 0):
+                    raise AssertionError(result)
+                if not (result['full_repeat_edit_ready_ms'] > 0):
+                    raise AssertionError(result)
                 full_cache_lines = [line for line in run.stderr.splitlines()
                                     if 'Decoded base' in line and line.endswith(', full)')]
-                assert any('Decoded base cached:' in line for line in full_cache_lines), run.stderr
-                assert sum('Decoded base cache hit:' in line for line in full_cache_lines) >= 2, run.stderr
-                assert result['full_max_heartbeat_gap_ms'] < 250, result
+                if not (any('Decoded base cached:' in line for line in full_cache_lines)):
+                    raise AssertionError(run.stderr)
+                if not (sum('Decoded base cache hit:' in line for line in full_cache_lines) >= 2):
+                    raise AssertionError(run.stderr)
+                if not (result['full_max_heartbeat_gap_ms'] < 250):
+                    raise AssertionError(result)
             elif limit == 25:
-                assert result['full_detail_blocked_by_policy'], result
+                if not (result['full_detail_blocked_by_policy']):
+                    raise AssertionError(result)
         print(f'RAW viewer behavior verified: {sample.name}', flush=True)
 
 

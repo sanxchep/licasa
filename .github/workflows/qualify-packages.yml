@@ -125,9 +125,16 @@ jobs:
                 2>&1 | tee reports/appimage.log
               ;;
             22.04)
-              python3 tools/verify_unsupported_ubuntu.py "$deb" --ubuntu-version 22.04 \
-                --appimage "$appimage" --output reports/rejection.json \
-                2>&1 | tee reports/rejection.log
+              if [[ -f packaging/support-matrix.json ]] &&
+                  python3 -c 'import json, sys; sys.exit(not any(row["id"] == "ubuntu22-appimage" for row in json.load(open("packaging/support-matrix.json"))["targets"]))'; then
+                python3 tools/verify_unsupported_ubuntu.py "$deb" --ubuntu-version 22.04 \
+                  --output reports/native-rejection.json 2>&1 | tee reports/native-rejection.log
+                python3 tools/verify_appimage_container.py "$appimage" \
+                  --target ubuntu-22.04 --output reports/appimage.json 2>&1 | tee reports/appimage.log
+              else
+                python3 tools/verify_unsupported_ubuntu.py "$deb" --ubuntu-version 22.04 \
+                  --appimage "$appimage" --output reports/rejection.json 2>&1 | tee reports/rejection.log
+              fi
               ;;
           esac
           {

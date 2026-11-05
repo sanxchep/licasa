@@ -372,6 +372,16 @@ Column {
     }
 
     ActionChip {
+        objectName: "keyboardShortcutsButton"
+        width: parent.width
+        text: qsTr("Keyboard shortcuts")
+        sectionStyle: true
+        animationDuration: content.menu.buttonMotionDuration
+        Accessible.description: qsTr("Browse keyboard shortcuts. Shortcut F1.")
+        onClicked: content.menu.keyboardShortcutsRequested()
+    }
+
+    ActionChip {
         objectName: "viewSourceButton"
         width: parent.width
         text: qsTr("View Source")

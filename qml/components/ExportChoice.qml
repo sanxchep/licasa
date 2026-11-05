@@ -11,7 +11,8 @@ ComboBox {
     font.pixelSize: 13
     Accessible.name: accessibleLabel
     Keys.onShortcutOverride: function(event) {
-        if (event.modifiers === Qt.NoModifier && (event.key !== Qt.Key_Escape || popup.visible))
+        if (event.modifiers === Qt.NoModifier && (event.key !== Qt.Key_F1 || popup.visible)
+                && (event.key !== Qt.Key_Escape || popup.visible))
             event.accepted = true
     }
     padding: 12

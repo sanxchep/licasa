@@ -63,6 +63,9 @@ def main():
         help="qualify an installed HEIF image-sequence reader with a pinned external fixture",
     )
     args = parser.parse_args()
+    # A failed rerun must not leave an earlier successful qualification receipt.
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text("{}\n")
     prefix = args.prefix.resolve(strict=True)
     cache = args.vendor_cache.resolve()
     cache.mkdir(parents=True, exist_ok=True)
@@ -170,9 +173,12 @@ def main():
                 raise RuntimeError(
                     f"Animated AVIF fixture checksum mismatch: {digest}"
                 )
-            assert avif_animation_fixture["width"] == 3840
-            assert avif_animation_fixture["height"] == 2160
-            assert avif_animation_fixture["frames"] == 8
+            if not (avif_animation_fixture["width"] == 3840):
+                raise AssertionError
+            if not (avif_animation_fixture["height"] == 2160):
+                raise AssertionError
+            if not (avif_animation_fixture["frames"] == 8):
+                raise AssertionError
 
     avif_provenance = None
     avif_verifier_output = ""
@@ -242,44 +248,70 @@ def main():
             )
             heif_sequence_probe = json.loads(probe_text.splitlines()[-1])
 
-            assert heif_sequence_probe["ok"], heif_sequence_probe
-            assert heif_sequence_probe["forced_format"] == "heics", heif_sequence_probe
-            assert heif_sequence_probe["format"] == "heics", heif_sequence_probe
-            assert heif_sequence_probe["animation"] is True, heif_sequence_probe
-            assert heif_sequence_probe["frames_initial"] == 0, heif_sequence_probe
-            assert heif_sequence_probe["streaming_count_discovery"] is True, heif_sequence_probe
-            assert heif_sequence_probe["frames"] == 120, heif_sequence_probe
-            assert heif_sequence_probe["loop_count"] == 0, heif_sequence_probe
-            assert heif_sequence_probe["declared_width"] == 256, heif_sequence_probe
-            assert heif_sequence_probe["declared_height"] == 144, heif_sequence_probe
-            assert "heics" in heif_sequence_probe["read_formats"], heif_sequence_probe
-            assert "heifs" in heif_sequence_probe["read_formats"], heif_sequence_probe
-            assert "image/heic-sequence" in heif_sequence_probe["read_mime_types"], heif_sequence_probe
-            assert "image/heif-sequence" in heif_sequence_probe["read_mime_types"], heif_sequence_probe
-            assert "libheif 1.23.4" in heif_sequence_probe["decoder_backend"], heif_sequence_probe
-            assert "libde265" in heif_sequence_probe["decoder_backend"], heif_sequence_probe
-            assert "heif image sequence" in heif_sequence_probe["preview_path"].lower(), heif_sequence_probe
+            if not (heif_sequence_probe["ok"]):
+                raise AssertionError(heif_sequence_probe)
+            if not (heif_sequence_probe["forced_format"] == "heics"):
+                raise AssertionError(heif_sequence_probe)
+            if not (heif_sequence_probe["format"] == "heics"):
+                raise AssertionError(heif_sequence_probe)
+            if not (heif_sequence_probe["animation"] is True):
+                raise AssertionError(heif_sequence_probe)
+            if not (heif_sequence_probe["frames_initial"] == 0):
+                raise AssertionError(heif_sequence_probe)
+            if not (heif_sequence_probe["streaming_count_discovery"] is True):
+                raise AssertionError(heif_sequence_probe)
+            if not (heif_sequence_probe["frames"] == 120):
+                raise AssertionError(heif_sequence_probe)
+            if not (heif_sequence_probe["loop_count"] == 0):
+                raise AssertionError(heif_sequence_probe)
+            if not (heif_sequence_probe["declared_width"] == 256):
+                raise AssertionError(heif_sequence_probe)
+            if not (heif_sequence_probe["declared_height"] == 144):
+                raise AssertionError(heif_sequence_probe)
+            if not ("heics" in heif_sequence_probe["read_formats"]):
+                raise AssertionError(heif_sequence_probe)
+            if not ("heifs" in heif_sequence_probe["read_formats"]):
+                raise AssertionError(heif_sequence_probe)
+            if not ("image/heic-sequence" in heif_sequence_probe["read_mime_types"]):
+                raise AssertionError(heif_sequence_probe)
+            if not ("image/heif-sequence" in heif_sequence_probe["read_mime_types"]):
+                raise AssertionError(heif_sequence_probe)
+            if not ("libheif 1.23.4" in heif_sequence_probe["decoder_backend"]):
+                raise AssertionError(heif_sequence_probe)
+            if not ("libde265" in heif_sequence_probe["decoder_backend"]):
+                raise AssertionError(heif_sequence_probe)
+            if not ("heif image sequence" in heif_sequence_probe["preview_path"].lower()):
+                raise AssertionError(heif_sequence_probe)
 
             checks = heif_sequence_probe["frame_checks"]
-            assert [row["requested"] for row in checks] == [0, 60, 119], checks
+            if not ([row["requested"] for row in checks] == [0, 60, 119]):
+                raise AssertionError(checks)
             for row in checks:
-                assert row["jumped"] and row["decoded"], row
-                assert row["current"] == row["requested"], row
-                assert row["width"] == 256 and row["height"] == 144, row
-                assert 10 <= row["delay_ms"] <= 60000, row
+                if not (row["jumped"] and row["decoded"]):
+                    raise AssertionError(row)
+                if not (row["current"] == row["requested"]):
+                    raise AssertionError(row)
+                if not (row["width"] == 256 and row["height"] == 144):
+                    raise AssertionError(row)
+                if not (10 <= row["delay_ms"] <= 60000):
+                    raise AssertionError(row)
 
             back = heif_sequence_probe["seek_back_to_zero"]
-            assert back["jumped"] and back["decoded"] and back["current"] == 0, back
-            assert int(heif_sequence_probe["native_raster_pixels"]) == 256 * 144, heif_sequence_probe
+            if not (back["jumped"] and back["decoded"] and back["current"] == 0):
+                raise AssertionError(back)
+            if not (int(heif_sequence_probe["native_raster_pixels"]) == 256 * 144):
+                raise AssertionError(heif_sequence_probe)
 
             mapped = [Path(item) for item in heif_sequence_probe["mapped_codec_libraries"]]
-            assert any(item.name == "liblicasa_heif.so" for item in mapped), mapped
-            assert any(item.name == "libheif.so.1.23.4" for item in mapped), mapped
-            assert any(item.name.startswith("libde265.so.") for item in mapped), mapped
+            if not (any(item.name == "liblicasa_heif.so" for item in mapped)):
+                raise AssertionError(mapped)
+            if not (any(item.name == "libheif.so.1.23.4" for item in mapped)):
+                raise AssertionError(mapped)
+            if not (any(item.name.startswith("libde265.so.") for item in mapped)):
+                raise AssertionError(mapped)
             for library in mapped:
-                assert library.resolve(strict=True).is_relative_to(prefix), (
-                    f"HEIF sequence codec escaped installed package: {library}"
-                )
+                if not (library.resolve(strict=True).is_relative_to(prefix)):
+                    raise AssertionError(f"HEIF sequence codec escaped installed package: {library}")
 
         if args.avif:
             # Isolated PNG decode proves discovering image/avif does not eagerly
@@ -317,48 +349,68 @@ def main():
                 probe_text = probe_completed.stdout.strip() or probe_completed.stderr.strip()
                 avif_animation_probe = json.loads(probe_text.splitlines()[-1])
 
-                assert avif_animation_probe["ok"], avif_animation_probe
-                assert avif_animation_probe["format"] == "avif", avif_animation_probe
-                assert avif_animation_probe["animation"] is True, avif_animation_probe
-                assert avif_animation_probe["frames"] == avif_animation_fixture["frames"], avif_animation_probe
-                assert avif_animation_probe["declared_width"] == avif_animation_fixture["width"], avif_animation_probe
-                assert avif_animation_probe["declared_height"] == avif_animation_fixture["height"], avif_animation_probe
-                assert "avif" in avif_animation_probe["read_formats"], avif_animation_probe
-                assert "image/avif" in avif_animation_probe["read_mime_types"], avif_animation_probe
-                assert avif_animation_probe["can_read_after_last"] is False, avif_animation_probe
+                if not (avif_animation_probe["ok"]):
+                    raise AssertionError(avif_animation_probe)
+                if not (avif_animation_probe["format"] == "avif"):
+                    raise AssertionError(avif_animation_probe)
+                if not (avif_animation_probe["animation"] is True):
+                    raise AssertionError(avif_animation_probe)
+                if not (avif_animation_probe["frames"] == avif_animation_fixture["frames"]):
+                    raise AssertionError(avif_animation_probe)
+                if not (avif_animation_probe["declared_width"] == avif_animation_fixture["width"]):
+                    raise AssertionError(avif_animation_probe)
+                if not (avif_animation_probe["declared_height"] == avif_animation_fixture["height"]):
+                    raise AssertionError(avif_animation_probe)
+                if not ("avif" in avif_animation_probe["read_formats"]):
+                    raise AssertionError(avif_animation_probe)
+                if not ("image/avif" in avif_animation_probe["read_mime_types"]):
+                    raise AssertionError(avif_animation_probe)
+                if not (avif_animation_probe["can_read_after_last"] is False):
+                    raise AssertionError(avif_animation_probe)
 
                 checks = avif_animation_probe["frame_checks"]
-                assert [row["requested"] for row in checks] == [0, 4, 7], checks
+                if not ([row["requested"] for row in checks] == [0, 4, 7]):
+                    raise AssertionError(checks)
                 for row in checks:
-                    assert row["jumped"] and row["decoded"], row
-                    assert row["current"] == row["requested"], row
-                    assert row["width"] == avif_animation_fixture["width"], row
-                    assert row["height"] == avif_animation_fixture["height"], row
-                    assert 10 <= row["delay_ms"] <= 60000, row
+                    if not (row["jumped"] and row["decoded"]):
+                        raise AssertionError(row)
+                    if not (row["current"] == row["requested"]):
+                        raise AssertionError(row)
+                    if not (row["width"] == avif_animation_fixture["width"]):
+                        raise AssertionError(row)
+                    if not (row["height"] == avif_animation_fixture["height"]):
+                        raise AssertionError(row)
+                    if not (10 <= row["delay_ms"] <= 60000):
+                        raise AssertionError(row)
 
                 back = avif_animation_probe["seek_back_to_zero"]
-                assert back["jumped"] and back["decoded"] and back["current"] == 0, back
+                if not (back["jumped"] and back["decoded"] and back["current"] == 0):
+                    raise AssertionError(back)
 
                 native_pixels = int(avif_animation_probe["native_raster_pixels"])
-                assert native_pixels == (
+                if not (native_pixels == (
                     avif_animation_fixture["width"] *
                     avif_animation_fixture["height"]
-                ), avif_animation_probe
+                )):
+                    raise AssertionError(avif_animation_probe)
 
                 mapped = [
                     Path(item)
                     for item in avif_animation_probe["mapped_codec_libraries"]
                 ]
-                assert any("libavif" in item.name for item in mapped), mapped
-                assert any("libdav1d" in item.name for item in mapped), mapped
-                assert any("libyuv" in item.name for item in mapped), mapped
+                if not (any("libavif" in item.name for item in mapped)):
+                    raise AssertionError(mapped)
+                if not (any("libdav1d" in item.name for item in mapped)):
+                    raise AssertionError(mapped)
+                if not (any("libyuv" in item.name for item in mapped)):
+                    raise AssertionError(mapped)
                 for library in mapped:
-                    assert library.resolve(strict=True).is_relative_to(prefix), (
-                        f"animated AVIF escaped installed package: {library}"
-                    )
+                    if not (library.resolve(strict=True).is_relative_to(prefix)):
+                        raise AssertionError(f"animated AVIF escaped installed package: {library}")
 
             lazy_sample = avif_lazy_png["samples"][0]
-            assert lazy_sample["decoded"] and lazy_sample["format"] == "png", lazy_sample
+            if not (lazy_sample["decoded"] and lazy_sample["format"] == "png"):
+                raise AssertionError(lazy_sample)
 
             eager_avif_libraries = [
                 library
@@ -368,10 +420,9 @@ def main():
                     for token in ("libavif", "libdav1d", "libyuv")
                 )
             ]
-            assert not eager_avif_libraries, (
-                "ordinary PNG eagerly loaded AVIF native libraries: "
-                f"{eager_avif_libraries}"
-            )
+            if not (not eager_avif_libraries):
+                raise AssertionError("ordinary PNG eagerly loaded AVIF native libraries: "
+                f"{eager_avif_libraries}")
 
         if args.apng:
             probe_binary = prefix / "bin/licasa_animation_probe"
@@ -394,16 +445,26 @@ def main():
             )
             apng_animation_probe = json.loads(probe_text.splitlines()[-1])
 
-            assert apng_animation_probe["ok"], apng_animation_probe
-            assert apng_animation_probe["forced_format"] == "apng", apng_animation_probe
-            assert apng_animation_probe["format"] == "apng", apng_animation_probe
-            assert apng_animation_probe["animation"] is True, apng_animation_probe
-            assert apng_animation_probe["frames"] >= 2, apng_animation_probe
-            assert apng_animation_probe["declared_width"] == 1280, apng_animation_probe
-            assert apng_animation_probe["declared_height"] == 720, apng_animation_probe
-            assert "apng" in apng_animation_probe["read_formats"], apng_animation_probe
-            assert "image/apng" in apng_animation_probe["read_mime_types"], apng_animation_probe
-            assert apng_animation_probe["can_read_after_last"] is False, apng_animation_probe
+            if not (apng_animation_probe["ok"]):
+                raise AssertionError(apng_animation_probe)
+            if not (apng_animation_probe["forced_format"] == "apng"):
+                raise AssertionError(apng_animation_probe)
+            if not (apng_animation_probe["format"] == "apng"):
+                raise AssertionError(apng_animation_probe)
+            if not (apng_animation_probe["animation"] is True):
+                raise AssertionError(apng_animation_probe)
+            if not (apng_animation_probe["frames"] >= 2):
+                raise AssertionError(apng_animation_probe)
+            if not (apng_animation_probe["declared_width"] == 1280):
+                raise AssertionError(apng_animation_probe)
+            if not (apng_animation_probe["declared_height"] == 720):
+                raise AssertionError(apng_animation_probe)
+            if not ("apng" in apng_animation_probe["read_formats"]):
+                raise AssertionError(apng_animation_probe)
+            if not ("image/apng" in apng_animation_probe["read_mime_types"]):
+                raise AssertionError(apng_animation_probe)
+            if not (apng_animation_probe["can_read_after_last"] is False):
+                raise AssertionError(apng_animation_probe)
 
             checks = apng_animation_probe["frame_checks"]
             expected = [
@@ -411,21 +472,27 @@ def main():
                 apng_animation_probe["frames"] // 2,
                 apng_animation_probe["frames"] - 1,
             ]
-            assert [row["requested"] for row in checks] == expected, checks
+            if not ([row["requested"] for row in checks] == expected):
+                raise AssertionError(checks)
             for row in checks:
-                assert row["jumped"] and row["decoded"], row
-                assert row["current"] == row["requested"], row
-                assert 0 < row["width"] <= 1280, row
-                assert 0 < row["height"] <= 720, row
-                assert 10 <= row["delay_ms"] <= 60000, row
+                if not (row["jumped"] and row["decoded"]):
+                    raise AssertionError(row)
+                if not (row["current"] == row["requested"]):
+                    raise AssertionError(row)
+                if not (0 < row["width"] <= 1280):
+                    raise AssertionError(row)
+                if not (0 < row["height"] <= 720):
+                    raise AssertionError(row)
+                if not (10 <= row["delay_ms"] <= 60000):
+                    raise AssertionError(row)
 
             back = apng_animation_probe["seek_back_to_zero"]
-            assert (
-                back["jumped"] and back["decoded"] and back["current"] == 0
-            ), back
+            if not (back["jumped"] and back["decoded"] and back["current"] == 0):
+                raise AssertionError(back)
 
             native_pixels = int(apng_animation_probe["native_raster_pixels"])
-            assert 0 < native_pixels <= 1280 * 720, apng_animation_probe
+            if not (0 < native_pixels <= 1280 * 720):
+                raise AssertionError(apng_animation_probe)
 
             mapped = [
                 Path(item)
@@ -434,11 +501,11 @@ def main():
             apng_backends = [
                 item for item in mapped if "licasa_apng" in item.name
             ]
-            assert apng_backends, mapped
+            if not (apng_backends):
+                raise AssertionError(mapped)
             for library in apng_backends:
-                assert library.resolve(strict=True).is_relative_to(prefix), (
-                    f"APNG backend escaped installed package: {library}"
-                )
+                if not (library.resolve(strict=True).is_relative_to(prefix)):
+                    raise AssertionError(f"APNG backend escaped installed package: {library}")
 
             static_completed = subprocess.run(
                 [
@@ -456,9 +523,12 @@ def main():
             )
             apng_static_png_probe = json.loads(static_completed.stdout)
             static_sample = apng_static_png_probe["samples"][0]
-            assert static_sample["decoded"], static_sample
-            assert static_sample["format"] == "png", static_sample
-            assert static_sample["animation"] is False, static_sample
+            if not (static_sample["decoded"]):
+                raise AssertionError(static_sample)
+            if not (static_sample["format"] == "png"):
+                raise AssertionError(static_sample)
+            if not (static_sample["animation"] is False):
+                raise AssertionError(static_sample)
 
             apng_as_png = temporary_path / "apng-as-png.png"
             shutil.copyfile(apng_animation_path, apng_as_png)
@@ -478,10 +548,14 @@ def main():
             )
             apng_png_extension_probe = json.loads(apng_png_completed.stdout)
             apng_png_sample = apng_png_extension_probe["samples"][0]
-            assert apng_png_sample["decoded"], apng_png_sample
-            assert apng_png_sample["format"] == "apng", apng_png_sample
-            assert apng_png_sample["animation"] is True, apng_png_sample
-            assert apng_png_sample["frames"] >= 2, apng_png_sample
+            if not (apng_png_sample["decoded"]):
+                raise AssertionError(apng_png_sample)
+            if not (apng_png_sample["format"] == "apng"):
+                raise AssertionError(apng_png_sample)
+            if not (apng_png_sample["animation"] is True):
+                raise AssertionError(apng_png_sample)
+            if not (apng_png_sample["frames"] >= 2):
+                raise AssertionError(apng_png_sample)
 
         completed = subprocess.run([str(prefix / "bin/licasa_diagnostics"), "--formats", "--megapixels", "25",
                                     *map(str, sorted(samples))], env=env, capture_output=True, text=True,
@@ -502,106 +576,128 @@ def main():
             str(ROOT / "tests/test-assets/modern/heif/single-48mp.heic")],
             env=viewer_env, capture_output=True, text=True, check=True, timeout=40)
         rejected_viewer = json.loads(rejected_viewer.stdout)
-    assert not report["before_decode"]["mapped_optional_libraries"], "codec library eagerly loaded"
-    assert report["qt_allocation_mib"] == 191
+    if not (not report["before_decode"]["mapped_optional_libraries"]):
+        raise AssertionError("codec library eagerly loaded")
+    if not (report["qt_allocation_mib"] == 191):
+        raise AssertionError
     desktop = (prefix / "share/applications/licasa.desktop").read_text()
     advertised = next(line.removeprefix("MimeType=").split(";") for line in desktop.splitlines() if line.startswith("MimeType="))
-    assert set(advertised) - {""} <= set(report["read_mime_types"]), "desktop advertises a missing reader"
+    if not (set(advertised) - {""} <= set(report["read_mime_types"])):
+        raise AssertionError("desktop advertises a missing reader")
 
     if args.avif:
-        assert "avif" in report["read_formats"], "installed package does not expose AVIF"
-        assert "image/avif" in report["read_mime_types"], (
-            "Qt AVIF plugin does not advertise image/avif"
-        )
-        assert "image/avif" in advertised, (
-            "installed desktop file does not advertise image/avif"
-        )
+        if not ("avif" in report["read_formats"]):
+            raise AssertionError("installed package does not expose AVIF")
+        if not ("image/avif" in report["read_mime_types"]):
+            raise AssertionError("Qt AVIF plugin does not advertise image/avif")
+        if not ("image/avif" in advertised):
+            raise AssertionError("installed desktop file does not advertise image/avif")
 
     if args.jp2:
-        assert "jp2" in report["read_formats"], "installed package does not expose JP2"
+        if not ("jp2" in report["read_formats"]):
+            raise AssertionError("installed package does not expose JP2")
         jp2_plugin = prefix / "lib/licasa/plugins/imageformats/liblicasa_jp2_plugin.so"
-        assert jp2_plugin.is_file(), jp2_plugin
+        if not (jp2_plugin.is_file()):
+            raise AssertionError(jp2_plugin)
 
     if args.apng:
-        assert "apng" in report["read_formats"], (
-            "installed package does not expose APNG"
-        )
-        assert "image/apng" in report["read_mime_types"], (
-            "Qt APNG plugin does not advertise image/apng"
-        )
-        assert "image/apng" in advertised, (
-            "installed desktop file does not advertise qualified image/apng support"
-        )
+        if not ("apng" in report["read_formats"]):
+            raise AssertionError("installed package does not expose APNG")
+        if not ("image/apng" in report["read_mime_types"]):
+            raise AssertionError("Qt APNG plugin does not advertise image/apng")
+        if not ("image/apng" in advertised):
+            raise AssertionError("installed desktop file does not advertise qualified image/apng support")
 
     if heif_sequence_path:
-        assert "heics" in report["read_formats"], (
-            "installed package does not expose HEIC sequences"
-        )
-        assert "heifs" in report["read_formats"], (
-            "installed package does not expose HEIF sequences"
-        )
-        assert "image/heic-sequence" in report["read_mime_types"], (
-            "Qt HEIF plugin does not advertise image/heic-sequence"
-        )
-        assert "image/heif-sequence" in report["read_mime_types"], (
-            "Qt HEIF plugin does not advertise image/heif-sequence"
-        )
-        assert "image/heic-sequence" in advertised, (
-            "desktop file does not advertise qualified image/heic-sequence support"
-        )
-        assert "image/heif-sequence" in advertised, (
-            "desktop file does not advertise qualified image/heif-sequence support"
-        )
+        if not ("heics" in report["read_formats"]):
+            raise AssertionError("installed package does not expose HEIC sequences")
+        if not ("heifs" in report["read_formats"]):
+            raise AssertionError("installed package does not expose HEIF sequences")
+        if not ("image/heic-sequence" in report["read_mime_types"]):
+            raise AssertionError("Qt HEIF plugin does not advertise image/heic-sequence")
+        if not ("image/heif-sequence" in report["read_mime_types"]):
+            raise AssertionError("Qt HEIF plugin does not advertise image/heif-sequence")
+        if not ("image/heic-sequence" in advertised):
+            raise AssertionError("desktop file does not advertise qualified image/heic-sequence support")
+        if not ("image/heif-sequence" in advertised):
+            raise AssertionError("desktop file does not advertise qualified image/heif-sequence support")
 
     quick = [path for path in report["before_decode"]["mapped_qt_libraries"] if "libQt6Quick.so." in path]
-    assert len(quick) == 1 and Path(quick[0]).is_relative_to(prefix), "package is missing the Qt Quick cleanup fix"
+    if not (len(quick) == 1 and Path(quick[0]).is_relative_to(prefix)):
+        raise AssertionError("package is missing the Qt Quick cleanup fix")
     for sample in report["samples"]:
         if Path(sample["path"]).suffix.lower() == ".dng":
-            assert not sample["raw_development"], sample
+            if not (not sample["raw_development"]):
+                raise AssertionError(sample)
             if Path(sample["path"]).name in ("broken-preview-offset.dng", "oversized-preview.dng", "truncated.dng", "no-preview.dng"):
-                assert not sample["decoded"] and sample["largest_native_raster_pixels"] == 0, sample
+                if not (not sample["decoded"] and sample["largest_native_raster_pixels"] == 0):
+                    raise AssertionError(sample)
                 continue
         if Path(sample["path"]).parent.name == "broken":
-            assert not sample["decoded"] and sample["largest_native_raster_pixels"] == 0, sample
+            if not (not sample["decoded"] and sample["largest_native_raster_pixels"] == 0):
+                raise AssertionError(sample)
             continue
         if Path(sample["path"]).name in ("single-48mp.heic", "large-48mp.jxl"):
-            assert not sample["decoded"] and "limit" in sample["codec_error"], sample
-            assert sample["largest_native_raster_pixels"] == 0, sample
+            if not (not sample["decoded"] and "limit" in sample["codec_error"]):
+                raise AssertionError(sample)
+            if not (sample["largest_native_raster_pixels"] == 0):
+                raise AssertionError(sample)
             continue
-        assert sample["decoded"], sample
+        if not (sample["decoded"]):
+            raise AssertionError(sample)
 
         if Path(sample["path"]).suffix.lower() == ".apng":
-            assert sample["format"] == "apng", sample
-            assert sample["animation"] is True, sample
-            assert sample["frames"] >= 2, sample
+            if not (sample["format"] == "apng"):
+                raise AssertionError(sample)
+            if not (sample["animation"] is True):
+                raise AssertionError(sample)
+            if not (sample["frames"] >= 2):
+                raise AssertionError(sample)
             declared_pixels = sample["declared_width"] * sample["declared_height"]
-            assert declared_pixels > 0, sample
-            assert 0 < sample["largest_native_raster_pixels"] <= declared_pixels, sample
-            assert sample["native_scaled_option"] is False, sample
-            assert "full admitted apng canvas" in sample["preview_path"].lower(), sample
+            if not (declared_pixels > 0):
+                raise AssertionError(sample)
+            if not (0 < sample["largest_native_raster_pixels"] <= declared_pixels):
+                raise AssertionError(sample)
+            if not (sample["native_scaled_option"] is False):
+                raise AssertionError(sample)
+            if not ("full admitted apng canvas" in sample["preview_path"].lower()):
+                raise AssertionError(sample)
 
         if Path(sample["path"]).suffix.lower() == ".avif":
-            assert sample["format"] == "avif", sample
-            assert "libavif 1.4.2" in sample["decoder_backend"], sample
-            assert "dav1d" in sample["decoder_backend"], sample
-            assert "libyuv 1924" in sample["decoder_backend"], sample
+            if not (sample["format"] == "avif"):
+                raise AssertionError(sample)
+            if not ("libavif 1.4.2" in sample["decoder_backend"]):
+                raise AssertionError(sample)
+            if not ("dav1d" in sample["decoder_backend"]):
+                raise AssertionError(sample)
+            if not ("libyuv 1924" in sample["decoder_backend"]):
+                raise AssertionError(sample)
 
             declared_pixels = (
                 sample["declared_width"] * sample["declared_height"]
             )
-            assert declared_pixels > 0, sample
-            assert sample["largest_native_raster_pixels"] >= declared_pixels, sample
-            assert "full native raster required" in sample["preview_path"].lower(), sample
+            if not (declared_pixels > 0):
+                raise AssertionError(sample)
+            if not (sample["largest_native_raster_pixels"] >= declared_pixels):
+                raise AssertionError(sample)
+            if not ("full native raster required" in sample["preview_path"].lower()):
+                raise AssertionError(sample)
 
         if args.jp2 and Path(sample["path"]).suffix.lower() in (".jp2", ".j2k"):
-            assert sample["format"] == "jp2", sample
-            assert (sample["declared_width"], sample["declared_height"]) == (640, 360), sample
+            if not (sample["format"] == "jp2"):
+                raise AssertionError(sample)
+            if not ((sample["declared_width"], sample["declared_height"]) == (640, 360)):
+                raise AssertionError(sample)
 
-        assert 0 < sample["decoded_width"] <= 1200 and 0 < sample["decoded_height"] <= 900, sample
-        assert sample["largest_native_raster_pixels"] <= 25_000_000, sample
-        assert sample["process"]["storage_write_bytes"] == report["before_decode"]["storage_write_bytes"], "format decode wrote to storage"
+        if not (0 < sample["decoded_width"] <= 1200 and 0 < sample["decoded_height"] <= 900):
+            raise AssertionError(sample)
+        if not (sample["largest_native_raster_pixels"] <= 25_000_000):
+            raise AssertionError(sample)
+        if not (sample["process"]["storage_write_bytes"] == report["before_decode"]["storage_write_bytes"]):
+            raise AssertionError("format decode wrote to storage")
         for library in sample["process"]["mapped_optional_libraries"]:
-            assert Path(library).is_relative_to(prefix), f"developer/system codec dependency: {library}"
+            if not (Path(library).is_relative_to(prefix)):
+                raise AssertionError(f"developer/system codec dependency: {library}")
 
     if args.avif:
         avif_rows = [
@@ -609,7 +705,8 @@ def main():
             for sample in report["samples"]
             if Path(sample["path"]).suffix.lower() == ".avif"
         ]
-        assert len(avif_rows) == len(avif_sample_paths), avif_rows
+        if not (len(avif_rows) == len(avif_sample_paths)):
+            raise AssertionError(avif_rows)
 
         mapped_avif = [
             library
@@ -617,9 +714,11 @@ def main():
             for library in sample["process"]["mapped_optional_libraries"]
             if "libavif" in Path(library).name
         ]
-        assert mapped_avif, "AVIF decode did not map libavif"
+        if not (mapped_avif):
+            raise AssertionError("AVIF decode did not map libavif")
         for library in mapped_avif:
-            assert Path(library).is_relative_to(prefix), library
+            if not (Path(library).is_relative_to(prefix)):
+                raise AssertionError(library)
 
         backend = (
             prefix
@@ -629,8 +728,10 @@ def main():
             prefix
             / "lib/licasa/plugins/imageformats/liblicasa_avif_plugin.so"
         )
-        assert backend.is_file(), backend
-        assert adapter.is_file(), adapter
+        if not (backend.is_file()):
+            raise AssertionError(backend)
+        if not (adapter.is_file()):
+            raise AssertionError(adapter)
 
         backend_ldd = subprocess.check_output(
             ["ldd", str(backend)],
@@ -646,10 +747,9 @@ def main():
             for token in ("libavif", "libdav1d", "libyuv")
             if token in adapter_ldd
         ]
-        assert not forbidden_adapter, (
-            "Qt AVIF adapter eagerly links native AVIF libraries: "
-            f"{forbidden_adapter}"
-        )
+        if not (not forbidden_adapter):
+            raise AssertionError("Qt AVIF adapter eagerly links native AVIF libraries: "
+            f"{forbidden_adapter}")
 
         def resolved_dependency(linkage, soname):
             prefix_text = soname + " => "
@@ -660,9 +760,8 @@ def main():
                     if not value or value == "not found":
                         raise AssertionError(f"{soname} did not resolve: {line}")
                     path = Path(value).resolve(strict=True)
-                    assert path.is_relative_to(prefix), (
-                        f"{soname} escaped installed package: {path}"
-                    )
+                    if not (path.is_relative_to(prefix)):
+                        raise AssertionError(f"{soname} escaped installed package: {path}")
                     return path
             raise AssertionError(f"{soname} missing from backend linkage")
 
@@ -693,14 +792,15 @@ def main():
     if heif_sequence_path:
         backend = prefix / "lib/licasa/plugins/licasa-codecs/liblicasa_heif.so"
         adapter = prefix / "lib/licasa/plugins/imageformats/liblicasa_heif_plugin.so"
-        assert backend.is_file(), backend
-        assert adapter.is_file(), adapter
+        if not (backend.is_file()):
+            raise AssertionError(backend)
+        if not (adapter.is_file()):
+            raise AssertionError(adapter)
 
         backend_ldd = subprocess.check_output(["ldd", str(backend)], text=True)
         adapter_ldd = subprocess.check_output(["ldd", str(adapter)], text=True)
-        assert "libheif" not in adapter_ldd and "libde265" not in adapter_ldd, (
-            "Qt HEIF adapter must lazy-load the native HEIF backend"
-        )
+        if not ("libheif" not in adapter_ldd and "libde265" not in adapter_ldd):
+            raise AssertionError("Qt HEIF adapter must lazy-load the native HEIF backend")
 
         report["heif_sequence_package_qualification"] = {
             "fixture": str(heif_sequence_path),
@@ -715,14 +815,15 @@ def main():
     if args.apng:
         backend = prefix / "lib/licasa/plugins/licasa-codecs/liblicasa_apng.so"
         adapter = prefix / "lib/licasa/plugins/imageformats/liblicasa_apng_plugin.so"
-        assert backend.is_file(), backend
-        assert adapter.is_file(), adapter
+        if not (backend.is_file()):
+            raise AssertionError(backend)
+        if not (adapter.is_file()):
+            raise AssertionError(adapter)
 
         backend_ldd = subprocess.check_output(["ldd", str(backend)], text=True)
         adapter_ldd = subprocess.check_output(["ldd", str(adapter)], text=True)
-        assert "licasa_apng" not in adapter_ldd, (
-            "Qt APNG adapter must lazy-load the APNG backend"
-        )
+        if not ("licasa_apng" not in adapter_ldd):
+            raise AssertionError("Qt APNG adapter must lazy-load the APNG backend")
 
         report["apng_package_qualification"] = {
             "fixtures": [str(path.relative_to(ROOT)) for path in apng_sample_paths],
@@ -737,23 +838,34 @@ def main():
 
     report["vendor_sample_sources"] = sources
     automatic = admitted["samples"][0]
-    assert admitted["qt_allocation_mib"] == 763
-    assert automatic["decoded"] and automatic["largest_native_raster_pixels"] == 48_000_000, automatic
-    assert automatic["decoded_width"] == 1200 and automatic["decoded_height"] == 900, automatic
-    assert automatic["process"]["storage_write_bytes"] == admitted["before_decode"]["storage_write_bytes"]
+    if not (admitted["qt_allocation_mib"] == 763):
+        raise AssertionError
+    if not (automatic["decoded"] and automatic["largest_native_raster_pixels"] == 48_000_000):
+        raise AssertionError(automatic)
+    if not (automatic["decoded_width"] == 1200 and automatic["decoded_height"] == 900):
+        raise AssertionError(automatic)
+    if not (automatic["process"]["storage_write_bytes"] == admitted["before_decode"]["storage_write_bytes"]):
+        raise AssertionError
     for library in automatic["process"]["mapped_optional_libraries"]:
-        assert Path(library).is_relative_to(prefix), library
+        if not (Path(library).is_relative_to(prefix)):
+            raise AssertionError(library)
     report["automatic_single_coded_at_100mp"] = admitted
     if admitted_jxl:
         automatic_jxl = admitted_jxl["samples"][0]
-        assert automatic_jxl["decoded"] and automatic_jxl["largest_native_raster_pixels"] == 48_000_000
-        assert automatic_jxl["decoded_width"] == 1200 and automatic_jxl["decoded_height"] == 900
-        assert automatic_jxl["process"]["storage_write_bytes"] == admitted_jxl["before_decode"]["storage_write_bytes"]
+        if not (automatic_jxl["decoded"] and automatic_jxl["largest_native_raster_pixels"] == 48_000_000):
+            raise AssertionError
+        if not (automatic_jxl["decoded_width"] == 1200 and automatic_jxl["decoded_height"] == 900):
+            raise AssertionError
+        if not (automatic_jxl["process"]["storage_write_bytes"] == admitted_jxl["before_decode"]["storage_write_bytes"]):
+            raise AssertionError
         for library in automatic_jxl["process"]["mapped_optional_libraries"]:
-            assert Path(library).is_relative_to(prefix), library
+            if not (Path(library).is_relative_to(prefix)):
+                raise AssertionError(library)
         report["admitted_jxl_at_100mp"] = admitted_jxl
-    assert rejected_viewer.get("image_failed") and rejected_viewer["first_error_presented_ms"] < 5000, rejected_viewer
-    assert "first_preview_presented_ms" not in rejected_viewer, rejected_viewer
+    if not (rejected_viewer.get("image_failed") and rejected_viewer["first_error_presented_ms"] < 5000):
+        raise AssertionError(rejected_viewer)
+    if not ("first_preview_presented_ms" not in rejected_viewer):
+        raise AssertionError(rejected_viewer)
     report["rejected_single_coded_window_at_25mp"] = rejected_viewer
     report["qualification"] = "Installed package; no development library/plugin environment; hostile allocation overrides; all decodes and bounds checked. Qt base runtime supplied by Ubuntu 24.04."
     args.output.parent.mkdir(parents=True, exist_ok=True)

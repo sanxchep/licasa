@@ -104,8 +104,11 @@ exit "$status"
 
 
 def digest(path: Path) -> str:
+    checksum = hashlib.sha256()
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        while block := stream.read(1024 * 1024):
+            checksum.update(block)
+    return checksum.hexdigest()
 
 
 def main() -> int:

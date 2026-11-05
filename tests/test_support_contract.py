@@ -37,8 +37,14 @@ class SupportContractTests(unittest.TestCase):
     def test_portable_targets_keep_ubuntu_qt_while_debian_native_is_separate(self):
         rows = {target["id"]: target for target in self.manifest["targets"]}
         self.assertEqual(rows["debian13-native"]["profile"], "debian-6.8.2")
-        for name in ("ubuntu24-appimage", "ubuntu26-appimage", "debian13-appimage", "fedora44-appimage", "arch-appimage"):
-            self.assertEqual(rows[name]["profile"], "ubuntu-6.4.2")
+        portable = self.manifest["profiles"]["appimage-6.4.2"]
+        self.assertEqual(portable["runtime_profile"], "ubuntu-6.4.2")
+        self.assertEqual(portable["glibc_minimum"], "2.35")
+        for row in rows.values():
+            if row["artifact"] in {"appimage", "rpm", "arch"}:
+                self.assertEqual(row["profile"], "appimage-6.4.2")
+        self.assertEqual(rows["ubuntu22-appimage"]["status"], "supported")
+        self.assertEqual(rows["ubuntu22-native-rejection"]["profile"], "ubuntu-6.4.2")
         self.assertNotEqual(self.manifest["artifacts"]["ubuntu-deb"], self.manifest["artifacts"]["debian-deb"])
 
     def test_qt_lock_change_cannot_silently_change_support_claims(self):

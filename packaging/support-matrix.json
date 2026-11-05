@@ -4,6 +4,7 @@
   "libc": "glibc",
   "profiles": {
     "ubuntu-6.4.2": {"qt": "6.4.2", "glibc_minimum": "2.39", "build_recipe": "packaging/build-deb.Dockerfile", "build_image": "ubuntu:24.04", "quick_lock": "packaging/qt-backport.lock.json", "multimedia_lock": "packaging/qt-ffmpeg.lock.json"},
+    "appimage-6.4.2": {"qt": "6.4.2", "glibc_minimum": "2.35", "build_recipe": "packaging/build-appimage.Dockerfile", "build_image": "ubuntu:22.04", "runtime_profile": "ubuntu-6.4.2", "quick_lock": "packaging/qt-backport.lock.json", "multimedia_lock": "packaging/qt-ffmpeg.lock.json", "portable_lock": "packaging/appimage-runtime.lock.json"},
     "debian-6.8.2": {"qt": "6.8.2", "glibc_minimum": "2.41", "build_recipe": "packaging/build-debian.Dockerfile", "build_image": "debian:13", "multimedia_lock": "packaging/qt-ffmpeg-debian.lock.json", "status": "in-development"}
   },
   "artifacts": {
@@ -18,17 +19,18 @@
     {"id": "ubuntu24-native", "os": "Ubuntu 24.04", "artifact": "ubuntu-deb", "profile": "ubuntu-6.4.2", "status": "supported", "qualifier": ["tools/verify_deb_container.py", "{artifact}", "--target", "ubuntu-24.04", "--output", "{report}"]},
     {"id": "debian13-native", "os": "Debian 13 (Trixie)", "artifact": "debian-deb", "profile": "debian-6.8.2", "status": "in-development", "qualifier": ["tools/verify_deb_container.py", "{artifact}", "--target", "debian-13", "--output", "{report}"]},
     {"id": "debian13-native-gtk", "os": "Debian 13 / MATE X11 / native GTK file picker", "artifact": "debian-deb", "profile": "debian-6.8.2", "status": "in-development", "contract": "native-dialogs", "qualifier": ["tools/verify_native_dialog_container.py", "{artifact}", "--target", "debian-13", "--output", "{report}"]},
-    {"id": "ubuntu24-appimage", "os": "Ubuntu 24.04", "artifact": "appimage", "profile": "ubuntu-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_container.py", "{artifact}", "--target", "ubuntu-24.04", "--output", "{report}"]},
-    {"id": "ubuntu26-appimage", "os": "Ubuntu 26.04", "artifact": "appimage", "profile": "ubuntu-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_container.py", "{artifact}", "--target", "ubuntu-26.04", "--output", "{report}"]},
-    {"id": "debian13-appimage", "os": "Debian 13 (Trixie)", "artifact": "appimage", "profile": "ubuntu-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_container.py", "{artifact}", "--target", "debian-13", "--output", "{report}"]},
-    {"id": "debian13-mate-accessibility", "os": "Debian 13 / MATE X11 / AT-SPI keyboard accessibility", "artifact": "appimage", "profile": "ubuntu-6.4.2", "status": "supported", "contract": "accessibility", "qualifier": ["tools/verify_mate_accessibility_container.py", "{artifact}", "--output", "{report}"]},
-    {"id": "fedora44-appimage", "os": "Fedora 44", "artifact": "appimage", "profile": "ubuntu-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_fedora.py", "{artifact}", "--output", "{report}"]},
-    {"id": "arch-appimage", "os": "Arch Linux (rolling; tested image recorded in evidence)", "artifact": "appimage", "profile": "ubuntu-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_desktops.py", "{artifact}", "--output", "{report}"]},
-    {"id": "fedora44-rpm", "os": "Fedora 44", "artifact": "rpm", "profile": "ubuntu-6.4.2", "status": "supported", "qualifier": ["tools/verify_rpm_container.py", "{artifact}", "--output", "{report}"]},
-    {"id": "arch-package", "os": "Arch Linux (rolling; tested image recorded in evidence)", "artifact": "arch", "profile": "ubuntu-6.4.2", "status": "supported", "qualifier": ["tools/verify_arch_package.py", "{artifact}", "--output", "{report}"]},
+    {"id": "ubuntu22-appimage", "os": "Ubuntu 22.04", "artifact": "appimage", "profile": "appimage-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_container.py", "{artifact}", "--target", "ubuntu-22.04", "--output", "{report}"]},
+    {"id": "ubuntu24-appimage", "os": "Ubuntu 24.04", "artifact": "appimage", "profile": "appimage-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_container.py", "{artifact}", "--target", "ubuntu-24.04", "--output", "{report}"]},
+    {"id": "ubuntu26-appimage", "os": "Ubuntu 26.04", "artifact": "appimage", "profile": "appimage-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_container.py", "{artifact}", "--target", "ubuntu-26.04", "--output", "{report}"]},
+    {"id": "debian13-appimage", "os": "Debian 13 (Trixie)", "artifact": "appimage", "profile": "appimage-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_container.py", "{artifact}", "--target", "debian-13", "--output", "{report}"]},
+    {"id": "debian13-mate-accessibility", "os": "Debian 13 / MATE X11 / AT-SPI keyboard accessibility", "artifact": "appimage", "profile": "appimage-6.4.2", "status": "supported", "contract": "accessibility", "qualifier": ["tools/verify_mate_accessibility_container.py", "{artifact}", "--output", "{report}"]},
+    {"id": "fedora44-appimage", "os": "Fedora 44", "artifact": "appimage", "profile": "appimage-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_fedora.py", "{artifact}", "--output", "{report}"]},
+    {"id": "arch-appimage", "os": "Arch Linux (rolling; tested image recorded in evidence)", "artifact": "appimage", "profile": "appimage-6.4.2", "status": "supported", "qualifier": ["tools/verify_appimage_desktops.py", "{artifact}", "--output", "{report}"]},
+    {"id": "fedora44-rpm", "os": "Fedora 44", "artifact": "rpm", "profile": "appimage-6.4.2", "status": "supported", "qualifier": ["tools/verify_rpm_container.py", "{artifact}", "--output", "{report}"]},
+    {"id": "arch-package", "os": "Arch Linux (rolling; tested image recorded in evidence)", "artifact": "arch", "profile": "appimage-6.4.2", "status": "supported", "qualifier": ["tools/verify_arch_package.py", "{artifact}", "--output", "{report}"]},
     {"id": "ubuntu24-snap-gnome", "os": "Ubuntu 24.04 / GNOME X11 and Wayland", "artifact": "snap", "profile": "ubuntu-6.4.2", "status": "supported", "desktop": "gnome"},
     {"id": "ubuntu24-snap-kde", "os": "Ubuntu 24.04 / Plasma X11 and Wayland", "artifact": "snap", "profile": "ubuntu-6.4.2", "status": "supported", "desktop": "kde"},
-    {"id": "ubuntu22-native-rejection", "os": "Ubuntu 22.04", "artifact": "ubuntu-deb", "profile": "ubuntu-6.4.2", "status": "unsupported", "qualifier": ["tools/verify_unsupported_ubuntu.py", "{artifact}", "--ubuntu-version", "22.04", "--appimage", "{appimage}", "--output", "{report}"]},
+    {"id": "ubuntu22-native-rejection", "os": "Ubuntu 22.04", "artifact": "ubuntu-deb", "profile": "ubuntu-6.4.2", "status": "unsupported", "qualifier": ["tools/verify_unsupported_ubuntu.py", "{artifact}", "--ubuntu-version", "22.04", "--output", "{report}"]},
     {"id": "ubuntu26-native-rejection", "os": "Ubuntu 26.04 (Ubuntu 24.04 native package)", "artifact": "ubuntu-deb", "profile": "ubuntu-6.4.2", "status": "unsupported", "qualifier": ["tools/verify_unsupported_ubuntu.py", "{artifact}", "--ubuntu-version", "26.04", "--output", "{report}"]}
   ]
 }

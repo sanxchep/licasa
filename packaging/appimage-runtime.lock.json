@@ -1,0 +1,18 @@
+{
+  "qt_version": "6.4.2",
+  "qt_url": "https://download.qt.io/archive/qt/6.4/6.4.2/submodules",
+  "qt_modules": {
+    "qtbase": "a88bc6cedbb34878a49a622baa79cace78cfbad4f95fdbd3656ddb21c705525d",
+    "qtshadertools": "fa65bff84d4e9c2cb4cbf6fb098207e0e23d863dbe675eb277034a29c226a217",
+    "qtdeclarative": "a4bdd983de4e9cbca0f85b767dbdd8598711554e370a06da8f509ded4430f5bd",
+    "qtsvg": "b746af3cb1793621d8ed7eae38d9ad5a15541dc2742031069f2ae3fe87590314",
+    "qtwayland": "24cf1a0af751ab1637b4815d5c5f3704483d5fa7bedbd3519e6fc020d8be135f",
+    "qttools": "a31387916184e4a5ef522d3ea841e8e931cc0f88be0824a7a354a572d5826c68",
+    "qtimageformats": "fc5f999ae0779a67d5507956d4dd315386eb81cf6ccba632de039bb9eee11707"
+  },
+  "ffmpeg": {
+    "url": "https://ffmpeg.org/releases/ffmpeg-6.1.6.tar.xz",
+    "sha256": "d4fcb164028dd3beee5d92c0ac72e46aac6973c75ea12dc14de07bf8f407370a",
+    "license": "LGPL-2.1-or-later"
+  }
+}

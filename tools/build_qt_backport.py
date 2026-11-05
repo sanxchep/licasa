@@ -25,6 +25,8 @@ def main():
     add_runtime_profile_argument(parser)
     parser.add_argument("--work-dir", type=Path, default=ROOT / "build/deps")
     parser.add_argument("--qt-prefix", type=Path)
+    parser.add_argument("--install-module", action="store_true",
+                        help="Build and install all of patched Qt Declarative into --qt-prefix")
     parser.add_argument(
         "--jobs",
         type=int,
@@ -42,6 +44,8 @@ def main():
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error("jobs must be at least 1")
+    if args.install_module and not args.qt_prefix:
+        parser.error("--install-module requires --qt-prefix")
     work = args.work_dir.resolve()
     lock = PROFILES[args.runtime_profile]["quick_lock"]
     if lock is None:
@@ -68,8 +72,9 @@ def main():
         subprocess.run(command + ["--reverse", "--dry-run"], cwd=source, check=True)
     build = work / "qt-backport-build"
     env = dict(os.environ)
+    destination = args.qt_prefix.resolve() if args.install_module else work / "qt-backport-prefix"
     command = ["cmake", "-S", str(source), "-B", str(build),
-               f"-DCMAKE_INSTALL_PREFIX={work / 'qt-backport-prefix'}",
+               f"-DCMAKE_INSTALL_PREFIX={destination}",
                "-DCMAKE_BUILD_TYPE=Release", "-DQT_BUILD_EXAMPLES=OFF",
                "-DQT_BUILD_TESTS=OFF", "-DQT_BUILD_BENCHMARKS=OFF",
                "-DCMAKE_CXX_FLAGS=-fstack-protector-strong",
@@ -83,8 +88,11 @@ def main():
     subprocess.run(command, env=env, check=True)
     if configured_qt_version((build / "CMakeCache.txt").read_text()) != spec["version"]:
         raise RuntimeError(f"Private Qt Quick requires exact Qt {spec['version']}")
-    subprocess.run(["cmake", "--build", str(build), "--target", "Quick",
-                    "--parallel", str(args.jobs)], env=env, check=True)
+    target = [] if args.install_module else ["--target", "Quick"]
+    subprocess.run(["cmake", "--build", str(build), *target, "--parallel", str(args.jobs)],
+                   env=env, check=True)
+    if args.install_module:
+        subprocess.run(["cmake", "--install", str(build)], env=env, check=True)
     name = f"libQt6Quick.so.{spec['version']}"
     libraries = list((build / "lib").rglob(name))
     if len(libraries) != 1:

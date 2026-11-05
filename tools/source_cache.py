@@ -44,7 +44,10 @@ def fetch_archive(directory, url, digest, *, name=None, algorithm="sha256",
 def _verify_archive(archive, digest, algorithm, limit):
     if archive.stat().st_size > limit:
         raise RuntimeError(f"Source archive exceeded size bound: {archive}")
+    checksum = hashlib.new(algorithm)
     with archive.open("rb") as content:
-        actual = hashlib.file_digest(content, algorithm).hexdigest()
+        while block := content.read(1024 * 1024):
+            checksum.update(block)
+    actual = checksum.hexdigest()
     if actual != digest:
         raise RuntimeError(f"Checksum mismatch: {archive} (expected {digest}, got {actual})")

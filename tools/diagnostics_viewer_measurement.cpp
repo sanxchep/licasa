@@ -140,9 +140,13 @@ class ViewerMeasurement final : public QObject, public DiagnosticCheck {
 
     void releaseImage()
     {
-        // Wait for an automatic full-detail promotion that is still in flight.
+        // A completed decode can clear pendingImageSlot before its frame is
+        // presented. Keep the first image alive until that observed frame too.
+        const bool awaitingFinalFrame = !imageUrl_.isEmpty() &&
+                                        result_.contains("full_detail_ready_ms") &&
+                                        !result_.contains("full_detail_presented_ms");
         if (viewport_->property("imageStatus").toInt() != 3 &&
-            viewport_->property("pendingImageSlot").toInt() >= 0) {
+            (viewport_->property("pendingImageSlot").toInt() >= 0 || awaitingFinalFrame)) {
             QTimer::singleShot(100, this, &ViewerMeasurement::releaseImage);
             return;
         }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn a checked amd64 Debian payload into a portable Qt AppImage."""
+"""Assemble a checked amd64 Licasa payload as a portable Qt AppImage."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
+import re
 import shutil
 import subprocess
 import tempfile
@@ -25,6 +27,8 @@ PORTABLE_RUNTIME_LIBRARIES = ("libSM.so.6", "libICE.so.6", "libuuid.so.1", "libf
                               "libgpg-error.so.0", "libcom_err.so.2")
 GTK_PLATFORM_THEME = "platformthemes/libqgtk3.so"
 GTK_SETTINGS_MODULE = "gio/modules/libdconfsettings.so"
+JAMMY_LIBRARY_DIR = Path("/usr/lib/x86_64-linux-gnu")
+JAMMY_ABI = {"GLIBC": (2, 35), "GLIBCXX": (3, 4, 30), "CXXABI": (1, 3, 13)}
 TOOLS = {
     "linuxdeploy-x86_64.AppImage": (
         "https://github.com/linuxdeploy/linuxdeploy/releases/download/"
@@ -48,11 +52,13 @@ TOOLS = {
 }
 
 
-def fetch_tools(directory: Path) -> None:
+def fetch_tools(directory: Path, *, offline: bool = False) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     for name, (url, expected) in TOOLS.items():
         path = directory / name
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            if offline:
+                raise RuntimeError(f"Offline AppImage tool missing or mismatched: {path}")
             with tempfile.NamedTemporaryFile(dir=directory, delete=False) as target:
                 temporary = Path(target.name)
             try:
@@ -139,40 +145,87 @@ def pin_multimedia_backend(appdir: Path) -> dict:
             "sha256": hashlib.sha256(private.read_bytes()).hexdigest()}
 
 
+def check_jammy_abi(appdir: Path) -> dict:
+    """Enforce the host ABI on all bundled ELFs, including lazy plugins."""
+    files = 0
+    highest = {}
+    system_only = {"libc.so.6", "libm.so.6", "libstdc++.so.6", "libgcc_s.so.1"}
+    for path in sorted(appdir.rglob("*")):
+        if path.name in system_only or path.name.startswith("ld-linux-"):
+            raise RuntimeError(f"The AppImage must use the host runtime for {path.name}")
+        if path.is_symlink() or not path.is_file():
+            continue
+        with path.open("rb") as content:
+            if content.read(4) != b"\x7fELF":
+                continue
+        files += 1
+        versions = subprocess.check_output(["readelf", "--version-info", "--wide", str(path)],
+                                           text=True, env=dict(os.environ, LC_ALL="C"))
+        needs = versions.partition("Version needs section")[2]
+        for family, version in re.findall(r"\bName: (GLIBCXX|GLIBC|CXXABI)_(\S+)", needs):
+            if family == "CXXABI" and version in {"FLOAT128", "TM_1"}:
+                continue
+            if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)+", version):
+                raise RuntimeError(f"{path.relative_to(appdir)} requires unsupported {family}_{version}")
+            parts = tuple(map(int, version.split(".")))
+            if parts > JAMMY_ABI[family]:
+                raise RuntimeError(f"{path.relative_to(appdir)} requires {family}_{version} above the Ubuntu 22.04 baseline")
+            highest[family] = max(highest.get(family, ()), parts)
+    if not files:
+        raise RuntimeError("The AppImage payload contains no ELF files")
+    return {"baseline": "ubuntu-22.04", "elf_files": files,
+            "maximum_required": {family: ".".join(map(str, version)) for family, version in highest.items()}}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("package", type=Path, help="Qualified Ubuntu 24.04 amd64 .deb")
+    parser.add_argument("package", type=Path, nargs="?", help="Legacy Ubuntu 24.04 amd64 .deb")
+    parser.add_argument("--payload", type=Path, help="Staged Ubuntu 22.04 application from build_appimage.py")
+    parser.add_argument("--version", help="Project version for --payload")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "build/qualification/appimage")
     parser.add_argument("--tools-dir", type=Path, default=ROOT / "build/packaging-tools")
+    parser.add_argument("--offline", action="store_true", help="Require the pinned packaging tools in --tools-dir")
     args = parser.parse_args()
-    missing_tools = [name for name in ("dpkg-deb", "qmake6", "file", "patchelf")
+    if bool(args.package) == bool(args.payload) or bool(args.version) != bool(args.payload):
+        parser.error("Supply either a Debian package or --payload with --version")
+    qmake = "qmake6" if shutil.which("qmake6") else "qmake"
+    payload_tools = ("readelf",) if args.payload else ("dpkg-deb",)
+    missing_tools = [name for name in (*payload_tools, qmake, "file", "patchelf")
                      if shutil.which(name) is None]
     if missing_tools:
         parser.error("Missing AppImage build tools: " + ", ".join(missing_tools))
-    package = args.package.resolve(strict=True)
-    if subprocess.check_output(["dpkg-deb", "--field", str(package), "Package"], text=True).strip() != "licasa":
-        parser.error("Expected a Licasa Debian package")
-    architecture = subprocess.check_output(["dpkg-deb", "--field", str(package), "Architecture"], text=True).strip()
-    if architecture != "amd64":
-        parser.error("Only amd64 is qualified for the AppImage")
-    version = subprocess.check_output(["dpkg-deb", "--field", str(package), "Version"], text=True).strip().split("-", 1)[0]
+    if args.payload:
+        if platform.machine() != "x86_64" or os.confstr("CS_GNU_LIBC_VERSION") != "glibc 2.35":
+            parser.error("The portable payload requires the Ubuntu 22.04 amd64 builder")
+        if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version):
+            parser.error("Expected the Licasa project version")
+        version = args.version
+    else:
+        package = args.package.resolve(strict=True)
+        if subprocess.check_output(["dpkg-deb", "--field", str(package), "Package"], text=True).strip() != "licasa":
+            parser.error("Expected a Licasa Debian package")
+        architecture = subprocess.check_output(["dpkg-deb", "--field", str(package), "Architecture"], text=True).strip()
+        if architecture != "amd64":
+            parser.error("Only amd64 is qualified for the AppImage")
+        version = subprocess.check_output(["dpkg-deb", "--field", str(package), "Version"], text=True).strip().split("-", 1)[0]
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
     tools_dir = args.tools_dir.resolve()
-    fetch_tools(tools_dir)
+    fetch_tools(tools_dir, offline=args.offline)
     qt_plugins = Path(subprocess.check_output(
-        ["qmake6", "-query", "QT_INSTALL_PLUGINS"], text=True).strip())
+        [qmake, "-query", "QT_INSTALL_PLUGINS"], text=True).strip())
     qt_libraries = Path(subprocess.check_output(
-        ["qmake6", "-query", "QT_INSTALL_LIBS"], text=True).strip())
+        [qmake, "-query", "QT_INSTALL_LIBS"], text=True).strip())
     qt_qml = Path(subprocess.check_output(
-        ["qmake6", "-query", "QT_INSTALL_QML"], text=True).strip())
-    qt_version = subprocess.check_output(["qmake6", "-query", "QT_VERSION"], text=True).strip()
+        [qmake, "-query", "QT_INSTALL_QML"], text=True).strip())
+    qt_version = subprocess.check_output([qmake, "-query", "QT_VERSION"], text=True).strip()
     if qt_version != "6.4.2":
         raise RuntimeError("The portable Ubuntu payload must be deployed with matching Qt 6.4.2")
     gtk_theme = qt_plugins / GTK_PLATFORM_THEME
     if not gtk_theme.is_file():
         raise RuntimeError("Missing matching Qt GTK platform theme; install qt6-gtk-platformtheme")
-    gtk_settings = qt_libraries / GTK_SETTINGS_MODULE
+    system_libraries = JAMMY_LIBRARY_DIR if args.payload else qt_libraries
+    gtk_settings = system_libraries / GTK_SETTINGS_MODULE
     if not gtk_settings.is_file():
         raise RuntimeError("Missing matching GTK settings backend; install dconf-gsettings-backend")
     # This also rejects a partially installed build environment before any bundle is made.
@@ -196,15 +249,18 @@ def main() -> None:
     qml_libraries = tuple(qt_libraries / name for module in requirements()["modules"]
                           if module.get("deploy_explicitly") for name in module.get("libraries", []))
     forced_libraries = (wl_shell_library, wayland_egl_library,
-                        *(qt_libraries / name for name in PORTABLE_RUNTIME_LIBRARIES), *qml_libraries)
+                        *(system_libraries / name for name in PORTABLE_RUNTIME_LIBRARIES), *qml_libraries)
     for library in forced_libraries:
         if not library.is_file():
             raise RuntimeError(f"Missing AppImage runtime library: {library}")
     with tempfile.TemporaryDirectory(prefix="licasa-appimage-", dir=output) as temporary:
         work = Path(temporary)
         appdir = work / "Licasa.AppDir"
-        appdir.mkdir()
-        run(["dpkg-deb", "--extract", str(package), str(appdir)])
+        if args.payload:
+            shutil.copytree(args.payload.resolve(strict=True), appdir, symlinks=True)
+        else:
+            appdir.mkdir()
+            run(["dpkg-deb", "--extract", str(package), str(appdir)])
         # A native Debian transaction uses a root-owned launcher before its
         # ELF. Portable packages have their own managed/portable launch gate,
         # so restore the ordinary payload layout before linuxdeploy scans it.
@@ -218,7 +274,7 @@ def main() -> None:
         icon = appdir / "usr/share/icons/hicolor/512x512/apps/licasa.png"
         for path in (appdir / "usr/bin/licasa", desktop, icon):
             if not path.is_file():
-                raise RuntimeError(f"Incomplete Debian payload: {path}")
+                raise RuntimeError(f"Incomplete AppImage payload: {path}")
         # The Qt deploy plugin only copies platform plugins. Wayland also loads
         # shell and buffer integrations at runtime, so stage those before the
         # dependency scanner runs.
@@ -240,6 +296,8 @@ def main() -> None:
                    VERSION=version, ARCH="x86_64",
                    EXTRA_PLATFORM_PLUGINS=";".join(
                        ("libqoffscreen.so", *wayland_platforms)))
+        if args.payload:
+            env["QMAKE"] = shutil.which(qmake)
         linuxdeploy = str(tools_dir / "linuxdeploy-x86_64.AppImage")
         run([linuxdeploy, "--appdir", str(appdir), "--desktop-file", str(desktop),
              "--icon-file", str(icon),
@@ -309,6 +367,8 @@ def main() -> None:
             "settings_sha256": hashlib.sha256(bundled_gtk_settings.read_bytes()).hexdigest(),
         }
         runtime_report["multimedia_backend"] = multimedia
+        if args.payload:
+            runtime_report["abi"] = check_jammy_abi(appdir)
         report_path = appdir / "usr/share/licasa/qt-runtime.json"
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(runtime_report, indent=2) + "\n")

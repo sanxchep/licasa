@@ -47,6 +47,7 @@ Item {
     property bool currentImageLimitedToPreview: false
     property real cropShieldOpacity: 0.70
     property bool advancedOpen: false
+    property alias scrollPosition: settingsFlick.contentY
 
     readonly property bool pointerInsidePanel: root.panelOpen
         && (panelHover.hovered || settingsScrollBar.dragging)
@@ -68,6 +69,7 @@ Item {
     signal colorManagedRenderingChanged(bool enabled)
     signal maximumImageMemoryMiBRequested(int value)
     signal cropShieldOpacityRequested(real value)
+    signal keyboardShortcutsRequested()
     signal quitRequested()
     signal externalUrlRequested(url targetUrl)
 
@@ -96,6 +98,11 @@ Item {
             )
         }
         wheel.accepted = true
+    }
+
+    function restoreScrollPosition(position) {
+        settingsFlick.contentY = Math.max(0, Math.min(
+            Math.max(0, settingsFlick.contentHeight - settingsFlick.height), position))
     }
 
     function scrollByPage(direction) {

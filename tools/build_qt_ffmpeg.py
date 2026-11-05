@@ -156,7 +156,8 @@ def main():
             environment=env, prefixes=prefixes)
     subprocess.run(["cmake", "--build", str(build), "--target", "QFFmpegMediaPlugin",
                     "--parallel", str(args.jobs)], env=env, check=True)
-    plugins = list((build / "lib").rglob("libffmpegmediaplugin.so"))
+    plugins = [*(build / "lib").rglob("libffmpegmediaplugin.so"),
+               *(build / "plugins").glob("multimedia/libffmpegmediaplugin.so")]
     if len(plugins) != 1:
         raise RuntimeError(f"Expected one FFmpeg plugin, found {plugins}")
     dynamic = subprocess.check_output(["readelf", "-d", str(plugins[0])], text=True)

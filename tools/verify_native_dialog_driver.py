@@ -271,20 +271,39 @@ def main() -> int:
         report["saved_output"] = {"path": str(args.destination), "sha256": hashlib.sha256(args.destination.read_bytes()).hexdigest()}
         record("native_save_output_decodes")
         if args.bundle_root:
-            previous_digest = hashlib.sha256(args.destination.read_bytes()).hexdigest()
+            # File creation precedes the viewer's save-completion handoff. Wait
+            # for the new source and clean edit baseline before the next edit.
+            wait("saved copy becomes the active clean image", lambda:
+                 find(args.destination.name, pyatspi.ROLE_IMAGE)
+                 and find("Exposure", pyatspi.ROLE_SLIDER).queryValue().currentValue == 0)
+            record("native_saved_copy_ready")
+            # Save As a copy deliberately refuses the active source, even after
+            # GTK confirms replacement. Exercise overwrite on a distinct file.
+            overwrite_destination = args.destination.with_name(
+                args.destination.stem + " overwritten" + args.destination.suffix)
+            overwrite_destination.write_bytes(args.destination.read_bytes())
+            previous_digest = hashlib.sha256(overwrite_destination.read_bytes()).hexdigest()
+            source_digest = hashlib.sha256(args.destination.read_bytes()).hexdigest()
             exposure = wait("Exposure after save", lambda: find("Exposure", pyatspi.ROLE_SLIDER))
             before_overwrite = exposure.queryValue().currentValue
             action(exposure, "increase")
             wait("edit before overwrite", lambda: find("Exposure", pyatspi.ROLE_SLIDER).queryValue().currentValue > before_overwrite)
+            report["overwrite_edit"] = {"before": before_overwrite,
+                "after": find("Exposure", pyatspi.ROLE_SLIDER).queryValue().currentValue}
             key("ctrl+shift+s")
             confirm_native()
-            enter_path(args.destination.absolute(), "Save", overwrite=True)
-            wait("overwritten edited output", lambda: hashlib.sha256(args.destination.read_bytes()).hexdigest() != previous_digest)
-            with Image.open(args.destination) as saved, Image.open(args.sample) as original:
+            enter_path(overwrite_destination.absolute(), "Save", overwrite=True)
+            wait("overwritten edited output", lambda: hashlib.sha256(overwrite_destination.read_bytes()).hexdigest() != previous_digest)
+            with Image.open(overwrite_destination) as saved, Image.open(args.sample) as original:
                 saved.load()
                 if saved.size != original.size:
                     raise RuntimeError("Native overwrite produced an unexpected image")
-            record("native_overwrite_output_decodes", str(args.destination))
+            if hashlib.sha256(args.destination.read_bytes()).hexdigest() != source_digest:
+                raise RuntimeError("Save As overwrite changed the active source")
+            report["overwrite_output"] = {"path": str(overwrite_destination),
+                "sha256": hashlib.sha256(overwrite_destination.read_bytes()).hexdigest(),
+                "active_source_preserved": True}
+            record("native_overwrite_output_decodes", str(overwrite_destination))
         report["status"] = "passed"
         return 0
     except Exception as error:

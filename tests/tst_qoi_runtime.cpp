@@ -137,10 +137,66 @@ class QoiRuntimeTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void initialPixelState_data()
+    {
+        QTest::addColumn<QByteArray>("chunks");
+        QTest::addColumn<QRgb>("expectedPixel");
+        for (int slot = 0; slot < 64; ++slot) {
+            QTest::newRow(qPrintable(QStringLiteral("index-%1").arg(slot)))
+                << QByteArray(1, char(slot)) << qRgba(0, 0, 0, 0);
+        }
+        QTest::newRow("run") << QByteArray::fromHex("c0") << qRgba(0, 0, 0, 255);
+        QTest::newRow("rgb") << QByteArray::fromHex("fe112233") << qRgba(17, 34, 51, 255);
+        QTest::newRow("diff") << QByteArray::fromHex("7f") << qRgba(1, 1, 1, 255);
+        QTest::newRow("luma") << QByteArray::fromHex("a188") << qRgba(1, 1, 1, 255);
+    }
+
+    void initialPixelState()
+    {
+        QFETCH(QByteArray, chunks);
+        QFETCH(QRgb, expectedPixel);
+        // Independent QOI 1.0 stream: 1x1 RGBA/sRGB, one opcode, end marker.
+        const QByteArray bytes = QByteArray::fromHex("716f696600000001000000010400") + chunks +
+                                 QByteArray::fromHex("0000000000000001");
+        for (const QSize& target : {QSize(1, 1), QSize(3, 2)}) {
+            QImage expected(target, QImage::Format_ARGB32);
+            expected.fill(expectedPixel);
+            expected.setColorSpace(QColorSpace::SRgb);
+            QCOMPARE(decode(bytes, target), expected);
+        }
+    }
+
+    void transparentIndexAndAlphaTransitions()
+    {
+        QImage source(67, 3, QImage::Format_ARGB32);
+        const QRgb pixels[] = {qRgba(0, 0, 0, 0),   qRgba(0, 0, 0, 0),      qRgba(0, 0, 0, 255),
+                               qRgba(0, 0, 0, 255), qRgba(17, 34, 51, 255), qRgba(17, 34, 51, 23),
+                               qRgba(0, 0, 0, 0)};
+        for (int y = 0; y < source.height(); ++y) {
+            for (int x = 0; x < source.width(); ++x) {
+                source.setPixel(x, y, pixels[(y * source.width() + x) % std::size(pixels)]);
+            }
+        }
+        source.setColorSpace(QColorSpace::SRgb);
+        const QByteArray bytes = encode(source);
+        QCOMPARE(uchar(bytes[14]), uchar(0)); // The independent encoder uses the initial index.
+        QCOMPARE(decode(bytes), source);
+        QImage expected(7, 2, QImage::Format_ARGB32);
+        for (int y = 0; y < expected.height(); ++y) {
+            for (int x = 0; x < expected.width(); ++x) {
+                const int sx = int((2ll * x + 1) * source.width() / (2ll * expected.width()));
+                const int sy = int((2ll * y + 1) * source.height() / (2ll * expected.height()));
+                expected.setPixel(x, y, source.pixel(sx, sy));
+            }
+        }
+        expected.setColorSpace(QColorSpace::SRgb);
+        QCOMPARE(decode(bytes, expected.size()), expected);
+    }
+
     void exactRunsOpcodesAndSampling()
     {
-        const QSize sizes[] = {{1, 1}, {3, 2}, {67, 5}, {257, 129}};
-        const QSize targets[] = {{1, 1}, {3, 2}, {17, 11}, {513, 7}, {7, 513}};
+        const QSize sizes[] = {{1, 1}, {3, 2}, {67, 5}, {257, 129}, {100000, 1}, {1, 100000}};
+        const QSize targets[] = {{1, 1}, {3, 2}, {17, 11}, {513, 7}, {7, 513}, {99999, 1}};
         for (const QSize& size : sizes) {
             for (int pattern = 0; pattern < 3; ++pattern) {
                 const QImage source = sourceImage(size, pattern);
@@ -168,6 +224,38 @@ class QoiRuntimeTest final : public QObject {
                     const QImage actual = decode(bytes, target);
                     QVERIFY(!actual.isNull());
                     QCOMPARE(actual, expected);
+                }
+            }
+        }
+    }
+
+    void samplingWidthBoundaries()
+    {
+        for (int width = 1; width <= 17; ++width) {
+            for (int pattern = 0; pattern < 3; ++pattern) {
+                const QImage source = sourceImage({width, 7}, pattern);
+                const QByteArray bytes = encode(source);
+                for (int requestedWidth = 1; requestedWidth <= width + 2; ++requestedWidth) {
+                    for (int requestedHeight : {1, 4, 9}) {
+                        const QSize target(requestedWidth, requestedHeight);
+                        const QSize sampled = target.boundedTo(source.size());
+                        QImage expected(sampled, QImage::Format_ARGB32);
+                        for (int y = 0; y < sampled.height(); ++y) {
+                            const int sy =
+                                int((2ll * y + 1) * source.height() / (2ll * sampled.height()));
+                            for (int x = 0; x < sampled.width(); ++x) {
+                                const int sx =
+                                    int((2ll * x + 1) * source.width() / (2ll * sampled.width()));
+                                expected.setPixel(x, y, source.pixel(sx, sy));
+                            }
+                        }
+                        if (sampled != target) {
+                            expected = expected.scaled(target, Qt::IgnoreAspectRatio,
+                                                       Qt::FastTransformation);
+                        }
+                        expected.setColorSpace(QColorSpace::SRgb);
+                        QCOMPARE(decode(bytes, target), expected);
+                    }
                 }
             }
         }

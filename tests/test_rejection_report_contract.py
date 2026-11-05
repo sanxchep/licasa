@@ -33,11 +33,11 @@ class RejectionReportTests(unittest.TestCase):
         return next(row for row in self.manifest["targets"]
                     if row["id"] == f"ubuntu{version}-native-rejection")
 
-    def receipt(self, version):
+    def receipt(self, version, *, legacy_appimage=False):
         report = {"ubuntu_version": f"{version}.04",
                   "native_deb": "unsupported_dependency_rejection_confirmed",
                   "package_sha256": self.package_hash}
-        if version == "22":
+        if legacy_appimage:
             report.update(appimage="unsupported_glibc_rejection_confirmed", appimage_sha256="a" * 64)
         return report
 
@@ -67,16 +67,18 @@ class RejectionReportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             check_report(report, self.target("26"), self.manifest, self.package)
 
-    def test_ubuntu22_requires_explicit_appimage_baseline_rejection(self):
+    def test_legacy_ubuntu22_contract_still_requires_appimage_rejection(self):
+        target = copy.deepcopy(self.target("22"))
+        target["qualifier"] += ["--appimage", "{appimage}"]
         for field in ("appimage", "appimage_sha256"):
-            report = self.receipt("22")
+            report = self.receipt("22", legacy_appimage=True)
             del report[field]
             with self.subTest(field=field), self.assertRaises(ValueError):
-                check_report(report, self.target("22"), self.manifest, self.package)
-        report = self.receipt("22")
+                check_report(report, target, self.manifest, self.package)
+        report = self.receipt("22", legacy_appimage=True)
         report["appimage_sha256"] = "invalid"
         with self.assertRaises(ValueError):
-            check_report(report, self.target("22"), self.manifest, self.package)
+            check_report(report, target, self.manifest, self.package)
 
     def test_nonpassing_report_cannot_override_explicit_receipt_fields(self):
         for status in ("failed", "skipped", "unsupported"):
@@ -97,12 +99,12 @@ class RejectionReportTests(unittest.TestCase):
 
 
 class RejectionGuestTests(unittest.TestCase):
-    def run_probe(self, directory, *, version="22.04", install_result=None):
+    def run_probe(self, directory, *, version="22.04", legacy_appimage=True, install_result=None):
         root=Path(directory);package=root/'candidate.deb';package.write_bytes(b'candidate deb')
         appimage=root/'candidate.AppImage';appimage.write_bytes(b'candidate appimage')
         output=root/'report.json';captured={}
         argv=['verify_unsupported_ubuntu.py',str(package),'--ubuntu-version',version,'--output',str(output)]
-        if version=='22.04':argv+=['--appimage',str(appimage)]
+        if legacy_appimage:argv+=['--appimage',str(appimage)]
         def run(command,**kwargs):
             if command[:2]==['docker','build']:
                 captured['recipe']=(Path(command[-1])/'Dockerfile').read_text()
@@ -146,12 +148,14 @@ class RejectionGuestTests(unittest.TestCase):
                     self.run_probe(directory,install_result=result)
                 self.assertFalse((Path(directory)/'report.json').exists())
 
-    def test_ubuntu26_native_only_probe_does_not_install_appimage_dependencies(self):
-        with tempfile.TemporaryDirectory() as directory:
-            captured,report,_,_=self.run_probe(directory,version='26.04')
-            self.assertNotIn('apt-get install',captured['recipe']);self.assertNotIn('installer',captured)
-            self.assertNotIn('appimage',report)
-            self.assertEqual(report['native_deb'],'unsupported_dependency_rejection_confirmed')
+    def test_native_only_probe_does_not_install_appimage_dependencies(self):
+        for version in ("22.04", "26.04"):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                captured, report, _, _ = self.run_probe(directory, version=version, legacy_appimage=False)
+                self.assertNotIn("apt-get install", captured["recipe"])
+                self.assertNotIn("installer", captured)
+                self.assertNotIn("appimage", report)
+                self.assertEqual(report["native_deb"], "unsupported_dependency_rejection_confirmed")
 
 
 if __name__ == "__main__":

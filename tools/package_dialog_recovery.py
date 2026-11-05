@@ -59,8 +59,10 @@ digest = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()
 inputs = {{'missing_module': {MISSING_MODULE!r}, 'isolated_qml_root': str(qml),
           'original_app_sha256': digest(source_app),
           'original_diagnostic_sha256': digest({diagnostic!r})}}
-assert inputs['original_app_sha256'] == digest({broken_app!r})
-assert inputs['original_diagnostic_sha256'] == digest({broken_diagnostic!r})
+if not (inputs['original_app_sha256'] == digest({broken_app!r})):
+    raise AssertionError
+if not (inputs['original_diagnostic_sha256'] == digest({broken_diagnostic!r})):
+    raise AssertionError
 shutil.rmtree(qml / 'Qt/labs/folderlistmodel')
 libraries = Path({library_root!r}) if {native!r} else root / 'usr/lib'
 try:

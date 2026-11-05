@@ -139,7 +139,12 @@ if [ ! -S "$x11_socket" ]; then
 fi
 
 if [ "$protocol" = wayland ]; then
-    weston --backend=x11 --renderer=pixman --socket="$WAYLAND_DISPLAY" \
+    if weston --help 2>&1 | grep -q -- '--renderer'; then
+        set -- --backend=x11 --renderer=pixman
+    else
+        set -- --backend=x11-backend.so --use-pixman
+    fi
+    weston "$@" --socket="$WAYLAND_DISPLAY" \
         --idle-time=0 >/tmp/weston.log 2>&1 &
     display_pid=$!
     attempt=0

@@ -29,8 +29,8 @@ def main():
     args = parser.parse_args()
     if os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         parser.error("Run this container check only on an ephemeral GitHub-hosted VM")
-    if (args.ubuntu_version == "22.04") != bool(args.appimage):
-        parser.error("Supply the AppImage only for Ubuntu 22.04 rejection checks")
+    if args.appimage and args.ubuntu_version != "22.04":
+        parser.error("Legacy AppImage rejection checks require Ubuntu 22.04")
     package = args.package.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="licasa-ubuntu-rejection-") as temporary:
         work = Path(temporary)

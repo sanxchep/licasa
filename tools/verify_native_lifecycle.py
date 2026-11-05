@@ -29,8 +29,10 @@ VIEWER = r'''import hashlib,json,os,socket,time
 from pathlib import Path
 uid=os.geteuid()
 binary=os.readlink('/proc/self/exe').removesuffix(' (deleted)')
-assert not any(name in os.environ for name in ('APPIMAGE','SNAP','SNAP_NAME','SNAP_INSTANCE_NAME','SNAP_REVISION','SNAP_VERSION','SNAP_USER_DATA','SNAP_USER_COMMON'))
-assert os.environ.get('APPDIR')==('/opt/licasa' if binary.startswith('/opt/licasa/') else None)
+if not (not any(name in os.environ for name in ('APPIMAGE','SNAP','SNAP_NAME','SNAP_INSTANCE_NAME','SNAP_REVISION','SNAP_VERSION','SNAP_USER_DATA','SNAP_USER_COMMON'))):
+    raise AssertionError
+if not (os.environ.get('APPDIR')==('/opt/licasa' if binary.startswith('/opt/licasa/') else None)):
+    raise AssertionError
 family,anchor=('appimage','/opt/licasa') if binary.startswith('/opt/licasa/') else ('filesystem',binary)
 identity=hashlib.sha256(f'{uid}\n{family}\n{anchor}'.encode()).hexdigest()[:32]
 record=Path('/proc/self/stat').read_text()
@@ -84,7 +86,8 @@ def write(path: Path, text: str, mode: int = 0o644) -> None:
 def install_scripts(stage: Path, installation: str) -> None:
     control = stage / "DEBIAN"
     control.mkdir(parents=True, exist_ok=True)
-    assert installation == "native"
+    if not (installation == "native"):
+        raise AssertionError
     write_maintainer_scripts(control)
 
 
@@ -157,7 +160,8 @@ cp -a {stage}/. %{{buildroot}}/
             dependencies = re.findall(r"^Requires\([^)]+\):.*$", production, re.MULTILINE)
             spec = spec.replace("%description\n", "\n".join(dependencies) + "\n%description\n", 1)
             scripts = re.findall(r"(?ms)^%(pretrans|pre|post|preun|postun)\n(.*?)(?=^%[a-z]|\Z)", production)
-            assert len(scripts) == 4, "Expected all four production RPM lifecycle scripts"
+            if not (len(scripts) == 4):
+                raise AssertionError("Expected all four production RPM lifecycle scripts")
             for name, source in scripts:
                 spec += f"\n%{name}\n" + source
         spec += "\n%files\n/usr/bin/licasa\n/opt/licasa\n"
@@ -235,15 +239,21 @@ def inside(manager: str, output: Path) -> None:
                                    preexec_fn=user, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         peers.append(process)
         deadline = time.monotonic() + 5
+        reply = None
         while time.monotonic() < deadline:
             target = next((candidate for candidate in native.processes(installation) if candidate["pid"] == process.pid), None)
             if target and list(runtime.glob("licasa-lc-*.sock")):
-                event("launch", pid=process.pid, uid=uid, generation=target["generation"], **values)
-                return process
+                # Binding the socket precedes releasing the inherited launch
+                # gate, and a terminated peer can leave a stale socket. A reply
+                # from this process proves it reached its request loop.
+                reply = native.dropped_request(target, "status")
+                if reply.get("result") == "ready":
+                    event("launch", pid=process.pid, uid=uid, generation=target["generation"], **values)
+                    return process
             if process.poll() is not None:
                 raise AssertionError(f"Fixture launch failed: {process.stderr.read().decode()}")
             time.sleep(0.02)
-        raise AssertionError("Fixture did not publish a private endpoint.")
+        raise AssertionError(f"Fixture did not publish a ready private endpoint: {reply}")
 
     def state() -> str:
         return json.loads((Path("/var/lib/licasa/lifecycle") / installation / "transaction.json").read_text())["state"]
@@ -265,12 +275,15 @@ def inside(manager: str, output: Path) -> None:
                                   env=dict(os.environ, XDG_RUNTIME_DIR=str(runtime)), preexec_fn=legacy_user)
         peers.append(legacy)
         time.sleep(0.1)
-        assert legacy.poll() is None
+        if not (legacy.poll() is None):
+            raise AssertionError
         if manager != "arch":
             old_hash = native.digest(Path(old_binary))
             rejected = install(packages[1], expect=False)
-            assert rejected.returncode != 0 and native.digest(Path(old_binary)) == old_hash
-            assert legacy.poll() is None
+            if not (rejected.returncode != 0 and native.digest(Path(old_binary)) == old_hash):
+                raise AssertionError
+            if not (legacy.poll() is None):
+                raise AssertionError
             event("legacy-without-protocol-blocks-before-mutation")
         # The accepted first-Arch-upgrade policy requires the user to fully
         # Quit before invoking pacman. A new incoming hook cannot enforce it.
@@ -278,59 +291,74 @@ def inside(manager: str, output: Path) -> None:
         legacy.wait(timeout=3)
         event("first-legacy-full-Quit-prerequisite-satisfied")
         install(packages[1])
-        assert state() == "verified"
+        if not (state() == "verified"):
+            raise AssertionError
         event("first-install-verified")
         first = launch(1000)
         busy = launch(1001, busy=True)
         original = native.digest(Path(config["binary"]))
         rejected = install(packages[2], expect=False)
-        assert rejected.returncode != 0 and native.digest(Path(config["binary"])) == original
-        assert first.poll() is None and busy.poll() is None and state() == "verified"
+        if not (rejected.returncode != 0 and native.digest(Path(config["binary"])) == original):
+            raise AssertionError
+        if not (first.poll() is None and busy.poll() is None and state() == "verified"):
+            raise AssertionError
         event("busy-all-users-blocked-before-mutation")
         if manager == "arch":
             rejected = install(packages[2], expect=False, extra=("--noscriptlet",))
-            assert rejected.returncode != 0 and native.digest(Path(config["binary"])) == original
+            if not (rejected.returncode != 0 and native.digest(Path(config["binary"])) == original):
+                raise AssertionError
             event("arch-noscriptlet-still-enforces-prehook")
         flags(1001)
         install(packages[2])
         first.wait(timeout=3)
         busy.wait(timeout=3)
-        assert native.digest(Path(config["binary"])) != original and state() == "verified"
+        if not (native.digest(Path(config["binary"])) != original and state() == "verified"):
+            raise AssertionError
         event("all-predecessors-exited-before-upgrade")
         hung = launch(1000, hangStop=True)
         original = native.digest(Path(config["binary"]))
         rejected = install(packages[1], expect=False)
-        assert rejected.returncode != 0 and native.digest(Path(config["binary"])) == original
-        assert hung.poll() is None
+        if not (rejected.returncode != 0 and native.digest(Path(config["binary"])) == original):
+            raise AssertionError
+        if not (hung.poll() is None):
+            raise AssertionError
         hung.terminate()
         hung.wait(timeout=3)
         event("accepted-stop-timeout-preserves-payload")
         install(packages[1])
-        assert state() == "verified" and native.digest(Path(config["binary"])) != original
+        if not (state() == "verified" and native.digest(Path(config["binary"])) != original):
+            raise AssertionError
         event("downgrade-verified")
         broken = install(packages[3], expect=False)
-        assert state() == "recovery-needed"
+        if not (state() == "recovery-needed"):
+            raise AssertionError
         blocked = command([config["launcher"], "--lifecycle", "identity"], expect=False)
-        assert blocked.returncode != 0
+        if not (blocked.returncode != 0):
+            raise AssertionError
         event("failed-configuration-blocks-launch", managerReturncode=broken.returncode)
         install(packages[2])
-        assert state() == "verified"
+        if not (state() == "verified"):
+            raise AssertionError
         event("package-manager-repair-verified")
         resident = launch(1000)
         removal = {"deb": ["dpkg", "--remove", "licasa"], "rpm": ["rpm", "-e", "licasa-appimage"],
                    "arch": ["pacman", "-R", "--noconfirm", "licasa-appimage"]}[manager]
         command(removal)
         resident.wait(timeout=3)
-        assert not Path(config["binary"]).exists() and state() == "removed"
+        if not (not Path(config["binary"]).exists() and state() == "removed"):
+            raise AssertionError
         event("running-uninstall-exits-owned-predecessor")
         if manager == "deb":
             command(["dpkg", "--purge", "licasa"])
-            assert state() == "purged"
+            if not (state() == "purged"):
+                raise AssertionError
             journal = json.loads((Path("/var/lib/licasa/lifecycle") / installation / "transaction.json").read_text())
-            assert set(journal) == {"schema", "installation", "state", "updatedAt"}
+            if not (set(journal) == {"schema", "installation", "state", "updatedAt"}):
+                raise AssertionError
             event("purge-retires-root-history-keeps-user-data")
         install(packages[1])
-        assert state() == "verified" and not native.processes(installation)
+        if not (state() == "verified" and not native.processes(installation)):
+            raise AssertionError
         event("remove-reinstall-verified-no-resurrection")
         report["result"] = "passed"
         report["cases"] = [item["action"] for item in trace if item["action"] != "manager"]
