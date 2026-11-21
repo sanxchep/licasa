@@ -455,6 +455,53 @@ Item {
         verify(valueControls.y + valueControls.height <= valueFrame.height - 8)
     }
 
+    function test_gnomeFullscreenOpacitySetting() {
+        const menu = createControl(settingsMenuComponent)
+        menu.smoothMotionEnabled = false
+        menu.gnomeWayland = true
+        menu.fullscreenOpacityEditable = false
+        menu.fullscreenBackgroundOpacity = 0.35
+        menu.panelOpen = true
+        const toggle = findChild(menu, "gnomeTopBarRow")
+        const row = findChild(menu, "fullscreenBackgroundOpacityRow")
+        verify(toggle && row)
+        verify(toggle.visible && !toggle.checked && !row.enabled)
+        compare(row.subtitle, "Turn on Show GNOME top bar to adjust background opacity.")
+        compare(row.formattedValue(), "35%")
+        verify(toggle.y < row.y)
+        const requested = createSpy(menu, "fullscreenBackgroundOpacityRequested")
+        const choice = createSpy(menu, "showGnomeTopBarRequested")
+        toggle.forceActiveFocus()
+        keyClick(Qt.Key_Space)
+        compare(choice.count, 1)
+        compare(choice.signalArguments[0][0], true)
+        menu.showGnomeTopBar = true
+        verify(!row.enabled)
+        menu.fullscreenOpacityEditable = true
+        row.forceActiveFocus()
+        keyClick(Qt.Key_Right)
+        keyClick(Qt.Key_Home)
+        keyClick(Qt.Key_End)
+        compare(requested.count, 3)
+        fuzzyCompare(requested.signalArguments[0][0], 0.40, 0.000001)
+        compare(requested.signalArguments[1][0], 0)
+        compare(requested.signalArguments[2][0], 1)
+        menu.fullscreenOpacityEditable = false
+        verify(toggle.activeFocus)
+        keyClick(Qt.Key_Left)
+        keyClick(Qt.Key_Home)
+        keyClick(Qt.Key_End)
+        compare(requested.count, 3)
+        compare(row.formattedValue(), "35%")
+
+        menu.panelOpen = true
+        menu.gnomeWayland = false
+        verify(!toggle.visible && !row.enabled)
+        compare(row.subtitle, "Background opacity is unavailable in native Wayland fullscreen.")
+        menu.fullscreenOpacityEditable = true
+        verify(!toggle.visible && row.enabled)
+    }
+
     function test_settingsRowsRespondToKeyboard() {
         const toggle = createControl(toggleComponent)
         const toggleSpy = createSpy(toggle, "toggled")

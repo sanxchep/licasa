@@ -20,6 +20,11 @@ FocusScope {
 
     signal valueChangedByUser(real value)
 
+    function requestValue(value) {
+        if (enabled)
+            valueChangedByUser(value)
+    }
+
     function clampedValue(v) {
         return Math.max(from, Math.min(to, v))
     }
@@ -63,13 +68,14 @@ FocusScope {
                 ? root.subtitle + (unit.length > 0 ? ". " + unit : "") : unit
         }
         Accessible.focusable: activeFocusOnTab
+        Accessible.readOnly: !enabled
         Accessible.focused: activeFocus
-        Accessible.onIncreaseAction: root.valueChangedByUser(root.clampedValue(root.value + root.step))
-        Accessible.onDecreaseAction: root.valueChangedByUser(root.clampedValue(root.value - root.step))
+        Accessible.onIncreaseAction: root.requestValue(root.clampedValue(root.value + root.step))
+        Accessible.onDecreaseAction: root.requestValue(root.clampedValue(root.value - root.step))
         onValueChanged: {
             const displayed = Math.round(root.clampedValue(root.value) * root.accessibleMultiplier)
             if (value === displayed) return
-            root.valueChangedByUser(root.clampedValue(value / root.accessibleMultiplier))
+            root.requestValue(root.clampedValue(value / root.accessibleMultiplier))
             value = Math.round(root.clampedValue(root.value) * root.accessibleMultiplier)
         }
         Binding {
@@ -91,7 +97,7 @@ FocusScope {
             nextValue = root.to
         else
             return
-        root.valueChangedByUser(root.clampedValue(nextValue))
+        root.requestValue(root.clampedValue(nextValue))
         event.accepted = true
     }
 
@@ -193,7 +199,7 @@ FocusScope {
                 onPressed: root.forceActiveFocus()
                 onClicked: {
                     const nextValue = root.clampedValue(root.value - root.step)
-                    root.valueChangedByUser(nextValue)
+                    root.requestValue(nextValue)
                 }
             }
         }
@@ -258,7 +264,7 @@ FocusScope {
                 onPressed: root.forceActiveFocus()
                 onClicked: {
                     const nextValue = root.clampedValue(root.value + root.step)
-                    root.valueChangedByUser(nextValue)
+                    root.requestValue(nextValue)
                 }
             }
         }
@@ -273,7 +279,7 @@ FocusScope {
             cursorShape: Qt.PointingHandCursor
 
             function updateValue(mouseX) {
-                root.valueChangedByUser(root.valueForTrackX(mouseX, width))
+                root.requestValue(root.valueForTrackX(mouseX, width))
             }
 
             onPressed: function(mouse) {

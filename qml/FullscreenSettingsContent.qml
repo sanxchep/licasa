@@ -129,10 +129,42 @@ Column {
         }
     }
 
+    ToggleRow {
+        id: gnomeTopBarRow
+        objectName: "gnomeTopBarRow"
+        visible: content.menu.gnomeWayland
+        Accessible.ignored: !visible
+        width: parent.width
+        title: qsTr("Show GNOME top bar")
+        subtitle: qsTr("Show the top bar and allow adjusting background opacity in fullscreen")
+        checked: content.menu.showGnomeTopBar
+        buttonMotionDuration: content.menu.buttonMotionDuration
+        switchMotionDuration: content.menu.switchMotionDuration
+
+        onToggled: function(value) {
+            content.menu.showGnomeTopBarRequested(value)
+        }
+    }
+
     ValueRow {
+        objectName: "fullscreenBackgroundOpacityRow"
         width: parent.width
         title: qsTr("Background opacity")
-        subtitle: qsTr("Dark backdrop behind the image in fullscreen")
+        subtitle: {
+            if (enabled)
+                return qsTr("Dark backdrop behind the image in fullscreen")
+            if (content.menu.gnomeWayland)
+                return content.menu.showGnomeTopBar
+                    ? qsTr("Background opacity is available when the fullscreen viewer is maximized.")
+                    : qsTr("Turn on Show GNOME top bar to adjust background opacity.")
+            return qsTr("Background opacity is unavailable in native Wayland fullscreen.")
+        }
+        enabled: content.menu.fullscreenOpacityEditable
+        opacity: enabled ? 1.0 : 0.7
+        onEnabledChanged: {
+            if (!enabled && focus && gnomeTopBarRow.visible)
+                gnomeTopBarRow.forceActiveFocus()
+        }
         value: content.menu.fullscreenBackgroundOpacity
         step: 0.05
         buttonMotionDuration: content.menu.buttonMotionDuration

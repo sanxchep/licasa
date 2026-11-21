@@ -1,9 +1,12 @@
 #include "platform/native_window_ops.h"
 
 #include <QCursor>
+#include <QEvent>
 #include <QGuiApplication>
+#include <QPointer>
 #include <QQuickWindow>
 #include <QScreen>
+#include <QStringList>
 #include <QUrl>
 
 #include <algorithm>
@@ -64,7 +67,10 @@ void setX11WindowOpacity(Display* display, Atom property, ::Window window, unsig
 
 } // namespace
 
-NativeWindowOps::NativeWindowOps(QObject* parent) : QObject(parent)
+NativeWindowOps::NativeWindowOps(QObject* parent)
+    : QObject(parent),
+      fullscreenPlatform_(fullscreenPlatform(QGuiApplication::platformName(),
+                                             qEnvironmentVariable("XDG_CURRENT_DESKTOP")))
 {
     for (QScreen* screen : QGuiApplication::screens()) {
         watchScreen(screen);
@@ -87,25 +93,130 @@ void NativeWindowOps::watchScreen(QScreen* screen)
     QObject::connect(screen, &QScreen::geometryChanged, this, [this] { emit screensChanged(); });
 }
 
+NativeWindowOps::FullscreenPlatform NativeWindowOps::fullscreenPlatform(const QString& qpa,
+                                                                        const QString& desktop)
+{
+    if (qpa != QStringLiteral("wayland") && !qpa.startsWith(QStringLiteral("wayland-"))) {
+        return FullscreenPlatform::Other;
+    }
+    return desktop.split(QLatin1Char(':')).contains(QStringLiteral("GNOME"), Qt::CaseInsensitive)
+               ? FullscreenPlatform::GnomeWayland
+               : FullscreenPlatform::NativeWayland;
+}
+
+bool NativeWindowOps::nativeWayland() const
+{
+    return fullscreenPlatform_ != FullscreenPlatform::Other;
+}
+
+bool NativeWindowOps::gnomeWayland() const
+{
+    return fullscreenPlatform_ == FullscreenPlatform::GnomeWayland;
+}
+
 bool NativeWindowOps::startSystemMove(QObject* windowObject) const
 {
     auto* window = qobject_cast<QQuickWindow*>(windowObject);
     return window && window->startSystemMove();
 }
 
-bool NativeWindowOps::showWindow(QObject* windowObject, bool fullScreen) const
+bool NativeWindowOps::showWindow(QObject* windowObject, bool fullScreen, bool showGnomeTopBar)
 {
     auto* window = qobject_cast<QQuickWindow*>(windowObject);
     if (!window) {
         return false;
     }
 
-    if (fullScreen) {
+    if (gnomeWayland()) {
+        if (!gnomeWindowStates_.contains(window)) {
+            window->installEventFilter(this);
+            connect(window, &QObject::destroyed, this,
+                    [this, window] { gnomeWindowStates_.remove(window); });
+        }
+        auto& state = gnomeWindowStates_[window];
+        state.target = !fullScreen       ? Qt::WindowNoState
+                       : showGnomeTopBar ? Qt::WindowMaximized
+                                         : Qt::WindowFullScreen;
+        applyGnomeWindowState(window);
+    } else if (fullScreen) {
         window->showFullScreen();
     } else {
         window->showNormal();
     }
     return true;
+}
+
+void NativeWindowOps::applyGnomeWindowState(QQuickWindow* window)
+{
+    auto& state = gnomeWindowStates_[window];
+    if (state.leavingOccupiedState || state.requested == state.target) {
+        return;
+    }
+
+    // Qt 6.4 sends set_maximized before unset_fullscreen. Mutter can then
+    // configure a maximized window with its old floating bounds. Leave the
+    // occupied state first and send the latest request after the normal configure.
+    state.leavingOccupiedState = state.target != Qt::WindowNoState &&
+                                 state.effective != Qt::WindowNoState &&
+                                 state.effective != state.target;
+    state.replacingPendingMaximization = state.target == Qt::WindowFullScreen &&
+                                         state.requested == Qt::WindowMaximized &&
+                                         state.effective == Qt::WindowNoState;
+    state.requested = state.leavingOccupiedState ? Qt::WindowNoState : state.target;
+    switch (*state.requested) {
+    case Qt::WindowMaximized:
+        window->showMaximized();
+        break;
+    case Qt::WindowFullScreen:
+        window->showFullScreen();
+        break;
+    default:
+        window->showNormal();
+        break;
+    }
+}
+
+bool NativeWindowOps::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() != QEvent::Hide && event->type() != QEvent::WindowStateChange) {
+        return QObject::eventFilter(watched, event);
+    }
+    auto* window = static_cast<QQuickWindow*>(watched);
+    if (event->type() == QEvent::Hide) {
+        gnomeWindowStates_[window] = {};
+    }
+    // QWindow reports requested states immediately. A spontaneous state event
+    // carries the compositor's configure.
+    if (event->type() == QEvent::WindowStateChange && event->spontaneous() && window->isVisible()) {
+        auto& state = gnomeWindowStates_[window];
+        state.effective = window->windowState();
+        emit fullscreenMaximizationChanged(window, state.effective == Qt::WindowMaximized);
+        const bool normalConfirmed =
+            state.leavingOccupiedState && state.effective == Qt::WindowNoState;
+        const bool supersededMaximization = state.replacingPendingMaximization &&
+                                            state.target == Qt::WindowFullScreen &&
+                                            window->windowStates().testFlag(Qt::WindowMaximized);
+        if (supersededMaximization) {
+            // The fullscreen request sent while maximization was pending did
+            // not unset it. Reconcile the latest target once Qt sees the old state.
+            state.replacingPendingMaximization = false;
+            state.requested.reset();
+        }
+        if (normalConfirmed || supersededMaximization) {
+            if (normalConfirmed) {
+                state.leavingOccupiedState = false;
+            }
+            QMetaObject::invokeMethod(
+                this,
+                [this, window = QPointer<QQuickWindow>(window)] {
+                    if (window && window->isVisible()) {
+                        applyGnomeWindowState(window);
+                    }
+                },
+                Qt::QueuedConnection);
+        }
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 QVariantMap NativeWindowOps::currentWindowGeometry(QObject* windowObject) const

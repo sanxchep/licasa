@@ -1,3 +1,5 @@
+#include "platform/native_window_ops.h"
+
 #include <QAccessible>
 #include <QGuiApplication>
 #include <QQmlComponent>
@@ -85,6 +87,66 @@ class AccessibilityControlsTest final : public QObject {
                      QString("Dark backdrop behind the image. Value in percent"));
         }
     }
+    void fullscreenDesktop_data()
+    {
+        using Platform = NativeWindowOps::FullscreenPlatform;
+        QTest::addColumn<QString>("qpa");
+        QTest::addColumn<QString>("desktop");
+        QTest::addColumn<int>("platform");
+        QTest::newRow("GNOME") << QString("wayland") << QString("GNOME")
+                               << int(Platform::GnomeWayland);
+        QTest::newRow("Ubuntu GNOME")
+            << QString("wayland-egl") << QString("ubuntu:GNOME") << int(Platform::GnomeWayland);
+        QTest::newRow("KDE") << QString("wayland") << QString("KDE")
+                             << int(Platform::NativeWayland);
+        QTest::newRow("missing") << QString("wayland") << QString() << int(Platform::NativeWayland);
+        QTest::newRow("partial token")
+            << QString("wayland") << QString("notGNOME:ubuntu") << int(Platform::NativeWayland);
+        QTest::newRow("XWayland") << QString("xcb") << QString("GNOME") << int(Platform::Other);
+    }
+
+    void fullscreenDesktop()
+    {
+        QFETCH(QString, qpa);
+        QFETCH(QString, desktop);
+        QFETCH(int, platform);
+        QCOMPARE(int(NativeWindowOps::fullscreenPlatform(qpa, desktop)), platform);
+    }
+
+    void disabledSettingsSliderRejectsAccessibleEdits()
+    {
+        QQmlEngine engine;
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(
+                                             LICASA_SOURCE_DIR "/qml/components/ValueRow.qml")));
+        std::unique_ptr<QObject> control(
+            component.createWithInitialProperties({{"title", "Background opacity"},
+                                                   {"subtitle", "Enable the top bar to adjust"},
+                                                   {"value", 0.35},
+                                                   {"enabled", false}}));
+        QVERIFY2(control, qPrintable(component.errorString()));
+        auto* slider = control->findChild<QObject*>("settingsAccessibleSlider");
+        auto* accessible = QAccessible::queryAccessibleInterface(slider);
+        QVERIFY(accessible);
+        QVERIFY(accessible->state().readOnly);
+        QVERIFY(!accessible->state().focusable);
+        QCOMPARE(accessible->text(QAccessible::Description),
+                 QString("Enable the top bar to adjust. Value in percent"));
+        auto* actions = accessible->actionInterface();
+        auto* values = accessible->valueInterface();
+        QVERIFY(actions && values);
+        QSignalSpy requested(control.get(), SIGNAL(valueChangedByUser(double)));
+        actions->doAction(QAccessibleActionInterface::increaseAction());
+        actions->doAction(QAccessibleActionInterface::decreaseAction());
+        values->setCurrentValue(50);
+        QCOMPARE(requested.size(), 0);
+        QCOMPARE(values->currentValue().toInt(), 35);
+
+        QVERIFY(control->setProperty("enabled", true));
+        values->setCurrentValue(50);
+        QCOMPARE(requested.size(), 1);
+        QCOMPARE(requested.first().first().toDouble(), 0.5);
+    }
+
     void readableValues_data()
     {
         QTest::addColumn<QString>("file");
