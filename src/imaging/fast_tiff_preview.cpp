@@ -144,10 +144,10 @@ QImage readFastTiffPreview(const QString& path, const QSize& requestedSize,
 
     uint16_t fillOrder = 0;
     const bool sampleRawRows = !gray16 && compression == COMPRESSION_NONE &&
-        quint64(width) * height >= 25000000 &&
-        scanlineBytes == tmsize_t(quint64(width) * bytesPerPixel) &&
-        TIFFGetFieldDefaulted(tiff.get(), TIFFTAG_FILLORDER, &fillOrder) &&
-        fillOrder == FILLORDER_MSB2LSB;
+                               quint64(width) * height >= 25000000 &&
+                               scanlineBytes == tmsize_t(quint64(width) * bytesPerPixel) &&
+                               TIFFGetFieldDefaulted(tiff.get(), TIFFTAG_FILLORDER, &fillOrder) &&
+                               fillOrder == FILLORDER_MSB2LSB;
     const thandle_t handle = TIFFClientdata(tiff.get());
     const quint64 fileSize = sampleRawRows ? TIFFGetSizeProc(tiff.get())(handle) : 0;
 
