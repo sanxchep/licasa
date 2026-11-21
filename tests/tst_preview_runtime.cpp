@@ -21,9 +21,9 @@ QColor rgbaValue(int x, int y, bool alpha)
 }
 
 bool writeTiff(const QString& path, const QSize& size, bool gray, bool white, bool alpha,
-               bool compressed)
+               bool compressed, bool bigTiff = false)
 {
-    TIFF* tiff = TIFFOpen(QFile::encodeName(path).constData(), "w");
+    TIFF* tiff = TIFFOpen(QFile::encodeName(path).constData(), bigTiff ? "w8" : "w");
     if (!tiff) {
         return false;
     }
@@ -38,7 +38,7 @@ bool writeTiff(const QString& path, const QSize& size, bool gray, bool white, bo
     TIFFSetField(tiff, TIFFTAG_COMPRESSION,
                  compressed ? COMPRESSION_ADOBE_DEFLATE : COMPRESSION_NONE);
     TIFFSetField(tiff, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tiff, TIFFTAG_ROWSPERSTRIP, 3);
+    TIFFSetField(tiff, TIFFTAG_ROWSPERSTRIP, bigTiff ? 128 : 3);
     TIFFSetField(tiff, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
     if (alpha) {
         uint16_t extra = EXTRASAMPLE_UNASSALPHA;
@@ -78,6 +78,34 @@ class PreviewRuntimeTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void largeUncompressedBigTiff()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("large.tiff"));
+        const QSize source(10000, 2501);
+        const QSize request(401, 101);
+        QVERIFY(writeTiff(path, source, false, false, true, false, true));
+
+        std::atomic_bool cancelled{false};
+        const QImage image =
+            Licasa::readFastTiffPreview(path, request, 2'000'000, 8 * 1024 * 1024, &cancelled);
+        QVERIFY(!image.isNull());
+        QCOMPARE(image.size(), source.scaled(request, Qt::KeepAspectRatio));
+        QCOMPARE(image.format(), QImage::Format_RGBA8888);
+        QCOMPARE(image.colorSpace(), QColorSpace(QColorSpace::DisplayP3));
+        for (int y = 0; y < image.height(); ++y) {
+            const int sourceY = int(qint64(y) * source.height() / image.height());
+            for (int x = 0; x < image.width(); ++x) {
+                const int sourceX = int(qint64(x) * source.width() / image.width());
+                QCOMPARE(image.pixelColor(x, y), rgbaValue(sourceX, sourceY, true));
+            }
+        }
+        cancelled.store(true);
+        QVERIFY(Licasa::readFastTiffPreview(path, request, 2'000'000, 8 * 1024 * 1024, &cancelled)
+                    .isNull());
+    }
+
     void sampledPixelsMatchSource_data()
     {
         QTest::addColumn<bool>("gray");
