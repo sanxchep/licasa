@@ -34,6 +34,16 @@ add_test(NAME licasa_offline_source_tests
 set_tests_properties(licasa_offline_source_tests PROPERTIES
         TIMEOUT 30 LABELS "packaging;offline;fast")
 
+option(LICASA_TEST_QT_XBM_BOUNDARIES "Test the patched Qt XBM reader in the AppImage build" OFF)
+if(LICASA_TEST_QT_XBM_BOUNDARIES)
+    add_executable(licasa_qt_xbm_boundaries tests/tst_qt_xbm_boundaries.cpp)
+    target_link_libraries(licasa_qt_xbm_boundaries PRIVATE Qt6::Gui)
+    licasa_enable_warnings(licasa_qt_xbm_boundaries)
+    list(APPEND LICASA_TEST_TARGETS licasa_qt_xbm_boundaries)
+    add_test(NAME licasa_qt_xbm_boundaries COMMAND licasa_qt_xbm_boundaries)
+    set_tests_properties(licasa_qt_xbm_boundaries PROPERTIES TIMEOUT 15 LABELS "packaging;fast")
+endif()
+
 add_executable(licasa_runtime_error_log_tests
         tests/tst_runtime_error_log.cpp src/app/runtime_error_log.cpp)
 target_include_directories(licasa_runtime_error_log_tests PRIVATE src)

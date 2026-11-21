@@ -36,8 +36,8 @@ def unpack(archive, directory):
     return source
 
 
-def patch_qtsvg(source):
-    patch = ROOT / "packaging/patches/qt-6.4.2-svg-inline-base64.patch"
+def patch_qt_module(source, filename):
+    patch = ROOT / "packaging/patches" / filename
     command = ["patch", "--batch", "--fuzz=0", "-p1", "-i", str(patch)]
     dry_run = subprocess.run(command + ["--forward", "--dry-run"], cwd=source,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -89,7 +89,7 @@ def build_application(work, output, tools_dir, jobs, sources, ffmpeg_source, *, 
     environment["LD_LIBRARY_PATH"] = f"{quick}:{environment['LD_LIBRARY_PATH']}"
     run("cmake", "-S", ROOT, "-B", build, "-G", "Ninja",
         "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr", "-DCMAKE_INSTALL_LIBDIR=lib",
-        "-DBUILD_TESTING=ON", "-DLICASA_ENABLE_IPO=OFF",
+        "-DBUILD_TESTING=ON", "-DLICASA_ENABLE_IPO=OFF", "-DLICASA_TEST_QT_XBM_BOUNDARIES=ON",
         *(f"-D{name}=ON" for name in REQUIRED_FEATURES),
         f"-DCMAKE_PREFIX_PATH={qt_prefix};{codec_prefix};{ffmpeg_prefix}",
         f"-DLICASA_QT_QUICK_BACKPORT_LIBRARY={quick / 'libQt6Quick.so.6.4.2'}",
@@ -156,7 +156,8 @@ def main():
 
     qt_work.mkdir(parents=True, exist_ok=True)
     sources = {module: unpack(archive, qt_work) for module, archive in archives.items()}
-    patch_qtsvg(sources["qtsvg"])
+    patch_qt_module(sources["qtbase"], "qt-6.4.2-xbm-split-token.patch")
+    patch_qt_module(sources["qtsvg"], "qt-6.4.2-svg-inline-base64.patch")
     ffmpeg_source = unpack(ffmpeg_archive, qt_work)
     ffmpeg_build = work / "build-ffmpeg"
     ffmpeg_build.mkdir(exist_ok=True)
