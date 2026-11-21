@@ -55,6 +55,8 @@ class AppImagePackagingTests(unittest.TestCase):
                      "usr/lib/licasa/plugins/multimedia/libffmpegmediaplugin.so",
                      "usr/lib/licasa/plugins/imageformats/liblicasa_jp2_plugin.so"):
             self.write(self.payload / name)
+        # The portable builder installs into a private TemporaryDirectory.
+        self.payload.chmod(0o700)
         self.package = self.work / "fixture.deb"
         self.write(self.package)
         self.output = self.work / "output"
@@ -114,6 +116,7 @@ class AppImagePackagingTests(unittest.TestCase):
                         shutil.copy2(source, appdir / "usr/lib" / source.name)
         elif name == "appimagetool-x86_64.AppImage":
             appdir = Path(command[-2])
+            self.assertEqual(appdir.stat().st_mode & 0o777, 0o755)
             self.assertIn("--family appimage", (appdir / "AppRun").read_text())
             self.assertIn("AppRun.wrapped", (appdir / "AppRun.lifecycle-original").read_text())
             self.assertNotIn("QT_QPA_PLATFORMTHEME=", (appdir / "apprun-hooks/linuxdeploy-plugin-qt-hook.sh").read_text())
