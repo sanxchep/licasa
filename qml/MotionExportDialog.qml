@@ -30,5 +30,5 @@ FileDialog {
     defaultSuffix: suggestedSuffix.toLowerCase()
 
     Component.onCompleted: selectedFile = suggestedFile
-    onAccepted: fileChosen(selectedFile)
+    onAccepted: fileChosen(DialogRuntime.destinationUrl(selectedFile))
 }

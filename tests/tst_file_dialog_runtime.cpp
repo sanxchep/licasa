@@ -4,6 +4,7 @@
 #include <QGuiApplication>
 #include <QQmlComponent>
 #include <QQmlEngine>
+#include <QQmlExpression>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QRegularExpression>
@@ -21,6 +22,7 @@ class FileDialogRuntimeTest final : public QObject {
     void dialogs_data()
     {
         QTest::addColumn<QString>("file");
+        QTest::addColumn<QString>("typedSuffix");
         const QDir directory(QStringLiteral(LICASA_SOURCE_DIR "/qml"));
         int wrappers = 0;
         for (const auto& name : directory.entryList({QStringLiteral("*.qml")}, QDir::Files)) {
@@ -35,15 +37,24 @@ class FileDialogRuntimeTest final : public QObject {
                 continue;
             }
             const QString base = QFileInfo(name).completeBaseName();
-            QTest::newRow(qPrintable(base)) << base;
+            QTest::newRow(qPrintable(base)) << base << QString();
             ++wrappers;
         }
         QVERIFY2(wrappers > 0, "No production FileDialog wrappers were discovered");
+        if (!qEnvironmentVariableIsSet("LICASA_TEST_MISSING_DIALOG_MODULE")) {
+            QTest::newRow("typed-frame")
+                << QStringLiteral("FrameSaveDialog") << QStringLiteral("png");
+            QTest::newRow("typed-motion")
+                << QStringLiteral("MotionExportDialog") << QStringLiteral("mov");
+            QTest::newRow("typed-animation")
+                << QStringLiteral("AnimationExportDialog") << QStringLiteral("apng");
+        }
     }
 
     void dialogs()
     {
         QFETCH(QString, file);
+        QFETCH(QString, typedSuffix);
         QQmlEngine engine;
         QTemporaryDir isolated;
         QVERIFY(isolated.isValid());
@@ -85,9 +96,11 @@ class FileDialogRuntimeTest final : public QObject {
         QVERIFY2(component.isReady(), qPrintable(component.errorString()));
         const QVariantMap formats{{"nameFilters", QStringList{"Images (*.png)"}},
                                   {"saveNameFilters", QStringList{"PNG (*.png)"}}};
-        QVariantMap initial{{"formatSupport", formats},
-                            {"suggestedFile", QUrl::fromLocalFile(isolated.filePath("copy.png"))},
-                            {"suggestedSuffix", QStringLiteral("png")}};
+        const QString suffix = typedSuffix.isEmpty() ? QStringLiteral("png") : typedSuffix;
+        QVariantMap initial{
+            {"formatSupport", formats},
+            {"suggestedFile", QUrl::fromLocalFile(isolated.filePath("copy." + suffix))},
+            {"suggestedSuffix", suffix}};
         std::unique_ptr<QObject> dialog(component.beginCreate(engine.rootContext()));
         QVERIFY2(dialog, qPrintable(component.errorString()));
         QVERIFY2(dialog->inherits("QQuickFileDialog"),
@@ -118,29 +131,70 @@ class FileDialogRuntimeTest final : public QObject {
                 QVERIFY(!dialog->property("visible").toBool());
             } else {
                 QTRY_VERIFY(dialog->property("visible").toBool());
-                bool fallbackVisible = false;
+                QObject* picker = nullptr;
                 for (auto* object : window.findChildren<QObject*>()) {
                     if (object->inherits("QQuickFileDialogImpl") &&
                         object->property("visible").toBool()) {
-                        fallbackVisible = true;
+                        picker = object;
+                        break;
                     }
                 }
-                QVERIFY2(fallbackVisible, "Qt fallback picker content did not become visible");
-                QQuickItem* content = nullptr;
-                for (auto* object : window.findChildren<QObject*>()) {
-                    if (object->inherits("QQuickFileDialogImpl") &&
-                        object->property("visible").toBool()) {
-                        content = qobject_cast<QQuickItem*>(
-                            object->property("contentItem").value<QObject*>());
-                    }
-                }
+                QVERIFY2(picker, "Qt fallback picker content did not become visible");
+                auto* content =
+                    qobject_cast<QQuickItem*>(picker->property("contentItem").value<QObject*>());
                 QVERIFY(content);
                 QTRY_VERIFY(content->window() && content->window()->isExposed());
+                if (!typedSuffix.isEmpty()) {
+                    checkTypedDestination(dialog.get(), picker, content->window(),
+                                          isolated.filePath("typed." + typedSuffix));
+                    return;
+                }
                 QTest::keyClick(content->window(), Qt::Key_Escape);
                 QTRY_VERIFY(!dialog->property("visible").toBool());
                 QCOMPARE(rejected.count(), cycle + 1);
             }
         }
+    }
+
+  private:
+    void checkTypedDestination(QObject* dialog, QObject* picker, QQuickWindow* window,
+                               const QString& expectedPath)
+    {
+        QSignalSpy chosen(dialog, SIGNAL(fileChosen(QUrl)));
+        QVERIFY(chosen.isValid());
+        auto* field = picker->findChild<QQuickItem*>(QStringLiteral("fileNameTextField"));
+        QVERIFY(field);
+        field->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+        for (const char key : QByteArrayLiteral("typed")) {
+            QTest::keyClick(window, key);
+        }
+        QCOMPARE(field->property("text").toString(), QStringLiteral("typed"));
+
+        QQuickItem* box = nullptr;
+        for (auto* item : picker->findChildren<QQuickItem*>()) {
+            if (item->inherits("QQuickDialogButtonBox") && item->isVisible()) {
+                box = item;
+                break;
+            }
+        }
+        QVERIFY(box);
+        QQmlExpression accept(qmlContext(box), box,
+                              QStringLiteral("standardButton(DialogButtonBox.Save) || "
+                                             "standardButton(DialogButtonBox.Open)"));
+        auto* button = qobject_cast<QQuickItem*>(accept.evaluate().value<QObject*>());
+        QVERIFY2(!accept.hasError(), qPrintable(accept.error().toString()));
+        QVERIFY(button && button->isVisible() && button->isEnabled());
+        QTest::mouseClick(
+            window, Qt::LeftButton, Qt::NoModifier,
+            button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(chosen.count(), 1);
+        const QUrl emitted = chosen.first().first().toUrl();
+        qInfo().noquote() << "fileChosen:" << emitted.toString()
+                          << "local:" << emitted.isLocalFile() << "path:" << emitted.toLocalFile();
+        QVERIFY(emitted.isLocalFile());
+        QCOMPARE(emitted.toLocalFile(), expectedPath);
     }
 };
 
