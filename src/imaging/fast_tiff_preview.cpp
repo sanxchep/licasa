@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -141,6 +142,15 @@ QImage readFastTiffPreview(const QString& path, const QSize& requestedSize,
         return {};
     }
 
+    uint16_t fillOrder = 0;
+    const bool sampleRawRows = !gray16 && compression == COMPRESSION_NONE &&
+                               quint64(width) * height >= 25000000 &&
+                               scanlineBytes == tmsize_t(quint64(width) * bytesPerPixel) &&
+                               TIFFGetFieldDefaulted(tiff.get(), TIFFTAG_FILLORDER, &fillOrder) &&
+                               fillOrder == FILLORDER_MSB2LSB;
+    const thandle_t handle = TIFFClientdata(tiff.get());
+    const quint64 fileSize = sampleRawRows ? TIFFGetSizeProc(tiff.get())(handle) : 0;
+
     const int outputBytesPerPixel = gray16 ? 1 : bytesPerPixel;
     const quint64 pixelLimit =
         std::min(maximumOutputPixels, quint64(maximumOutputBytes) / quint64(outputBytesPerPixel));
@@ -185,7 +195,10 @@ QImage readFastTiffPreview(const QString& path, const QSize& requestedSize,
     };
 
     std::vector<quint16> grayScanline(gray16 ? size_t((scanlineBytes + 1) / 2) : 0);
-    std::vector<quint16> stripBuffer(gray16 ? 0 : size_t((stripBytes + 1) / 2));
+    std::vector<quint16> stripBuffer(
+        gray16 ? 0 : size_t(((sampleRawRows ? scanlineBytes : stripBytes) + 1) / 2));
+    quint64 rawStripOffset = 0;
+    quint64 rawStripBytes = 0;
     tstrip_t loadedStrip = std::numeric_limits<tstrip_t>::max();
     tmsize_t loadedBytes = 0;
     for (int y = 0; y < target.height(); ++y) {
@@ -199,6 +212,32 @@ QImage readFastTiffPreview(const QString& path, const QSize& requestedSize,
                 return {};
             }
             sourceBytes = reinterpret_cast<const uchar*>(grayScanline.data());
+        } else if (sampleRawRows) {
+            const tstrip_t strip = TIFFComputeStrip(tiff.get(), sourceY, 0);
+            if (strip != loadedStrip) {
+                int offsetError = 0;
+                int countError = 0;
+                rawStripOffset = TIFFGetStrileOffsetWithErr(tiff.get(), strip, &offsetError);
+                rawStripBytes = TIFFGetStrileByteCountWithErr(tiff.get(), strip, &countError);
+                if (offsetError || countError || !rawStripOffset || rawStripOffset > fileSize ||
+                    rawStripBytes > fileSize - rawStripOffset) {
+                    return {};
+                }
+                loadedStrip = strip;
+            }
+            const quint64 rowOffset = quint64(sourceY % rowsPerStrip) * quint64(scanlineBytes);
+            if (rowOffset > rawStripBytes || quint64(scanlineBytes) > rawStripBytes - rowOffset) {
+                return {};
+            }
+            // With no compression or bit reversal, these 8-bit samples are
+            // already in output channel order. Read from the same TIFF handle.
+            const quint64 position = rawStripOffset + rowOffset;
+            if (TIFFGetSeekProc(tiff.get())(handle, position, SEEK_SET) != position ||
+                TIFFGetReadProc(tiff.get())(handle, stripBuffer.data(), scanlineBytes) !=
+                    scanlineBytes) {
+                return {};
+            }
+            sourceBytes = reinterpret_cast<const uchar*>(stripBuffer.data());
         } else {
             const tstrip_t strip = TIFFComputeStrip(tiff.get(), sourceY, 0);
             if (strip != loadedStrip) {

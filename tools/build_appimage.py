@@ -36,6 +36,17 @@ def unpack(archive, directory):
     return source
 
 
+def patch_qtsvg(source):
+    patch = ROOT / "packaging/patches/qt-6.4.2-svg-inline-base64.patch"
+    command = ["patch", "--batch", "--fuzz=0", "-p1", "-i", str(patch)]
+    dry_run = subprocess.run(command + ["--forward", "--dry-run"], cwd=source,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if dry_run.returncode == 0:
+        run(*command, "--forward", cwd=source)
+    else:
+        run(*command, "--reverse", "--dry-run", cwd=source)
+
+
 def build_qt(sources, work, prefix, python, dep_args, jobs, environment):
     options = {
         "qtbase": ["-DFEATURE_xcb=ON", "-DFEATURE_gtk3=ON", "-DFEATURE_glib=ON",
@@ -145,6 +156,7 @@ def main():
 
     qt_work.mkdir(parents=True, exist_ok=True)
     sources = {module: unpack(archive, qt_work) for module, archive in archives.items()}
+    patch_qtsvg(sources["qtsvg"])
     ffmpeg_source = unpack(ffmpeg_archive, qt_work)
     ffmpeg_build = work / "build-ffmpeg"
     ffmpeg_build.mkdir(exist_ok=True)
