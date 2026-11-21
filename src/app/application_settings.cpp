@@ -89,6 +89,7 @@ bool hasCompatibleAutostartOwner(const QMap<QByteArray, QByteArray>& fields,
 }
 
 const QString startInFullscreenKey = QStringLiteral("viewer/startInFullscreen");
+const QString showGnomeTopBarKey = QStringLiteral("viewer/showGnomeTopBar");
 const QString fullscreenBackgroundOpacityKey = QStringLiteral("viewer/fullscreenBackgroundOpacity");
 const QString transparencyCheckerboardEnabledKey =
     QStringLiteral("viewer/transparencyCheckerboardEnabled");
@@ -441,6 +442,11 @@ bool ViewerPreferences::startInFullscreen() const
     return settings_.value(startInFullscreenKey, true).toBool();
 }
 
+bool ViewerPreferences::showGnomeTopBar() const
+{
+    return settings_.value(showGnomeTopBarKey).toString() == QStringLiteral("true");
+}
+
 qreal ViewerPreferences::fullscreenBackgroundOpacity() const
 {
     constexpr qreal defaultValue = 179.0 / 255.0;
@@ -564,6 +570,16 @@ void ViewerPreferences::setStartInFullscreen(bool value)
 
     storeValue(startInFullscreenKey, value);
     emit startInFullscreenChanged();
+}
+
+void ViewerPreferences::setShowGnomeTopBar(bool value)
+{
+    if (showGnomeTopBar() == value) {
+        return;
+    }
+
+    storeValue(showGnomeTopBarKey, value);
+    emit showGnomeTopBarChanged();
 }
 
 void ViewerPreferences::setFullscreenBackgroundOpacity(qreal value)

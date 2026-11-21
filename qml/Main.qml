@@ -149,6 +149,24 @@ Window {
     property string lastPresentedParallelPairId: ""
     property double imageOpenStartedMs: -1
 
+    readonly property bool gnomeWayland: nativeWindowOps.gnomeWayland === true
+    readonly property bool showGnomeTopBar: gnomeWayland && viewerPreferences.showGnomeTopBar === true
+    property bool compositorMaximized: false
+    Connections {
+        target: root.nativeWindowOps
+        function onFullscreenMaximizationChanged(window, maximized) {
+            if (window === root)
+                root.compositorMaximized = root.showGnomeTopBar && root.fullScreenMode && maximized
+        }
+    }
+    readonly property bool fullscreenOpacityEditable: nativeWindowOps.nativeWayland !== true
+        || (showGnomeTopBar && fullScreenMode && visible && compositorMaximized
+            && visibility === Window.Maximized)
+    onShowGnomeTopBarChanged: {
+        if (fullScreenMode && visible)
+            syncWindowVisibility()
+    }
+
     readonly property real fullscreenBackdropOpacity: viewerPreferences.fullscreenBackgroundOpacity
     readonly property bool transparencyCheckerboardEnabled: viewerPreferences.transparencyCheckerboardEnabled
     readonly property real transparencyCheckerboardOpacity: viewerPreferences.transparencyCheckerboardOpacity
@@ -1023,7 +1041,7 @@ Window {
         if (!root.visible)
             return
 
-        nativeWindowOps.showWindow(root, root.fullScreenMode)
+        nativeWindowOps.showWindow(root, root.fullScreenMode, root.showGnomeTopBar)
     }
 
     function setFullScreenState(enabled) {
@@ -1424,7 +1442,13 @@ Window {
         // Clearing pendingImageReveal first briefly deactivates its controller
         // from inside Image.onStatusChanged, resetting the source binding and
         // starting a second native decode of the same frame.
-        root.visible = true
+        if (root.gnomeWayland) {
+            // Apply the current preference before Wayland recreates the role
+            // with the previous native state of a hidden background viewer.
+            nativeWindowOps.showWindow(root, root.fullScreenMode, root.showGnomeTopBar)
+        } else {
+            root.visible = true
+        }
         pendingImageReveal = false
         syncWindowVisibility()
         root.raise()
@@ -2662,6 +2686,7 @@ Window {
             if (!root.hasAssignedImage())
                 root.scheduleOpenActionFocus()
         } else {
+            root.compositorMaximized = false
             dismissKeyboardShortcuts(false)
             stopMotionPhotoPlaybackForLifecycle()
             resourceReleaseTimer.restart()
@@ -3448,6 +3473,9 @@ Window {
             infoOverlayEnabled: root.infoOverlayEnabled
             smoothMotionEnabled: root.smoothMenuMotionEnabled
             startInFullscreenEnabled: root.viewerPreferences.startInFullscreen
+            gnomeWayland: root.gnomeWayland
+            showGnomeTopBar: root.showGnomeTopBar
+            fullscreenOpacityEditable: root.fullscreenOpacityEditable
             fullscreenBackgroundOpacity: root.viewerPreferences.fullscreenBackgroundOpacity
             transparencyCheckerboardEnabled: root.viewerPreferences.transparencyCheckerboardEnabled
             transparencyCheckerboardOpacity: root.viewerPreferences.transparencyCheckerboardOpacity
@@ -3487,8 +3515,14 @@ Window {
                 root.viewerPreferences.startInFullscreen = enabled
             }
 
+            onShowGnomeTopBarRequested: function(checked) {
+                if (root.gnomeWayland)
+                    root.viewerPreferences.showGnomeTopBar = checked
+            }
+
             onFullscreenBackgroundOpacityRequested: function(value) {
-                root.viewerPreferences.fullscreenBackgroundOpacity = value
+                if (root.fullscreenOpacityEditable)
+                    root.viewerPreferences.fullscreenBackgroundOpacity = value
             }
 
             onTransparencyCheckerboardChanged: function(enabled) {

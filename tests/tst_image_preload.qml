@@ -121,7 +121,8 @@ Item {
                 function traceZoom(phase, scale) {}
                 function releaseWindowResources(window) {}
                 function trimProcessMemory() {}
-                function showWindow(window, fullScreen) { return true }
+                signal fullscreenMaximizationChanged(var window, bool maximized)
+                function showWindow(window, fullScreen, showGnomeTopBar) { return true }
             }
             backgroundModeManager: QtObject {
                 property bool enabled: false

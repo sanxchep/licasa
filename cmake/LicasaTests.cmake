@@ -508,7 +508,10 @@ if(LICASA_ENABLE_HEIF)
             TIMEOUT 90 LABELS "codec;heif;security")
 endif()
 
-add_executable(licasa_accessibility_tests tests/tst_accessibility_controls.cpp)
+add_executable(licasa_accessibility_tests
+        tests/tst_accessibility_controls.cpp
+        src/platform/native_window_ops.cpp)
+target_include_directories(licasa_accessibility_tests PRIVATE src)
 target_link_libraries(licasa_accessibility_tests PRIVATE Qt6::Quick Qt6::Qml Qt6::Test)
 target_compile_definitions(licasa_accessibility_tests PRIVATE
         LICASA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

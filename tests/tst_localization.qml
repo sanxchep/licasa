@@ -96,6 +96,20 @@ Item {
             verify(choice.visible)
         }
 
+        function test_gnomeOpacityExplanationFitsSwedishDrawer() {
+            const drawer = openDrawer(320)
+            drawer.gnomeWayland = true
+            drawer.fullscreenOpacityEditable = false
+            verify(testLanguageManager.selectLanguage("sv"))
+            const toggle = findChild(drawer, "gnomeTopBarRow")
+            const row = findChild(drawer, "fullscreenBackgroundOpacityRow")
+            compare(toggle.Accessible.name, "Visa GNOMEs överkantspanel")
+            const explanation = findChild(row, "valueRowSubtitle")
+            const controls = findChild(row, "valueRowControls")
+            verify(explanation.text.indexOf("överkantspanel") >= 0)
+            verify(explanation.y + explanation.height < controls.y)
+        }
+
         function test_languageFailureRemainsVisibleAndAccessible() {
             const drawer = openDrawer(320)
             const choice = findChild(drawer, "languageChoice")
