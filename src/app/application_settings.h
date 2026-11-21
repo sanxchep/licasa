@@ -42,6 +42,8 @@ class ViewerPreferences final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool startInFullscreen READ startInFullscreen WRITE setStartInFullscreen NOTIFY
                    startInFullscreenChanged)
+    Q_PROPERTY(bool showGnomeTopBar READ showGnomeTopBar WRITE setShowGnomeTopBar NOTIFY
+                   showGnomeTopBarChanged)
     Q_PROPERTY(qreal fullscreenBackgroundOpacity READ fullscreenBackgroundOpacity WRITE
                    setFullscreenBackgroundOpacity NOTIFY fullscreenBackgroundOpacityChanged)
     Q_PROPERTY(bool transparencyCheckerboardEnabled READ transparencyCheckerboardEnabled WRITE
@@ -83,6 +85,7 @@ class ViewerPreferences final : public QObject {
     explicit ViewerPreferences(QObject* parent = nullptr);
 
     bool startInFullscreen() const;
+    bool showGnomeTopBar() const;
     qreal fullscreenBackgroundOpacity() const;
     bool transparencyCheckerboardEnabled() const;
     qreal transparencyCheckerboardOpacity() const;
@@ -105,6 +108,7 @@ class ViewerPreferences final : public QObject {
 
   public slots:
     void setStartInFullscreen(bool value);
+    void setShowGnomeTopBar(bool value);
     void setFullscreenBackgroundOpacity(qreal value);
     void setTransparencyCheckerboardEnabled(bool value);
     void setTransparencyCheckerboardOpacity(qreal value);
@@ -123,6 +127,7 @@ class ViewerPreferences final : public QObject {
 
   signals:
     void startInFullscreenChanged();
+    void showGnomeTopBarChanged();
     void fullscreenBackgroundOpacityChanged();
     void transparencyCheckerboardEnabledChanged();
     void transparencyCheckerboardOpacityChanged();

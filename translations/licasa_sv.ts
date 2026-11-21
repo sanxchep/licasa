@@ -824,6 +824,26 @@
     <context>
         <name>FullscreenSettingsContent</name>
         <message>
+        <source>Show GNOME top bar</source>
+        <translation>Visa GNOMEs överkantspanel</translation>
+    </message>
+    <message>
+        <source>Show the top bar and allow adjusting background opacity in fullscreen</source>
+        <translation>Visa överkantspanelen och gör det möjligt att justera bakgrundens opacitet i helskärmsläge</translation>
+    </message>
+    <message>
+        <source>Background opacity is available when the fullscreen viewer is maximized.</source>
+        <translation>Bakgrundens opacitet kan justeras när helskärmsvisningen är maximerad.</translation>
+    </message>
+    <message>
+        <source>Turn on Show GNOME top bar to adjust background opacity.</source>
+        <translation>Aktivera Visa GNOMEs överkantspanel för att justera bakgrundens opacitet.</translation>
+    </message>
+    <message>
+        <source>Background opacity is unavailable in native Wayland fullscreen.</source>
+        <translation>Bakgrundens opacitet kan inte justeras i Waylands inbyggda helskärmsläge.</translation>
+    </message>
+    <message>
             <source>Language</source>
             <translation>Språk</translation>
         </message>

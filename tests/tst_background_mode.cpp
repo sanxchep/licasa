@@ -126,6 +126,47 @@ class BackgroundModeTests final : public QObject {
         home_.reset();
     }
 
+    void gnomeTopBarPreferencePreservesLegacyOpacity()
+    {
+        constexpr auto modeKey = "viewer/showGnomeTopBar";
+        constexpr auto opacityKey = "viewer/fullscreenBackgroundOpacity";
+        QSettings settings;
+        Licasa::ViewerPreferences fresh;
+        QVERIFY(!fresh.showGnomeTopBar());
+
+        settings.setValue(opacityKey, 0.35);
+        settings.setValue(modeKey, "invalid");
+        settings.sync();
+        Licasa::ViewerPreferences preferences;
+        QSignalSpy modeChanged(&preferences, &Licasa::ViewerPreferences::showGnomeTopBarChanged);
+        QSignalSpy opacityChanged(&preferences,
+                                  &Licasa::ViewerPreferences::fullscreenBackgroundOpacityChanged);
+        QVERIFY(!preferences.showGnomeTopBar());
+        QCOMPARE(preferences.fullscreenBackgroundOpacity(), 0.35);
+        preferences.setShowGnomeTopBar(true);
+        QCOMPARE(modeChanged.size(), 1);
+        QVERIFY(Licasa::ViewerPreferences().showGnomeTopBar());
+        preferences.setShowGnomeTopBar(false);
+        QCOMPARE(modeChanged.size(), 2);
+        QVERIFY(!Licasa::ViewerPreferences().showGnomeTopBar());
+        QCOMPARE(Licasa::ViewerPreferences().fullscreenBackgroundOpacity(), 0.35);
+        QCOMPARE(opacityChanged.size(), 0);
+    }
+
+    void gnomeTopBarWriteFailureReportsDiagnostic()
+    {
+        const QString path = QSettings().fileName();
+        QVERIFY(QDir().mkpath(path));
+        Licasa::ViewerPreferences preferences;
+        QSignalSpy errors(&preferences, &Licasa::ViewerPreferences::errorOccurred);
+        QTest::ignoreMessage(QtWarningMsg, "Failed to save viewer setting: viewer/showGnomeTopBar");
+        preferences.setShowGnomeTopBar(true);
+        QCOMPARE(errors.size(), 1);
+        QCOMPARE(errors.first().first().toString(),
+                 QString("Failed to save viewer setting: viewer/showGnomeTopBar"));
+        QVERIFY(QFileInfo(path).isDir());
+    }
+
     void freshNativeInstallIsOffUntilEnabled()
     {
         Licasa::BackgroundModeManager manager;

@@ -28,6 +28,9 @@ Item {
     property string releaseDate: ""
     property bool installedAsSnap: false
 
+    property bool gnomeWayland: false
+    property bool showGnomeTopBar: false
+    property bool fullscreenOpacityEditable: true
     property real fullscreenBackgroundOpacity: 0.70
     property bool transparencyCheckerboardEnabled: false
     property real transparencyCheckerboardOpacity: 0.70
@@ -55,6 +58,7 @@ Item {
     signal infoOverlayChanged(bool enabled)
     signal smoothMotionChanged(bool enabled)
     signal startInFullscreenChanged(bool enabled)
+    signal showGnomeTopBarRequested(bool checked)
     signal fullscreenBackgroundOpacityRequested(real value)
     signal transparencyCheckerboardChanged(bool enabled)
     signal transparencyCheckerboardOpacityRequested(real value)
