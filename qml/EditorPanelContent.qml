@@ -143,6 +143,7 @@ Column {
         estimatedSize: content.editor.estimatedSize
         saveBusy: content.editor.saveBusy
         hasImage: content.editor.hasImage
+        sdrCopyRequired: content.editor.sdrCopyRequired
         onSettingRequested: function(name, value) { content.editor.exportSettingRequested(name, value) }
         onExportRequested: content.editor.exportRequested()
         unscaledWidth: content.editor.unscaledOutputWidth

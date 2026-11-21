@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QSettings>
 #include <QVariant>
+#include <QVariantMap>
 
 namespace Licasa {
 
@@ -102,6 +103,10 @@ class ViewerPreferences final : public QObject {
     int minimumImageLimitMegapixels() const;
     int maximumImageLimitMegapixels() const;
     qreal cropShieldOpacity() const;
+    QVariantMap hdrMonitorCalibration(const QString& monitorKey) const;
+    bool setHdrMonitorCalibration(const QString& monitorKey, bool enabled, float paperWhite,
+                                  float peak);
+    bool removeHdrMonitorCalibration(const QString& monitorKey);
 
   public slots:
     void setStartInFullscreen(bool value);
@@ -138,6 +143,7 @@ class ViewerPreferences final : public QObject {
     void maximumImageMegapixelsChanged();
     void maximumImageMemoryMiBChanged();
     void cropShieldOpacityChanged();
+    void hdrMonitorCalibrationChanged(const QString& monitorKey);
     void errorOccurred(const QString& message);
 
   private:

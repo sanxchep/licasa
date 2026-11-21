@@ -19,6 +19,8 @@ class PreferredCoverFrameCoordinatorTest final : public QObject {
     void currentMotionPositionCanBecomePreferred();
     void currentPreferredChoiceCanBeCleared();
     void kindMismatchDoesNotApplyPersistedChoice();
+    void storedMotionChoiceAppliesAgainAfterReopen();
+    void clearingMotionSourceKeepsAnimationBinding();
 
   private:
     QUrl makeSource(const QString& name, const QByteArray& contents);
@@ -150,6 +152,68 @@ void PreferredCoverFrameCoordinatorTest::kindMismatchDoesNotApplyPersistedChoice
 
     QVERIFY(!coordinator.hasPreferred());
     QCOMPARE(applyCalls, 0);
+}
+
+void PreferredCoverFrameCoordinatorTest::storedMotionChoiceAppliesAgainAfterReopen()
+{
+    const QUrl source = makeSource(QStringLiteral("reopen.jpg"), QByteArray("motion"));
+    QVERIFY(source.isValid());
+
+    PreferredCoverFrameStore store;
+    QVERIFY(store.storeMotionTimestampUs(source, 466'689));
+
+    PreferredCoverFrameCoordinator coordinator;
+    QList<qint64> applied;
+    const auto apply = [&](qint64 value) {
+        applied.append(value);
+        return true;
+    };
+    coordinator.setApplyHandler(apply);
+    coordinator.setCurrentState(0, false, false);
+    coordinator.setSource(source, PreferredCoverFrameKind::MotionTimestampUs);
+    coordinator.setCurrentState(0, true, true);
+    QCOMPARE(applied, QList<qint64>{466'689});
+
+    // Binding the same file again without a new open must not seek again.
+    coordinator.setCurrentState(0, false, false);
+    coordinator.setSource(source, PreferredCoverFrameKind::MotionTimestampUs);
+    coordinator.setCurrentState(0, true, true);
+    QCOMPARE(applied.size(), 1);
+
+    // A new open of the same file ends the binding; binding it again, as
+    // WindowMediaState::bindMotionCover does, applies the choice once more.
+    coordinator.clearMotionSource();
+    QVERIFY(!coordinator.hasPreferred());
+    coordinator.setApplyHandler(apply);
+    coordinator.setCurrentState(0, false, false);
+    coordinator.setSource(source, PreferredCoverFrameKind::MotionTimestampUs);
+    QVERIFY(coordinator.hasPreferred());
+    coordinator.setCurrentState(0, true, true);
+    QCOMPARE(applied, (QList<qint64>{466'689, 466'689}));
+}
+
+void PreferredCoverFrameCoordinatorTest::clearingMotionSourceKeepsAnimationBinding()
+{
+    const QUrl source = makeSource(QStringLiteral("keep.webp"), QByteArray("animated"));
+    QVERIFY(source.isValid());
+
+    PreferredCoverFrameStore store;
+    QVERIFY(store.storeAnimationFrameIndex(source, 5));
+
+    PreferredCoverFrameCoordinator coordinator;
+    int applyCalls = 0;
+    coordinator.setApplyHandler([&](qint64) {
+        ++applyCalls;
+        return true;
+    });
+    coordinator.setCurrentState(0, true, true);
+    coordinator.setSource(source, PreferredCoverFrameKind::AnimationFrameIndex);
+    QCOMPARE(applyCalls, 1);
+
+    coordinator.clearMotionSource();
+    QVERIFY(coordinator.hasPreferred());
+    coordinator.setSource(source, PreferredCoverFrameKind::AnimationFrameIndex);
+    QCOMPARE(applyCalls, 1);
 }
 
 QTEST_GUILESS_MAIN(PreferredCoverFrameCoordinatorTest)

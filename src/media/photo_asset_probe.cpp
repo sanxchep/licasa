@@ -292,7 +292,8 @@ PhotoAssetInfo probePhotoAsset(const QUrl& url, const std::atomic_bool* cancelFl
     const QString suffix = fileInfo.suffix().toLower();
     XmpProbeResult xmp;
     AppleLivePhotoIdentifierDetection appleIdentifier;
-    const bool isJpeg = suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg");
+    const bool isJpeg = suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg") ||
+                        suffix == QStringLiteral("jpe") || suffix == QStringLiteral("jfif");
     const bool isHeif = suffix == QStringLiteral("heic") || suffix == QStringLiteral("heif") ||
                         suffix == QStringLiteral("hif");
     const bool isAvif = suffix == QStringLiteral("avif");

@@ -339,17 +339,18 @@ void PhotoAssetProbeTest::motionJpegIsDetectedFromStandardApp1Xmp()
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QByteArray bytes = motionJpeg();
-    const QString path = write(directory, bytes, QStringLiteral("sampleMP.jpg"));
-    QVERIFY(!path.isEmpty());
-
-    const PhotoAssetInfo info = probePhotoAsset(QUrl::fromLocalFile(path));
-    QVERIFY(info.kind == PhotoAssetKind::MotionPhoto);
-    QVERIFY(info.motion.has_value());
-    QCOMPARE(info.motion->mimeType, QStringLiteral("video/mp4"));
-    QCOMPARE(info.motion->embedded.length, quint64(makeVideo().size()));
-    QCOMPARE(info.motion->embedded.offset, quint64(bytes.size() - makeVideo().size()));
-    QVERIFY(info.motion->presentationTimestampUs.has_value());
-    QCOMPARE(*info.motion->presentationTimestampUs, qint64(123456));
+    for (const auto& suffix : {"jpg", "jpeg", "jpe", "jfif"}) {
+        const QString path = write(directory, bytes, QStringLiteral("sampleMP.") + QLatin1String(suffix));
+        QVERIFY(!path.isEmpty());
+        const PhotoAssetInfo info = probePhotoAsset(QUrl::fromLocalFile(path));
+        QVERIFY2(info.kind == PhotoAssetKind::MotionPhoto, suffix);
+        QVERIFY(info.motion.has_value());
+        QCOMPARE(info.motion->mimeType, QStringLiteral("video/mp4"));
+        QCOMPARE(info.motion->embedded.length, quint64(makeVideo().size()));
+        QCOMPARE(info.motion->embedded.offset, quint64(bytes.size() - makeVideo().size()));
+        QVERIFY(info.motion->presentationTimestampUs.has_value());
+        QCOMPARE(*info.motion->presentationTimestampUs, qint64(123456));
+    }
 }
 
 void PhotoAssetProbeTest::legacyPixelMicroVideoJpegIsDetectedFromStandardApp1Xmp()

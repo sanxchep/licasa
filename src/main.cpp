@@ -1,3 +1,7 @@
+#ifdef LICASA_ENABLE_HDR_VIEWER_LAB
+#include "imaging/hdr/viewer_memory_policy.h"
+#include "imaging/presented_still_sources.h"
+#endif
 /*!
  * \file main.cpp
  * \brief Application composition root for Licasa.
@@ -80,7 +84,13 @@ int main(int argc, char* argv[])
         snapVersion.isEmpty() ? QStringLiteral(LICASA_VERSION) : snapVersion;
     application.setApplicationVersion(installedVersion);
     const QDate releaseDate = QDate::fromString(QStringLiteral(LICASA_RELEASE_DATE), Qt::ISODate);
+#ifdef LICASA_ENABLE_HDR_VIEWER_LAB
+    constexpr bool hdrViewerBridgeEnabled = true;
+#else
+    constexpr bool hdrViewerBridgeEnabled = false;
+#endif
     const QVariantMap appInfo{{QStringLiteral("version"), installedVersion},
+                              {QStringLiteral("hdrViewerBridgeEnabled"), hdrViewerBridgeEnabled},
                               {QStringLiteral("installedAsSnap"), installedAsSnap},
                               {QStringLiteral("releaseDate"),
                                QLocale().toString(releaseDate, QStringLiteral("d MMMM yyyy"))}};
@@ -124,6 +134,10 @@ int main(int argc, char* argv[])
         }
     }
     Licasa::ViewerPreferences viewerPreferences;
+#ifdef LICASA_ENABLE_HDR_VIEWER_LAB
+    Licasa::bindHdrMemoryPolicy(viewerPreferences);
+    Licasa::PresentedStillSources::instance().setEnabled(true);
+#endif
     Licasa::LanguageManager languageManager;
     languageManager.setReleaseDate(releaseDate);
     Licasa::ImageResourcePolicy imageResourcePolicy(viewerPreferences);
@@ -229,6 +243,10 @@ int main(int argc, char* argv[])
     const int exitCode = application.exec();
     syncAutostart();
     decodeProvider->waitForPendingWork();
+    // HDR workers use Qt's global pool and may finish after their item closes.
+    // Windows were cancelled by aboutToQuit; join before codec/plugin teardown.
+    if (hdrViewerBridgeEnabled)
+        QThreadPool::globalInstance()->waitForDone();
     if (exitCode == softwareRetryExitCode) {
         singleInstanceServer.stop();
         windowManager.destroyAllWindows();

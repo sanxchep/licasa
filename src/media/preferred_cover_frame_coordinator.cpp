@@ -28,6 +28,13 @@ void PreferredCoverFrameCoordinator::setSource(const QUrl& sourceUrl, PreferredC
     maybeApplyPreferred();
 }
 
+void PreferredCoverFrameCoordinator::clearMotionSource()
+{
+    if (kind_ && *kind_ == PreferredCoverFrameKind::MotionTimestampUs) {
+        clearSource();
+    }
+}
+
 void PreferredCoverFrameCoordinator::clearSource()
 {
     const bool changed = !sourceUrl_.isEmpty() || kind_.has_value() ||

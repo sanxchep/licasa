@@ -18,13 +18,14 @@ bool destinationAliasesSource(const QString& destinationPath, const QString& sou
         return true;
     }
 
-    QFile destination(destinationPath);
-    if (!destination.open(QIODevice::ReadOnly)) {
-        return false; // QSaveFile supplies the authoritative destination error.
-    }
-    const auto identity = externalFileIdentity(destination);
+#if defined(Q_OS_UNIX)
+    const auto identity = externalFileIdentityAtPath(destinationPath);
     return identity && identity->device == sourceIdentity.device &&
            identity->inode == sourceIdentity.inode;
+#else
+    Q_UNUSED(sourceIdentity);
+    return false;
+#endif
 }
 
 QString copyFileRangeAtomically(QFile& source, const ExternalFileIdentity& identity,
@@ -43,9 +44,15 @@ QString copyFileRangeAtomically(QFile& source, const ExternalFileIdentity& ident
         return QCoreApplication::translate("AtomicFileCopy",
                                            "The export range no longer fits the source file.");
     }
-    if (destinationAliasesSource(destinationPath, source.fileName(), identity)) {
+    const auto aliasesSource = [&]() {
+        return destinationAliasesSource(destinationPath, source.fileName(), identity);
+    };
+    const auto aliasError = []() {
         return QCoreApplication::translate(
             "AtomicFileCopy", "Choose a destination that is not an alias of the source file.");
+    };
+    if (aliasesSource()) {
+        return aliasError();
     }
     // A regular QFile's signed size and the range check bound this conversion.
     if (!source.seek(qint64(range.offset))) {
@@ -75,9 +82,17 @@ QString copyFileRangeAtomically(QFile& source, const ExternalFileIdentity& ident
         }
         remaining -= quint64(request);
     }
-    if (!unchanged()) {
+    if (!unchanged()
+#if defined(Q_OS_UNIX)
+        || externalFileIdentityAtPath(source.fileName()) != identity
+#endif
+    ) {
         output.cancelWriting();
         return changedError;
+    }
+    if (aliasesSource()) {
+        output.cancelWriting();
+        return aliasError();
     }
     if (!output.commit()) {
         return output.errorString();

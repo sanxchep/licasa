@@ -1,3 +1,7 @@
+#include <QSaveFile>
+#include <QCryptographicHash>
+#include <QBuffer>
+#include "hdr_jpeg_variants.h"
 #include "app/app_constants.h"
 #include "app/application_settings.h"
 #include "export/image_export_contract.h"
@@ -57,6 +61,302 @@ class ImageSaveServiceTest final : public QObject {
     }
 
   private slots:
+    void hdrOriginalCopyAndSdrExport_data()
+    {
+        QTest::addColumn<QString>("fixture");
+        const QString root = QStringLiteral(LICASA_SOURCE_DIR "/tests/test-assets/formats/hdr/");
+        QTest::newRow("ultra-hdr-jpeg") << root + QStringLiteral("jpeg-gainmap-dual.jpg");
+    }
+
+    void hdrOriginalCopyAndSdrExport()
+    {
+        QFETCH(QString, fixture);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString extension = QFileInfo(fixture).suffix();
+        const QString path = directory.filePath(QStringLiteral("source.") + extension);
+        QVERIFY(QFile::copy(fixture, path));
+        const auto digest = [](const QString& name) {
+            QFile file(name);
+            QCryptographicHash sha256(QCryptographicHash::Sha256);
+            return file.open(QIODevice::ReadOnly) && sha256.addData(&file) ? sha256.result() : QByteArray{};
+        };
+        const QByteArray original = digest(path);
+        QVERIFY(!original.isEmpty());
+        Licasa::ImageSaveService service(*resourcePolicy_);
+        const QUrl source = QUrl::fromLocalFile(path);
+        QVERIFY(service.requiresSdrExport(source));
+
+        QSignalSpy saved(&service, &Licasa::ImageSaveService::saveCompleted);
+        QSignalSpy failed(&service, &Licasa::ImageSaveService::saveFailed);
+        const QVariantMap originalOptions{{"copyOriginalBytes", true}};
+        const auto url = [](const QString& name) { return QUrl::fromLocalFile(name); };
+        QVERIFY(service.save(source, url(directory.filePath("original")), {{"exposure", 1}},
+                             originalOptions, this, service.sourceVersion(source)));
+        QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 1, 10000);
+        const QString copy = directory.filePath(QStringLiteral("original.") + extension);
+        QCOMPARE(saved.at(0).at(1).toUrl(), url(copy));
+        QCOMPARE(digest(copy), original);
+
+        QVERIFY(service.save(source, url(directory.filePath("wrong.bin")), {}, originalOptions));
+        QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 10000);
+        QVERIFY(!QFile::exists(directory.filePath("wrong.bin")));
+
+        const auto overwrite = Licasa::ImageSaveOperations::writeEditedImage(
+            path, path, {}, Licasa::exportOptionsFromMap({{"format", "original"}}), 100);
+        QVERIFY(overwrite.destinationUrl.isEmpty());
+        QVERIFY(!overwrite.errorMessage.isEmpty());
+        QCOMPARE(digest(path), original);
+
+        const QString output = directory.filePath("sdr.png");
+        const QVariantMap copyOptions{{"format", "png"}, {"copyOnly", true}, {"srgb", true}};
+#if defined(Q_OS_UNIX)
+        const QString hard = directory.filePath("hard.png"), soft = directory.filePath("soft.png");
+        QVERIFY(::link(QFile::encodeName(path).constData(), QFile::encodeName(hard).constData()) == 0);
+        QVERIFY(QFile::link(path, soft));
+        for (const auto& alias : {hard, soft}) {
+            const auto result = Licasa::ImageSaveOperations::writeEditedImage(
+                path, alias, {}, Licasa::exportOptionsFromMap({{"format", "png"}}), 100);
+            QVERIFY(result.destinationUrl.isEmpty());
+            QVERIFY(result.errorMessage.contains(QStringLiteral("Export an SDR copy")));
+            QCOMPARE(digest(alias), original);
+        }
+        bool linked = false;
+        const auto lateAlias = Licasa::ImageSaveOperations::writeEditedImage(
+            path, output, {}, Licasa::exportOptionsFromMap(copyOptions), 100, std::nullopt,
+            [&] { linked = QFile::link(path, output); });
+        QVERIFY(linked);
+        QVERIFY(lateAlias.destinationUrl.isEmpty());
+        QVERIFY(QFileInfo(output).isSymLink());
+        QCOMPARE(digest(output), original);
+        QVERIFY(QFile::remove(output));
+#endif
+        QVERIFY(service.save(source, url(output), {}, copyOptions));
+        QTRY_COMPARE_WITH_TIMEOUT(saved.count(), 2, 10000);
+        const QImage flat(output);
+        QVERIFY(!flat.isNull());
+        QCOMPARE(flat.size(), QImageReader(path).size());
+        QCOMPARE(flat.colorSpace(), QColorSpace(QColorSpace::SRgb));
+        QVERIFY(!service.requiresSdrExport(url(output)));
+        QCOMPARE(digest(path), original);
+        QCOMPARE(digest(copy), original);
+
+        const QByteArray previousExport = digest(output);
+        bool sourceReplaced = false;
+        // Replace the source identity after encoding but before commit. The
+        // replacement has identical content, including any appended video.
+        const auto interrupted = Licasa::ImageSaveOperations::writeEditedImage(
+            path, output, Licasa::editParametersFromMap({{"exposure", 0.4}}),
+            Licasa::exportOptionsFromMap(
+                {{"format", "png"}, {"copyOnly", true}, {"srgb", true}, {"stripMetadata", true}}),
+            100, std::nullopt, [&] {
+                QFile savedOriginal(copy);
+                if (!savedOriginal.open(QIODevice::ReadOnly)) {
+                    return;
+                }
+                const QByteArray bytes = savedOriginal.readAll();
+                QSaveFile replacement(path);
+                sourceReplaced = replacement.open(QIODevice::WriteOnly) &&
+                                 replacement.write(bytes) == bytes.size() && replacement.commit();
+            });
+        QVERIFY(sourceReplaced);
+        QVERIFY(interrupted.destinationUrl.isEmpty());
+        QVERIFY(interrupted.errorMessage.contains(QStringLiteral("source changed")));
+        QCOMPARE(digest(output), previousExport);
+        QCOMPARE(digest(path), original);
+        QCOMPARE(digest(copy), original);
+    }
+
+    void hdrOrientedAsymmetricSdrExport_data()
+    {
+        QTest::addColumn<int>("orientation");
+        for (int orientation = 1; orientation <= 8; ++orientation)
+            QTest::addRow("exif-%d", orientation) << orientation;
+    }
+
+    void hdrOrientedAsymmetricSdrExport()
+    {
+        // A protected Ultra HDR JPEG whose stored primary is 64x32 with four
+        // different quadrants and an EXIF orientation. The SDR export must be
+        // upright, carry no orientation of its own and leave the original alone.
+        QFETCH(int, orientation);
+        using namespace Licasa::TestSupport;
+        QFile donor(QStringLiteral(LICASA_SOURCE_DIR "/tests/test-assets/formats/hdr/jpeg-gainmap-rgb.jpg"));
+        QVERIFY(donor.open(QIODevice::ReadOnly));
+        const QSize stored(64, 32), shown = displayedSize(stored, orientation);
+        const QByteArray bytes = withExifOrientation(gainMapJpegWithPrimary(donor.readAll(), quadrantImage(stored)), orientation);
+        QVERIFY(!bytes.isEmpty());
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath("oriented.jpg");
+        {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size());
+        }
+        const auto digest = [](const QString& name) {
+            QFile file(name);
+            return file.open(QIODevice::ReadOnly)
+                ? QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256) : QByteArray();
+        };
+        const QByteArray original = digest(path);
+        const QUrl source = QUrl::fromLocalFile(path);
+        Licasa::ImageSaveService service(*resourcePolicy_);
+        QVERIFY(service.requiresSdrExport(source));
+        QSignalSpy saved(&service, &Licasa::ImageSaveService::saveCompleted);
+        QSignalSpy failed(&service, &Licasa::ImageSaveService::saveFailed);
+        const auto save = [&](const QString& name, const QVariantMap& edits, const QVariantMap& options) {
+            const int before = saved.count();
+            return service.save(source, QUrl::fromLocalFile(directory.filePath(name)), edits, options, this,
+                                service.sourceVersion(source))
+                && QTest::qWaitFor([&] { return saved.count() > before || !failed.isEmpty(); }, 10000)
+                && failed.isEmpty();
+        };
+        const QVariantMap sdr{{"format", "png"}, {"copyOnly", true}, {"srgb", true}};
+
+        QVERIFY(save("flat.png", {}, sdr));
+        const QImage flat(directory.filePath("flat.png"));
+        QCOMPARE(flat.colorSpace(), QColorSpace(QColorSpace::SRgb));
+        QVERIFY2(quadrantMismatch(flat, stored, orientation).isEmpty(),
+                 qPrintable(quadrantMismatch(flat, stored, orientation)));
+
+        // A JPEG export has upright pixels and must not repeat the rotation.
+        QVERIFY(save("flat.jpg", {}, {{"format", "jpeg"}, {"copyOnly", true}, {"srgb", true}, {"quality", 100}}));
+        QImageReader stored8(directory.filePath("flat.jpg"));
+        QCOMPARE(stored8.transformation(), QImageIOHandler::TransformationNone);
+        QCOMPARE(stored8.size(), shown);
+        stored8.setAutoTransform(true);
+        const QImage jpeg = stored8.read();
+        QVERIFY2(quadrantMismatch(jpeg, stored, orientation).isEmpty(),
+                 qPrintable(quadrantMismatch(jpeg, stored, orientation)));
+        QFile exported(directory.filePath("flat.jpg"));
+        QVERIFY(exported.open(QIODevice::ReadOnly));
+        QVERIFY(!service.requiresSdrExport(QUrl::fromLocalFile(exported.fileName())));
+        QVERIFY(!exported.readAll().contains(QByteArray("MPF\0", 4)));
+
+        // Editor geometry applies to the upright image. Half a turn swaps the
+        // diagonal quadrants; a crop of the right half keeps the right column.
+        QVERIFY(save("turned.png", {{"quarterTurns", 2}}, sdr));
+        const QImage turned(directory.filePath("turned.png"));
+        QCOMPARE(turned.size(), shown);
+        for (const QPoint point : {QPoint(shown.width() / 4, shown.height() / 4),
+                                   QPoint(shown.width() * 3 / 4, shown.height() * 3 / 4)}) {
+            const QPoint opposite(shown.width() - 1 - point.x(), shown.height() - 1 - point.y());
+            QVERIFY(closeTo(turned.pixelColor(point), displayedQuadrant(stored, orientation, opposite), 12));
+        }
+        QVERIFY(save("cropped.png", {{"cropX", 0.5}, {"cropWidth", 0.5}}, sdr));
+        const QImage cropped(directory.filePath("cropped.png"));
+        QCOMPARE(cropped.size(), QSize(shown.width() / 2, shown.height()));
+        for (const int y : {shown.height() / 4, shown.height() * 3 / 4})
+            QVERIFY(closeTo(cropped.pixelColor(cropped.width() / 2, y),
+                            displayedQuadrant(stored, orientation, QPoint(shown.width() * 3 / 4, y)), 12));
+
+        QVERIFY(save("original", {{"exposure", 1}}, {{"copyOriginalBytes", true}}));
+        QCOMPARE(digest(directory.filePath("original.jpg")), original);
+        QCOMPARE(digest(path), original);
+    }
+
+    void hdrDamagedOversizedAndWideGamutSources_data()
+    {
+        QTest::addColumn<QString>("variant");
+        for (const char* variant : {"gain-truncated", "gain-garbage", "primary-truncated", "oversized",
+                                    "display-p3-gray", "display-p3-red"})
+            QTest::newRow(variant) << QString::fromLatin1(variant);
+    }
+
+    void hdrDamagedOversizedAndWideGamutSources()
+    {
+        // A damaged or oversized protected source must stay protected, and its
+        // original copy must stay exact, whatever the SDR export can do.
+        QFETCH(QString, variant);
+        using namespace Licasa::TestSupport;
+        const QString root = QStringLiteral(LICASA_SOURCE_DIR "/tests/test-assets/formats/hdr/");
+        const QString fixture = root + (variant == "display-p3-gray" ? QStringLiteral("jpeg-gainmap-p3.jpg")
+                                       : variant == "display-p3-red" ? QStringLiteral("jpeg-gainmap-p3-red.jpg")
+                                                                     : QStringLiteral("jpeg-gainmap-dual.jpg"));
+        QFile input(fixture);
+        QVERIFY(input.open(QIODevice::ReadOnly));
+        QByteArray bytes = input.readAll();
+        const auto layout = mpfLayout(bytes);
+        QVERIFY(layout.valid());
+        if (variant == "gain-truncated") {
+            bytes.chop(layout.gainBytes / 2);
+        } else if (variant == "gain-garbage") {
+            bytes.replace(layout.primaryBytes + 4, layout.gainBytes - 4, QByteArray(layout.gainBytes - 4, '\xa5'));
+        } else if (variant == "primary-truncated") {
+            bytes = bytes.left(layout.primaryBytes - 40) + bytes.mid(layout.primaryBytes);
+        } else if (variant == "oversized") {
+            const auto frame = bytes.indexOf(QByteArray::fromHex("ffc0"));
+            QVERIFY(frame > 0 && frame < qsizetype(layout.primaryBytes));
+            qToBigEndian<quint16>(20000, bytes.data() + frame + 5);
+            qToBigEndian<quint16>(20000, bytes.data() + frame + 7);
+        }
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath("source.jpg");
+        {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size());
+        }
+        const QByteArray original = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
+        const auto digest = [](const QString& name) {
+            QFile file(name);
+            return file.open(QIODevice::ReadOnly)
+                ? QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256) : QByteArray();
+        };
+        QFile source(path);
+        QVERIFY(source.open(QIODevice::ReadOnly));
+        QVERIFY(Licasa::ImageSaveOperations::requiresSdrExport(source));
+        source.close();
+
+        const auto options = [](const QVariantMap& values) { return Licasa::exportOptionsFromMap(values); };
+        // Writing over the source is refused before anything is decoded.
+        const auto overwrite = Licasa::ImageSaveOperations::writeEditedImage(path, path, {}, options({{"format", "original"}}), 100);
+        QVERIFY(overwrite.destinationUrl.isEmpty());
+        QVERIFY2(overwrite.errorMessage.contains(QStringLiteral("Export an SDR copy")), qPrintable(overwrite.errorMessage));
+        const auto exact = Licasa::ImageSaveOperations::writeEditedImage(
+            path, directory.filePath("copy.jpg"), {}, options({{"copyOriginalBytes", true}}), 100);
+        QVERIFY2(exact.errorMessage.isEmpty(), qPrintable(exact.errorMessage));
+        QCOMPARE(digest(directory.filePath("copy.jpg")), original);
+
+        // An earlier export at the destination survives a refused one.
+        const QString output = directory.filePath("flat.png");
+        QImage earlier(3, 2, QImage::Format_RGB32);
+        earlier.fill(Qt::magenta);
+        QVERIFY(earlier.save(output));
+        const QByteArray previous = digest(output);
+        const auto flat = Licasa::ImageSaveOperations::writeEditedImage(
+            path, output, {}, options({{"format", "png"}, {"copyOnly", true}, {"srgb", true}}), 100);
+        if (variant == "oversized") {
+            QVERIFY(flat.destinationUrl.isEmpty());
+            QVERIFY(!flat.errorMessage.isEmpty());
+            QCOMPARE(digest(output), previous);
+        } else if (variant == "primary-truncated") {
+            // The reader may refuse the image or recover its decoded rows.
+            if (flat.destinationUrl.isEmpty()) QCOMPARE(digest(output), previous);
+            else QCOMPARE(QImage(output).size(), QSize(32, 32));
+        } else {
+            QVERIFY2(flat.errorMessage.isEmpty(), qPrintable(flat.errorMessage));
+            const QImage image(output);
+            QCOMPARE(image.size(), QSize(32, 32));
+            QCOMPARE(image.colorSpace(), QColorSpace(QColorSpace::SRgb));
+            // Display P3 (254, 0, 0) lies outside sRGB and clips to its red.
+            const QColor expected = variant == "display-p3-red" ? QColor(255, 0, 0) : QColor(192, 192, 192);
+            QVERIFY2(closeTo(image.pixelColor(16, 16), expected, 3), qPrintable(image.pixelColor(16, 16).name()));
+        }
+        if (variant.startsWith("display-p3")) {
+            // Without the sRGB request the copy keeps the source's primaries.
+            const auto kept = Licasa::ImageSaveOperations::writeEditedImage(
+                path, directory.filePath("kept.png"), {}, options({{"format", "png"}, {"copyOnly", true}}), 100);
+            QVERIFY2(kept.errorMessage.isEmpty(), qPrintable(kept.errorMessage));
+            const QImage image(directory.filePath("kept.png"));
+            QCOMPARE(image.colorSpace().primaries(), QColorSpace::Primaries::DciP3D65);
+            const QColor expected = variant == "display-p3-red" ? QColor(254, 0, 0) : QColor(192, 192, 192);
+            QVERIFY2(closeTo(image.pixelColor(16, 16), expected, 3), qPrintable(image.pixelColor(16, 16).name()));
+        }
+        QCOMPARE(digest(path), original);
+        QCOMPARE(digest(directory.filePath("copy.jpg")), original);
+    }
+
     void exportsEveryWriterFamilyAndAlias_data()
     {
         QTest::addColumn<QByteArray>("format");

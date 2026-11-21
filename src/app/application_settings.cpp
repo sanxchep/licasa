@@ -1,4 +1,5 @@
 #include "app/application_settings.h"
+#include "imaging/hdr/monitor_calibration.h"
 
 #include "app/app_constants.h"
 #include "platform/application_identity.h"
@@ -722,4 +723,58 @@ void ViewerPreferences::setCropShieldOpacity(qreal value)
     emit cropShieldOpacityChanged();
 }
 
+} // namespace Licasa
+
+namespace Licasa {
+QVariantMap ViewerPreferences::hdrMonitorCalibration(const QString& key) const
+{
+    if (!validHdrMonitorKey(key)) {
+        return {};
+    }
+    const auto value = settings_.value(QStringLiteral("viewer/hdr/monitors/") + key).toMap();
+    return validHdrCalibrationProfile(value) ? value : QVariantMap{};
+}
+bool ViewerPreferences::setHdrMonitorCalibration(const QString& key, bool enabled, float white,
+                                                 float peak)
+{
+    const QVariantMap profile{
+        {"version", 1}, {"enabled", enabled}, {"paperWhite", white}, {"peak", peak}};
+    if (!validHdrMonitorKey(key) || !validHdrCalibrationProfile(profile)) {
+        return false;
+    }
+    const auto path = QStringLiteral("viewer/hdr/monitors/") + key;
+    const auto previous = settings_.value(path);
+    settings_.setValue(path, profile);
+    settings_.sync();
+    if (settings_.status() != QSettings::NoError) {
+        if (previous.isValid()) {
+            settings_.setValue(path, previous);
+        } else {
+            settings_.remove(path);
+        }
+        emit errorOccurred(tr("HDR display settings could not be saved."));
+        return false;
+    }
+    emit hdrMonitorCalibrationChanged(key);
+    return true;
+}
+bool ViewerPreferences::removeHdrMonitorCalibration(const QString& key)
+{
+    if (!validHdrMonitorKey(key)) {
+        return false;
+    }
+    const auto path = QStringLiteral("viewer/hdr/monitors/") + key;
+    const auto previous = settings_.value(path);
+    settings_.remove(path);
+    settings_.sync();
+    if (settings_.status() != QSettings::NoError) {
+        if (previous.isValid()) {
+            settings_.setValue(path, previous);
+        }
+        emit errorOccurred(tr("HDR display settings could not be saved."));
+        return false;
+    }
+    emit hdrMonitorCalibrationChanged(key);
+    return true;
+}
 } // namespace Licasa

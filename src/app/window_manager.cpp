@@ -1,3 +1,8 @@
+#ifdef LICASA_ENABLE_HDR_VIEWER_LAB
+#include "imaging/hdr/output_negotiation.h"
+#include "app/application_settings.h"
+#include "imaging/hdr/render_target_budget.h"
+#endif
 #include "app/window_manager.h"
 #include "app/window_media_state.h"
 
@@ -19,6 +24,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QEvent>
+#include <QDynamicPropertyChangeEvent>
 #include <QFileInfo>
 #include <QImage>
 #include <QKeyEvent>
@@ -79,6 +85,11 @@ QUrl WindowManager::defaultImageUrl() const
 
 bool WindowManager::eventFilter(QObject* watched, QEvent* event)
 {
+#ifdef LICASA_ENABLE_HDR_VIEWER_LAB
+    if (event->type() == QEvent::DynamicPropertyChange
+        && static_cast<QDynamicPropertyChangeEvent*>(event)->propertyName() == "licasaHdrRecoveryState")
+        emit lifecycleStateChanged();
+#endif
     if (event->type() == QEvent::KeyRelease) {
         const auto* key = static_cast<QKeyEvent*>(event);
         if (!key->isAutoRepeat() && key->modifiers() == Qt::NoModifier &&
@@ -156,6 +167,11 @@ QString WindowManager::lifecycleBusyReason() const
             return QStringLiteral("opening-image");
         }
     }
+#ifdef LICASA_ENABLE_HDR_VIEWER_LAB
+    for (const QPointer<QQuickWindow>& window : windows_) {
+        if (window && hdrTargetKeepsWindowAlive(window)) return QStringLiteral("graphics-recovery");
+    }
+#endif
     return visibleWindowCount() > 0 ? QStringLiteral("visible-window") : QString{};
 }
 
@@ -235,6 +251,11 @@ bool WindowManager::createWindow(const QUrl& initialUrl, bool startHidden, bool 
         if (motionSessionGuard) {
             motionSessionGuard->clearAsset();
         }
+        // Every open invalidates the probe. Without this, returning to the same
+        // Motion Photo keeps the spent binding and its stored cover never applies.
+        if (mediaState->coverCoordinator) {
+            mediaState->coverCoordinator->clearMotionSource();
+        }
         if (mediaState->motionService) {
             mediaState->motionService->clearAsset();
         }
@@ -257,8 +278,19 @@ bool WindowManager::createWindow(const QUrl& initialUrl, bool startHidden, bool 
         QStringLiteral("motionPhotoFrameSaveCoordinator"),
         QVariant::fromValue(static_cast<QObject*>(motionPhotoFrameSaveCoordinator.get())));
 
+#ifdef LICASA_ENABLE_HDR_VIEWER_LAB
+    // Negotiate before Component.onCompleted can create/show the native surface.
+    QObject* object = component_.beginCreate(engine_->rootContext());
+    if (object) {
+        component_.setInitialProperties(object, initialProperties);
+        if (auto* candidate = qobject_cast<QQuickWindow*>(object))
+            requestHdrOutput(candidate, qobject_cast<ViewerPreferences*>(sharedWindowProperties_.value(QStringLiteral("viewerPreferences")).value<QObject*>()));
+        component_.completeCreate();
+    }
+#else
     QObject* object =
         component_.createWithInitialProperties(initialProperties, engine_->rootContext());
+#endif
     if (!object) {
         qCritical() << "Failed to create Main.qml window:" << component_.errors();
         return false;
@@ -477,6 +509,9 @@ QVariantMap WindowManager::sampleDisplayedPixel(QObject* windowObject, qreal x, 
         return {};
     }
 
+#ifdef LICASA_ENABLE_HDR_VIEWER_LAB
+    if (!hdrTargetReadbackReady(window)) return {};
+#endif
     // Capture the displayed raster with edits and color management applied.
     // The hover label can cover the next cell, so exclude it from the grab.
     // grabWindow() synchronizes the scene graph before rendering this frame.

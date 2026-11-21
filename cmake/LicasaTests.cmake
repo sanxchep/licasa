@@ -545,10 +545,12 @@ qt_add_resources(licasa_qml_tests "editor_dialog_fixtures"
         BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
         FILES qml/SaveDialog.qml qml/FileUrls.js qml/DialogRuntime.js
         qml/ShortcutsDialog.qml qml/ShortcutCatalog.js
-        qml/components/RoundIconButton.qml qml/components/InteractiveScrollBar.qml)
+        qml/components/RoundIconButton.qml qml/components/InteractiveScrollBar.qml
+        qml/components/SdrCompositionLayer.qml)
 qt_add_resources(licasa_qml_tests "shortcut_visual_fixtures"
         PREFIX "/Licasa"
-        FILES assets/icons/close.svg assets/shaders/shortcuts-blur.frag.qsb)
+        FILES assets/icons/close.svg assets/shaders/shortcuts-blur.frag.qsb
+        assets/shaders/sdr-composition.frag.qsb)
 
 # The harness uses Qt Gui/Qml APIs directly; the production service target
 # additionally propagates its Qt Quick requirements.

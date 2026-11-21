@@ -14,6 +14,7 @@
 */
 
 import QtQuick
+import "components"
 import "ViewerMath.js" as ViewerMath
 import "FileUrls.js" as FileUrls
 
@@ -41,6 +42,9 @@ Item {
     required property string providerSource
     // The gesture surface selects a bounded source for large images and
     // mirrors the exact source for smaller ones.
+    property bool hdrBridgeEnabled: false
+    readonly property string hdrPhotoStatusText: hdrPhoto.item ? hdrPhoto.item.photoStatusText : ""
+    property real sdrWhiteScale: 0
     property string sourceOverride: ""
     property size sourceOverrideSize: Qt.size(0, 0)
     property bool presentationOnly: false
@@ -372,6 +376,42 @@ Item {
         return requestKeyForStage(stage, parallelStage)
     }
 
+    // Image.source reports a normalized URL in which spaces and non-ASCII
+    // characters are no longer escaped. Compare what the requests name.
+    function presentsRequest(key) {
+        if (key.length === 0)
+            return false
+        if (root.activeRequestKey === key)
+            return true
+        try {
+            return decodeURIComponent(root.activeRequestKey) === decodeURIComponent(key)
+        } catch (error) {
+            return false
+        }
+    }
+
+    // Resolve the file from the SDR slot that is actually presented. A newly
+    // selected resident URL can precede promotion of its base raster. Keep
+    // the presented revision in the URL so a same-path reload retires HDR.
+    function hdrPresentedSource() {
+        const prefix = "image://licasa/"
+        const key = root.activeRequestKey.split("?")[0]
+        if (key.indexOf(prefix) !== 0)
+            return ""
+        const separator = key.indexOf("/", prefix.length)
+        if (separator < 0)
+            return ""
+        const revision = key.substring(prefix.length, separator)
+        if (!/^-?[0-9]+$/.test(revision))
+            return ""
+        try {
+            const fileUrl = FileUrls.fromLocalPath(decodeURIComponent(key.substring(separator + 1)))
+            return fileUrl ? fileUrl + "#licasa-revision-" + revision : ""
+        } catch (error) {
+            return ""
+        }
+    }
+
     function fullRequestKey() {
         return requestKeyForStage(root.rawPreviewFirst ? "raw-interactive" : "full",
                                   root.previewFirstPreloadEnabled ? "" : "full")
@@ -655,524 +695,6 @@ Item {
         return Math.round(value * dpr) / dpr
     }
 
-    clip: true
-
-    Rectangle {
-        anchors.fill: parent
-        visible: root.fullScreenMode && !root.presentationOnly
-            && root.fullscreenBackdropOpacity > 0.0 && !root.hasImage
-        color: Qt.rgba(20 / 255, 20 / 255, 20 / 255, root.fullscreenBackdropOpacity)
-    }
-
-    Rectangle {
-        x: 0
-        y: 0
-        width: root.width
-        height: root.visibleImageTop
-        visible: root.fullScreenMode && !root.presentationOnly
-            && root.fullscreenBackdropOpacity > 0.0 && root.hasImage
-        color: Qt.rgba(20 / 255, 20 / 255, 20 / 255, root.fullscreenBackdropOpacity)
-    }
-
-    Rectangle {
-        x: 0
-        y: root.visibleImageBottom
-        width: root.width
-        height: Math.max(0, root.height - root.visibleImageBottom)
-        visible: root.fullScreenMode && !root.presentationOnly
-            && root.fullscreenBackdropOpacity > 0.0 && root.hasImage
-        color: Qt.rgba(20 / 255, 20 / 255, 20 / 255, root.fullscreenBackdropOpacity)
-    }
-
-    Rectangle {
-        x: 0
-        y: root.visibleImageTop
-        width: root.visibleImageLeft
-        height: root.visibleImageBandHeight
-        visible: root.fullScreenMode && !root.presentationOnly
-            && root.fullscreenBackdropOpacity > 0.0 && root.hasImage
-        color: Qt.rgba(20 / 255, 20 / 255, 20 / 255, root.fullscreenBackdropOpacity)
-    }
-
-    Rectangle {
-        x: root.visibleImageRight
-        y: root.visibleImageTop
-        width: Math.max(0, root.width - root.visibleImageRight)
-        height: root.visibleImageBandHeight
-        visible: root.fullScreenMode && !root.presentationOnly
-            && root.fullscreenBackdropOpacity > 0.0 && root.hasImage
-        color: Qt.rgba(20 / 255, 20 / 255, 20 / 255, root.fullscreenBackdropOpacity)
-    }
-
-    Item {
-        id: transparentPixelBackdrop
-        x: root.visibleImageLeft
-        y: root.visibleImageTop
-        width: Math.max(0, root.visibleImageRight - root.visibleImageLeft)
-        height: Math.max(0, root.visibleImageBottom - root.visibleImageTop)
-        visible: root.hasImage && width > 0 && height > 0
-        opacity: root.effectiveTransparencyCheckerboardEnabled
-            ? root.effectiveTransparencyOpacity
-            : 1.0
-        clip: true
-
-        Rectangle {
-            anchors.fill: parent
-            visible: !root.effectiveTransparencyCheckerboardEnabled
-            color: Qt.rgba(
-                20 / 255,
-                20 / 255,
-                20 / 255,
-                root.fullScreenMode && !root.presentationOnly
-                    ? root.fullscreenBackdropOpacity
-                    : root.windowedTransparencyOpacity
-            )
-        }
-
-        Canvas {
-            id: transparencyGrid
-            anchors.fill: parent
-            visible: root.effectiveTransparencyCheckerboardEnabled
-
-            onPaint: {
-                const ctx = getContext("2d")
-                const tile = 18
-                ctx.clearRect(0, 0, width, height)
-                ctx.fillStyle = "#C8C8C8"
-                ctx.fillRect(0, 0, width, height)
-                ctx.fillStyle = "#929292"
-
-                for (let row = 0, y = 0; y < height; ++row, y += tile) {
-                    const firstColumn = row % 2
-                    for (let x = firstColumn * tile; x < width; x += tile * 2) {
-                        ctx.fillRect(x, y, tile, tile)
-                    }
-                }
-            }
-
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-            onVisibleChanged: {
-                if (visible)
-                    requestPaint()
-            }
-        }
-    }
-
-    Item {
-        id: imageStage
-        objectName: "imageStage"
-        Accessible.role: Accessible.Graphic
-        Accessible.name: root.imageAccessibleName
-        Accessible.ignored: root.presentationOnly || !root.hasImage
-        visible: root.imageStatus === Image.Ready
-        x: root.renderedImageX
-        y: root.renderedImageY
-        width: root.scaledContentMode ? Math.max(1, root.imageWidth) : root.width
-        height: root.scaledContentMode ? Math.max(1, root.imageHeight) : root.height
-        scale: root.scaledContentMode ? root.currentScale : 1.0
-        transformOrigin: Item.TopLeft
-
-        readonly property real fadingScale: Math.max(0.0001, scale)
-        readonly property real fadingX: (root.fadingViewportRect.x - x) / fadingScale
-        readonly property real fadingY: (root.fadingViewportRect.y - y) / fadingScale
-        readonly property real fadingWidth: root.fadingViewportRect.width / fadingScale
-        readonly property real fadingHeight: root.fadingViewportRect.height / fadingScale
-
-        Image {
-            id: photoA
-            objectName: "staticImageA"
-            x: root.fadingImageSlot === 0 && root.fullScreenMode ? imageStage.fadingX : 0
-            y: root.fadingImageSlot === 0 && root.fullScreenMode ? imageStage.fadingY : 0
-            width: root.fadingImageSlot === 0 && root.fullScreenMode
-                ? imageStage.fadingWidth : parent.width
-            height: root.fadingImageSlot === 0 && root.fullScreenMode
-                ? imageStage.fadingHeight : parent.height
-            visible: (root.activeImageSlot === 0 || root.fadingImageSlot === 0)
-                && !root.animatedFrameReady
-            z: root.fadingImageSlot === 0 ? 1 : 0
-            opacity: root.fadingImageSlot === 0 && root.activeImageSlot !== 0 ? 0.0 : 1.0
-            asynchronous: true
-            cache: false
-            smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
-            mipmap: root.mipmapScalingEnabled
-            fillMode: Image.Stretch
-
-            Behavior on opacity {
-                enabled: root.fadingImageSlot === 0 && !root.rapidBrowseMode
-                NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
-            }
-
-            onStatusChanged: {
-                if (status === Image.Ready)
-                    root.completeImageRequest(0)
-                else if (status === Image.Error)
-                    root.failImageRequest(0)
-            }
-        }
-
-        Image {
-            id: photoB
-            objectName: "staticImageB"
-            x: root.fadingImageSlot === 1 && root.fullScreenMode ? imageStage.fadingX : 0
-            y: root.fadingImageSlot === 1 && root.fullScreenMode ? imageStage.fadingY : 0
-            width: root.fadingImageSlot === 1 && root.fullScreenMode
-                ? imageStage.fadingWidth : parent.width
-            height: root.fadingImageSlot === 1 && root.fullScreenMode
-                ? imageStage.fadingHeight : parent.height
-            visible: (root.activeImageSlot === 1 || root.fadingImageSlot === 1)
-                && !root.animatedFrameReady
-            z: root.fadingImageSlot === 1 ? 1 : 0
-            opacity: root.fadingImageSlot === 1 && root.activeImageSlot !== 1 ? 0.0 : 1.0
-            asynchronous: true
-            cache: false
-            smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
-            mipmap: root.mipmapScalingEnabled
-            fillMode: Image.Stretch
-
-            Behavior on opacity {
-                enabled: root.fadingImageSlot === 1 && !root.rapidBrowseMode
-                NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
-            }
-
-            onStatusChanged: {
-                if (status === Image.Ready)
-                    root.completeImageRequest(1)
-                else if (status === Image.Error)
-                    root.failImageRequest(1)
-            }
-        }
-
-        Image {
-            id: photoC
-            objectName: "staticImageC"
-            x: root.fadingImageSlot === 2 && root.fullScreenMode ? imageStage.fadingX : 0
-            y: root.fadingImageSlot === 2 && root.fullScreenMode ? imageStage.fadingY : 0
-            width: root.fadingImageSlot === 2 && root.fullScreenMode
-                ? imageStage.fadingWidth : parent.width
-            height: root.fadingImageSlot === 2 && root.fullScreenMode
-                ? imageStage.fadingHeight : parent.height
-            visible: (root.activeImageSlot === 2 || root.fadingImageSlot === 2)
-                && !root.animatedFrameReady
-            z: root.fadingImageSlot === 2 ? 1 : 0
-            opacity: root.fadingImageSlot === 2 && root.activeImageSlot !== 2 ? 0.0 : 1.0
-            asynchronous: true
-            cache: false
-            smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
-            mipmap: root.mipmapScalingEnabled
-            fillMode: Image.Stretch
-
-            Behavior on opacity {
-                enabled: root.fadingImageSlot === 2 && !root.rapidBrowseMode
-                NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
-            }
-
-            onStatusChanged: {
-                if (status === Image.Ready)
-                    root.completeImageRequest(2)
-                else if (status === Image.Error)
-                    root.failImageRequest(2)
-            }
-        }
-
-        Image {
-            id: animatedPhoto
-
-            anchors.fill: parent
-            visible: root.animatedFrameReady
-            source: root.animatedPlaybackActive && root.animationController
-                ? root.animationController.frameSource : ""
-            // The frame provider only returns an already decoded, shared image.
-            // Synchronous lookup avoids a queue of obsolete frame requests.
-            asynchronous: false
-            cache: false
-            smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
-            mipmap: root.mipmapScalingEnabled
-            fillMode: Image.Stretch
-
-            onStatusChanged: {
-                if (status === Image.Ready) {
-                    if (root.animatedPlaybackActive)
-                        root.releaseStaticImages()
-                    root.imageReady()
-                }
-            }
-        }
-
-        // Native presentation only. Keep the surface itself lazy so ordinary
-        // JPEG/PNG windows allocate no temporal presentation object. Once a
-        // validated Motion Photo exists, C++ pulls an owned bounded RGBA frame
-        // from MotionPhotoSession; QML never receives QVideoFrame, QVideoSink,
-        // decoder handles or raw pixel buffers. The still image remains resident
-        // underneath for instant pause/stop/error fallback.
-        Loader {
-            id: motionPhotoFrameLoader
-            anchors.fill: parent
-            z: 3
-
-            // Keep every binding that reaches back into ImageViewport on the
-            // Loader itself. The nested Component has its own creation context,
-            // so its visual object remains self-contained.
-            property var motionSession: root.motionPhotoSession
-            property bool frameSmooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
-
-            active: motionSession && motionSession.available
-            // The native surface paints transparently until its first valid
-            // frame, so visibility does not need to inspect Loader.item. This
-            // also keeps the Loader boundary statically type-safe for QML lint.
-            visible: active && !root.animatedFrameReady
-
-            onLoaded: {
-                item.session = motionSession
-                item.smooth = frameSmooth
-            }
-            onMotionSessionChanged: {
-                if (item)
-                    item.session = motionSession
-            }
-            onFrameSmoothChanged: {
-                if (item)
-                    item.smooth = frameSmooth
-            }
-
-            // Keep the C++ presentation type out of this always-loaded QML
-            // compilation unit. The tiny host imports the generated Licasa QML
-            // module only when a Motion Photo is actually active, which both
-            // preserves ordinary-still startup and activates the C++ type
-            // registrar before MotionPhotoFrameSurface is instantiated.
-            source: active ? Qt.resolvedUrl("MotionPhotoFrameSurfaceHost.qml") : ""
-        }
-    }
-
-    // Draw only the boundaries that cross the viewport. These are the cells
-    // of the actual displayed raster, including an animation or video frame.
-    Canvas {
-        id: pixelGrid
-        objectName: "pixelGrid"
-        anchors.fill: parent
-        z: 5
-        visible: root.pixelGridVisible
-
-        onPaint: {
-            const ctx = getContext("2d")
-            ctx.clearRect(0, 0, width, height)
-            if (!root.pixelGridVisible)
-                return
-
-            const dpr = Math.max(1, root.devicePixelRatio)
-            const left = Math.max(0, root.gridImageX)
-            const right = Math.min(root.width, root.gridImageRight)
-            const top = Math.max(0, root.gridImageY)
-            const bottom = Math.min(root.height, root.gridImageBottom)
-            if (left >= right || top >= bottom)
-                return
-            const firstX = Math.max(0, Math.ceil((left - root.gridImageX)
-                / root.rasterCellWidth))
-            const lastX = Math.min(root.inspectedRasterWidth, Math.floor(
-                (right - root.gridImageX) / root.rasterCellWidth))
-            const firstY = Math.max(0, Math.ceil((top - root.gridImageY)
-                / root.rasterCellHeight))
-            const lastY = Math.min(root.inspectedRasterHeight, Math.floor(
-                (bottom - root.gridImageY) / root.rasterCellHeight))
-            ctx.save()
-            ctx.beginPath()
-            ctx.rect(left, top, right - left, bottom - top)
-            ctx.clip()
-            ctx.lineWidth = 1 / dpr
-            ctx.strokeStyle = "rgba(128, 128, 128, 0.8)"
-            ctx.beginPath()
-            for (let x = firstX; x <= lastX; ++x) {
-                const boundary = root.gridImageX + x * root.rasterCellWidth
-                const aligned = (Math.round(boundary * dpr) + 0.5) / dpr
-                ctx.moveTo(aligned, top)
-                ctx.lineTo(aligned, bottom)
-            }
-            for (let y = firstY; y <= lastY; ++y) {
-                const boundary = root.gridImageY + y * root.rasterCellHeight
-                const aligned = (Math.round(boundary * dpr) + 0.5) / dpr
-                ctx.moveTo(left, aligned)
-                ctx.lineTo(right, aligned)
-            }
-            ctx.stroke()
-            ctx.restore()
-        }
-
-        onWidthChanged: requestPaint()
-        onHeightChanged: requestPaint()
-        onVisibleChanged: requestPaint()
-        Connections {
-            target: root
-            function onGridImageXChanged() {
-                pixelGrid.requestPaint()
-                if (pointerLayer.containsMouse)
-                    root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
-            }
-            function onGridImageYChanged() {
-                pixelGrid.requestPaint()
-                if (pointerLayer.containsMouse)
-                    root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
-            }
-            function onRasterCellWidthChanged() {
-                pixelGrid.requestPaint()
-                if (pointerLayer.containsMouse)
-                    root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
-            }
-            function onRasterCellHeightChanged() {
-                pixelGrid.requestPaint()
-                if (pointerLayer.containsMouse)
-                    root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
-            }
-            function onDevicePixelRatioChanged() { pixelGrid.requestPaint() }
-        }
-    }
-
-    Rectangle {
-        objectName: "pixelCoordinateOverlay"
-        property bool sampleCaptureHidden: false
-        z: 9
-        visible: root.pixelGridVisible && root.hoveredPixelX >= 0
-            && root.hoveredPixelY >= 0 && root.sampledPixelColor
-            && root.sampledPixelX === root.hoveredPixelX
-            && root.sampledPixelY === root.hoveredPixelY
-            && !root.presentationOnly && !sampleCaptureHidden
-        x: root.hoverViewportX + width + 16 <= root.width
-            ? root.hoverViewportX + 16
-            : Math.max(8, root.hoverViewportX - width - 16)
-        y: root.hoverViewportY + height + 16 <= root.height
-            ? root.hoverViewportY + 16
-            : Math.max(8, root.hoverViewportY - height - 16)
-        width: pixelCoordinateText.implicitWidth + 16
-        height: pixelCoordinateText.implicitHeight + 10
-        radius: 5
-        color: "#E6191B20"
-        border.color: "#B0FFFFFF"
-        border.width: 1
-
-        Text {
-            id: pixelCoordinateText
-            anchors.centerIn: parent
-            objectName: "pixelCoordinateText"
-            text: root.inspectedPixelKind + " (" + root.hoveredPixelX
-                + ", " + root.hoveredPixelY + ")  "
-                + (root.sampledPixelColor && root.sampledPixelColor.alpha < 255
-                    ? "RGBA(" + root.sampledPixelColor.red + ", "
-                        + root.sampledPixelColor.green + ", "
-                        + root.sampledPixelColor.blue + ", "
-                        + root.sampledPixelColor.alpha + ")"
-                    : "RGB(" + (root.sampledPixelColor ? root.sampledPixelColor.red : 0)
-                        + ", " + (root.sampledPixelColor ? root.sampledPixelColor.green : 0)
-                        + ", " + (root.sampledPixelColor ? root.sampledPixelColor.blue : 0)
-                        + ")")
-            color: "white"
-            font.pixelSize: 12
-        }
-    }
-
-    Rectangle {
-        id: emptyState
-        objectName: "emptyImageState"
-        anchors.centerIn: parent
-        readonly property bool compact: root.width < 320 || root.height < 200
-        visible: !root.presentationOnly
-            && (root.imageStatus === Image.Loading || root.imageStatus === Image.Error)
-            && root.width >= 180 && root.height >= 110
-        z: 20
-        width: Math.min(420, Math.max(0, parent.width - 24))
-        height: Math.min(parent.height - 24, compact ? 104 : 176)
-        radius: 24
-        color: Qt.rgba(18 / 255, 20 / 255, 24 / 255, 0.94)
-        border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.16)
-        antialiasing: true
-
-        Column {
-            id: emptyStateContent
-            anchors.centerIn: parent
-            spacing: emptyState.compact ? 8 : 14
-
-            Text {
-                objectName: "emptyStateTitle"
-                Accessible.role: Accessible.StaticText
-                Accessible.name: text
-                anchors.horizontalCenter: parent.horizontalCenter
-                color: "#f2f2f2"
-                font.pixelSize: emptyState.compact ? 16 : 20
-                font.weight: Font.DemiBold
-                renderType: Text.NativeRendering
-                horizontalAlignment: Text.AlignHCenter
-                text: root.imageStatus === Image.Loading
-                    ? qsTr("Opening image…")
-                    : root.imageStatus === Image.Error
-                        ? emptyState.compact ? qsTr("Open failed")
-                                             : qsTr("That image could not be opened")
-                        : ""
-            }
-
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                visible: !emptyState.compact && root.imageStatus === Image.Error
-                color: Qt.rgba(1, 1, 1, 0.68)
-                font.pixelSize: 12
-                renderType: Text.NativeRendering
-                text: qsTr("Choose another local image file")
-            }
-
-            Rectangle {
-                id: openImageButton
-                objectName: "emptyStateOpenButton"
-                anchors.horizontalCenter: parent.horizontalCenter
-                visible: root.imageStatus !== Image.Loading
-                width: 122
-                height: 38
-                radius: height / 2
-                color: openButton.pressed ? "#2466D8" : openButton.containsMouse ? "#347CF2" : "#2A72E8"
-                border.width: activeFocus ? 2 : 1
-                border.color: activeFocus ? "#D8FFFFFF" : "#50FFFFFF"
-                activeFocusOnTab: true
-
-                Accessible.role: Accessible.Button
-                Accessible.name: qsTr("Open image")
-                Accessible.description: root.imageStatus === Image.Error
-                    ? qsTr("That image could not be opened. Choose another local image file. Shortcut: Ctrl+O.")
-                    : qsTr("Choose an image file to view. Shortcut: Ctrl+O.")
-                Accessible.focusable: visible
-                Accessible.focused: activeFocus
-                Accessible.onPressAction: {
-                    openImageButton.forceActiveFocus(Qt.OtherFocusReason)
-                    root.openDialogRequested()
-                }
-
-                Keys.onPressed: function(event) {
-                    if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
-                            && event.key !== Qt.Key_Enter)
-                        return
-                    if (!event.isAutoRepeat)
-                        root.openDialogRequested()
-                    event.accepted = true
-                }
-
-                Text {
-                    anchors.centerIn: parent
-                    text: qsTr("Open image")
-                    color: "white"
-                    font.pixelSize: 13
-                    font.weight: Font.DemiBold
-                    renderType: Text.NativeRendering
-                }
-
-                MouseArea {
-                    id: openButton
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onPressed: openImageButton.forceActiveFocus()
-                    onClicked: root.openDialogRequested()
-                }
-            }
-        }
-
-    }
-
     function normalizedWheelDelta(wheel) {
         // Precision touchpads commonly provide both delta types. Prefer the
         // pixel distance in that case; the angle delta can be so small that a
@@ -1211,170 +733,727 @@ Item {
         wheel.accepted = true
     }
 
-    Item {
-        id: wheelInputLayer
+    clip: true
 
-        x: root.renderedImageX
-        y: root.renderedImageY
-        width: Math.max(0, root.renderedImageRight - root.renderedImageX)
-        height: Math.max(0, root.renderedImageBottom - root.renderedImageY)
-        z: 11
-        visible: root.imageStatus === Image.Ready
-        enabled: visible && !root.interactionBlocked
+    SdrCompositionLayer {
+        objectName: "sdrImageComposition"
+        anchors.fill: parent
+        whiteScale: root.sdrWhiteScale
+        Rectangle {
+            anchors.fill: parent
+            visible: root.fullScreenMode && !root.presentationOnly
+                && root.fullscreenBackdropOpacity > 0.0 && !root.hasImage
+            color: Qt.rgba(20 / 255, 20 / 255, 20 / 255, root.fullscreenBackdropOpacity)
+        }
 
-        WheelHandler {
-            id: imageWheelHandler
+        Rectangle {
+            x: 0
+            y: 0
+            width: root.width
+            height: root.visibleImageTop
+            visible: root.fullScreenMode && !root.presentationOnly
+                && root.fullscreenBackdropOpacity > 0.0 && root.hasImage
+            color: Qt.rgba(20 / 255, 20 / 255, 20 / 255, root.fullscreenBackdropOpacity)
+        }
 
-            target: null
-            orientation: Qt.Vertical
-            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-            blocking: true
+        Rectangle {
+            x: 0
+            y: root.visibleImageBottom
+            width: root.width
+            height: Math.max(0, root.height - root.visibleImageBottom)
+            visible: root.fullScreenMode && !root.presentationOnly
+                && root.fullscreenBackdropOpacity > 0.0 && root.hasImage
+            color: Qt.rgba(20 / 255, 20 / 255, 20 / 255, root.fullscreenBackdropOpacity)
+        }
 
-            onWheel: function(wheel) {
-                const viewportPoint = wheelInputLayer.mapToItem(
-                    root,
-                    point.position.x,
-                    point.position.y
+        Rectangle {
+            x: 0
+            y: root.visibleImageTop
+            width: root.visibleImageLeft
+            height: root.visibleImageBandHeight
+            visible: root.fullScreenMode && !root.presentationOnly
+                && root.fullscreenBackdropOpacity > 0.0 && root.hasImage
+            color: Qt.rgba(20 / 255, 20 / 255, 20 / 255, root.fullscreenBackdropOpacity)
+        }
+
+        Rectangle {
+            x: root.visibleImageRight
+            y: root.visibleImageTop
+            width: Math.max(0, root.width - root.visibleImageRight)
+            height: root.visibleImageBandHeight
+            visible: root.fullScreenMode && !root.presentationOnly
+                && root.fullscreenBackdropOpacity > 0.0 && root.hasImage
+            color: Qt.rgba(20 / 255, 20 / 255, 20 / 255, root.fullscreenBackdropOpacity)
+        }
+
+        Item {
+            id: transparentPixelBackdrop
+            x: root.visibleImageLeft
+            y: root.visibleImageTop
+            width: Math.max(0, root.visibleImageRight - root.visibleImageLeft)
+            height: Math.max(0, root.visibleImageBottom - root.visibleImageTop)
+            visible: root.hasImage && width > 0 && height > 0
+            opacity: root.effectiveTransparencyCheckerboardEnabled
+                ? root.effectiveTransparencyOpacity
+                : 1.0
+            clip: true
+
+            Rectangle {
+                anchors.fill: parent
+                visible: !root.effectiveTransparencyCheckerboardEnabled
+                color: Qt.rgba(
+                    20 / 255,
+                    20 / 255,
+                    20 / 255,
+                    root.fullScreenMode && !root.presentationOnly
+                        ? root.fullscreenBackdropOpacity
+                        : root.windowedTransparencyOpacity
                 )
-                root.handleWheel(wheel, viewportPoint.x, viewportPoint.y)
+            }
+
+            Canvas {
+                id: transparencyGrid
+                anchors.fill: parent
+                visible: root.effectiveTransparencyCheckerboardEnabled
+
+                onPaint: {
+                    const ctx = getContext("2d")
+                    const tile = 18
+                    ctx.clearRect(0, 0, width, height)
+                    ctx.fillStyle = "#C8C8C8"
+                    ctx.fillRect(0, 0, width, height)
+                    ctx.fillStyle = "#929292"
+
+                    for (let row = 0, y = 0; y < height; ++row, y += tile) {
+                        const firstColumn = row % 2
+                        for (let x = firstColumn * tile; x < width; x += tile * 2) {
+                            ctx.fillRect(x, y, tile, tile)
+                        }
+                    }
+                }
+
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
+                onVisibleChanged: {
+                    if (visible)
+                        requestPaint()
+                }
+            }
+        }
+
+        Item {
+            id: imageStage
+            objectName: "imageStage"
+            Accessible.role: Accessible.Graphic
+            Accessible.name: root.imageAccessibleName
+            Accessible.ignored: root.presentationOnly || !root.hasImage
+            visible: root.imageStatus === Image.Ready
+            x: root.renderedImageX
+            y: root.renderedImageY
+            width: root.scaledContentMode ? Math.max(1, root.imageWidth) : root.width
+            height: root.scaledContentMode ? Math.max(1, root.imageHeight) : root.height
+            scale: root.scaledContentMode ? root.currentScale : 1.0
+            transformOrigin: Item.TopLeft
+
+            readonly property real fadingScale: Math.max(0.0001, scale)
+            readonly property real fadingX: (root.fadingViewportRect.x - x) / fadingScale
+            readonly property real fadingY: (root.fadingViewportRect.y - y) / fadingScale
+            readonly property real fadingWidth: root.fadingViewportRect.width / fadingScale
+            readonly property real fadingHeight: root.fadingViewportRect.height / fadingScale
+
+            Image {
+                id: photoA
+                objectName: "staticImageA"
+                x: root.fadingImageSlot === 0 && root.fullScreenMode ? imageStage.fadingX : 0
+                y: root.fadingImageSlot === 0 && root.fullScreenMode ? imageStage.fadingY : 0
+                width: root.fadingImageSlot === 0 && root.fullScreenMode
+                    ? imageStage.fadingWidth : parent.width
+                height: root.fadingImageSlot === 0 && root.fullScreenMode
+                    ? imageStage.fadingHeight : parent.height
+                visible: (root.activeImageSlot === 0 || root.fadingImageSlot === 0)
+                    && !root.animatedFrameReady
+                z: root.fadingImageSlot === 0 ? 1 : 0
+                opacity: root.fadingImageSlot === 0 && root.activeImageSlot !== 0 ? 0.0 : 1.0
+                asynchronous: true
+                cache: false
+                smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
+                mipmap: root.mipmapScalingEnabled
+                fillMode: Image.Stretch
+
+                Behavior on opacity {
+                    enabled: root.fadingImageSlot === 0 && !root.rapidBrowseMode
+                    NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
+                }
+
+                onStatusChanged: {
+                    if (status === Image.Ready)
+                        root.completeImageRequest(0)
+                    else if (status === Image.Error)
+                        root.failImageRequest(0)
+                }
+            }
+
+            Image {
+                id: photoB
+                objectName: "staticImageB"
+                x: root.fadingImageSlot === 1 && root.fullScreenMode ? imageStage.fadingX : 0
+                y: root.fadingImageSlot === 1 && root.fullScreenMode ? imageStage.fadingY : 0
+                width: root.fadingImageSlot === 1 && root.fullScreenMode
+                    ? imageStage.fadingWidth : parent.width
+                height: root.fadingImageSlot === 1 && root.fullScreenMode
+                    ? imageStage.fadingHeight : parent.height
+                visible: (root.activeImageSlot === 1 || root.fadingImageSlot === 1)
+                    && !root.animatedFrameReady
+                z: root.fadingImageSlot === 1 ? 1 : 0
+                opacity: root.fadingImageSlot === 1 && root.activeImageSlot !== 1 ? 0.0 : 1.0
+                asynchronous: true
+                cache: false
+                smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
+                mipmap: root.mipmapScalingEnabled
+                fillMode: Image.Stretch
+
+                Behavior on opacity {
+                    enabled: root.fadingImageSlot === 1 && !root.rapidBrowseMode
+                    NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
+                }
+
+                onStatusChanged: {
+                    if (status === Image.Ready)
+                        root.completeImageRequest(1)
+                    else if (status === Image.Error)
+                        root.failImageRequest(1)
+                }
+            }
+
+            Image {
+                id: photoC
+                objectName: "staticImageC"
+                x: root.fadingImageSlot === 2 && root.fullScreenMode ? imageStage.fadingX : 0
+                y: root.fadingImageSlot === 2 && root.fullScreenMode ? imageStage.fadingY : 0
+                width: root.fadingImageSlot === 2 && root.fullScreenMode
+                    ? imageStage.fadingWidth : parent.width
+                height: root.fadingImageSlot === 2 && root.fullScreenMode
+                    ? imageStage.fadingHeight : parent.height
+                visible: (root.activeImageSlot === 2 || root.fadingImageSlot === 2)
+                    && !root.animatedFrameReady
+                z: root.fadingImageSlot === 2 ? 1 : 0
+                opacity: root.fadingImageSlot === 2 && root.activeImageSlot !== 2 ? 0.0 : 1.0
+                asynchronous: true
+                cache: false
+                smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
+                mipmap: root.mipmapScalingEnabled
+                fillMode: Image.Stretch
+
+                Behavior on opacity {
+                    enabled: root.fadingImageSlot === 2 && !root.rapidBrowseMode
+                    NumberAnimation { duration: root.progressiveFadeDurationMs; easing.type: Easing.OutQuad }
+                }
+
+                onStatusChanged: {
+                    if (status === Image.Ready)
+                        root.completeImageRequest(2)
+                    else if (status === Image.Error)
+                        root.failImageRequest(2)
+                }
+            }
+
+
+            Image {
+                id: animatedPhoto
+
+                anchors.fill: parent
+                visible: root.animatedFrameReady
+                source: root.animatedPlaybackActive && root.animationController
+                    ? root.animationController.frameSource : ""
+                // The frame provider only returns an already decoded, shared image.
+                // Synchronous lookup avoids a queue of obsolete frame requests.
+                asynchronous: false
+                cache: false
+                smooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
+                mipmap: root.mipmapScalingEnabled
+                fillMode: Image.Stretch
+
+                onStatusChanged: {
+                    if (status === Image.Ready) {
+                        if (root.animatedPlaybackActive)
+                            root.releaseStaticImages()
+                        root.imageReady()
+                    }
+                }
+            }
+
+            // Native presentation only. Keep the surface itself lazy so ordinary
+            // JPEG/PNG windows allocate no temporal presentation object. Once a
+            // validated Motion Photo exists, C++ pulls an owned bounded RGBA frame
+            // from MotionPhotoSession; QML never receives QVideoFrame, QVideoSink,
+            // decoder handles or raw pixel buffers. The still image remains resident
+            // underneath for instant pause/stop/error fallback.
+            Loader {
+                id: motionPhotoFrameLoader
+                anchors.fill: parent
+                z: 3
+
+                // Keep every binding that reaches back into ImageViewport on the
+                // Loader itself. The nested Component has its own creation context,
+                // so its visual object remains self-contained.
+                property var motionSession: root.motionPhotoSession
+                property bool frameSmooth: root.smoothScalingEnabled && !root.pixelInspectionScaleReached
+
+                active: motionSession && motionSession.available
+                // The native surface paints transparently until its first valid
+                // frame, so visibility does not need to inspect Loader.item. This
+                // also keeps the Loader boundary statically type-safe for QML lint.
+                visible: active && !root.animatedFrameReady
+
+                onLoaded: {
+                    item.session = motionSession
+                    item.smooth = frameSmooth
+                }
+                onMotionSessionChanged: {
+                    if (item)
+                        item.session = motionSession
+                }
+                onFrameSmoothChanged: {
+                    if (item)
+                        item.smooth = frameSmooth
+                }
+
+                // Keep the C++ presentation type out of this always-loaded QML
+                // compilation unit. The tiny host imports the generated Licasa QML
+                // module only when a Motion Photo is actually active, which both
+                // preserves ordinary-still startup and activates the C++ type
+                // registrar before MotionPhotoFrameSurface is instantiated.
+                source: active ? Qt.resolvedUrl("MotionPhotoFrameSurfaceHost.qml") : ""
+            }
+        }
+
+    }
+
+    // The linear HDR photo bypasses both SDR transfer-function layers.
+    Item {
+        objectName: "linearHdrPhotoPlane"
+        anchors.fill: parent
+        Loader {
+            id: hdrPhoto
+            objectName: "hdrStillImage"
+            x: imageStage.x
+            y: imageStage.y
+            width: imageStage.width
+            height: imageStage.height
+            scale: imageStage.scale
+            transformOrigin: Item.TopLeft
+            active: root.hdrBridgeEnabled && root.hasImage && root.imageStatus === Image.Ready
+                && (root.presentsRequest(root.requestKey()) || root.presentsRequest(root.fullRequestKey()))
+                && !root.decodePending && !root.previewPhase && !root.rawFastPhase && !root.rapidBrowseMode
+                && !root.animatedPlaybackActive && !root.motionFrameReady
+                && !root.presentationOnly && root.sourceOverride.length === 0
+            source: active ? Qt.resolvedUrl("HdrImageSurfaceHost.qml") : ""
+            onLoaded: {
+                item.presentedRequest = Qt.binding(function() { return root.activeRequestKey })
+                item.source = Qt.binding(function() { return root.hdrPresentedSource() })
+                item.active = true
             }
         }
     }
 
-    MouseArea {
-        id: pointerLayer
-        objectName: "imagePointerLayer"
+    SdrCompositionLayer {
+        objectName: "sdrViewportComposition"
         anchors.fill: parent
-        z: 10
-        acceptedButtons: Qt.LeftButton
-        hoverEnabled: true
-        preventStealing: true
-        enabled: !root.interactionBlocked
+        whiteScale: root.sdrWhiteScale
+        // Draw only the boundaries that cross the viewport. These are the cells
+        // of the actual displayed raster, including an animation or video frame.
+        Canvas {
+            id: pixelGrid
+            objectName: "pixelGrid"
+            anchors.fill: parent
+            z: 5
+            visible: root.pixelGridVisible
 
-        readonly property bool hoverOnImage:
-            containsMouse
-            && root.imageStatus === Image.Ready
-            && root.pointHitsImage(mouseX, mouseY)
+            onPaint: {
+                const ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                if (!root.pixelGridVisible)
+                    return
 
-        property real lastX: 0
-        property real lastY: 0
-        property point pressPosition: Qt.point(0, 0)
-        property bool dragged: false
-        property bool pressedOnImage: false
-
-        cursorShape: root.fullScreenMode
-            ? ((hoverOnImage && pressed)
-                ? Qt.ClosedHandCursor
-                : ((hoverOnImage && root.imageStatus === Image.Ready) ? Qt.OpenHandCursor : Qt.ArrowCursor))
-            : ((containsMouse && root.imageStatus === Image.Ready)
-                ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
-                : Qt.ArrowCursor)
-
-        onPressed: function(mouse) {
-            root.updateHoveredPixel(mouse.x, mouse.y)
-            pressPosition = Qt.point(mouse.x, mouse.y)
-            dragged = false
-            pressedOnImage = root.imageStatus === Image.Ready
-                && root.pointHitsImage(mouse.x, mouse.y)
-            if (root.imageStatus !== Image.Ready)
-                return
-
-            // Playback intent must not enqueue a still-image promotion that
-            // closes its own admission gate before the single-click timer fires.
-            if (!root.floatingPlaybackEnabled)
-                root.promoteFullResRequested()
-            root.cancelZoomAnimationRequested()
-
-            if (!root.fullScreenMode && !root.windowedInspectionMode) {
-                if (root.pointHitsImage(mouse.x, mouse.y) && !root.floatingPlaybackEnabled)
-                    root.windowMoveStarted()
-                return
+                const dpr = Math.max(1, root.devicePixelRatio)
+                const left = Math.max(0, root.gridImageX)
+                const right = Math.min(root.width, root.gridImageRight)
+                const top = Math.max(0, root.gridImageY)
+                const bottom = Math.min(root.height, root.gridImageBottom)
+                if (left >= right || top >= bottom)
+                    return
+                const firstX = Math.max(0, Math.ceil((left - root.gridImageX)
+                    / root.rasterCellWidth))
+                const lastX = Math.min(root.inspectedRasterWidth, Math.floor(
+                    (right - root.gridImageX) / root.rasterCellWidth))
+                const firstY = Math.max(0, Math.ceil((top - root.gridImageY)
+                    / root.rasterCellHeight))
+                const lastY = Math.min(root.inspectedRasterHeight, Math.floor(
+                    (bottom - root.gridImageY) / root.rasterCellHeight))
+                ctx.save()
+                ctx.beginPath()
+                ctx.rect(left, top, right - left, bottom - top)
+                ctx.clip()
+                ctx.lineWidth = 1 / dpr
+                ctx.strokeStyle = "rgba(128, 128, 128, 0.8)"
+                ctx.beginPath()
+                for (let x = firstX; x <= lastX; ++x) {
+                    const boundary = root.gridImageX + x * root.rasterCellWidth
+                    const aligned = (Math.round(boundary * dpr) + 0.5) / dpr
+                    ctx.moveTo(aligned, top)
+                    ctx.lineTo(aligned, bottom)
+                }
+                for (let y = firstY; y <= lastY; ++y) {
+                    const boundary = root.gridImageY + y * root.rasterCellHeight
+                    const aligned = (Math.round(boundary * dpr) + 0.5) / dpr
+                    ctx.moveTo(left, aligned)
+                    ctx.lineTo(right, aligned)
+                }
+                ctx.stroke()
+                ctx.restore()
             }
 
-            if (!root.pointHitsImage(mouse.x, mouse.y))
-                return
-
-            root.disableFitModeRequested()
-            lastX = mouse.x
-            lastY = mouse.y
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onVisibleChanged: requestPaint()
+            Connections {
+                target: root
+                function onGridImageXChanged() {
+                    pixelGrid.requestPaint()
+                    if (pointerLayer.containsMouse)
+                        root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
+                }
+                function onGridImageYChanged() {
+                    pixelGrid.requestPaint()
+                    if (pointerLayer.containsMouse)
+                        root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
+                }
+                function onRasterCellWidthChanged() {
+                    pixelGrid.requestPaint()
+                    if (pointerLayer.containsMouse)
+                        root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
+                }
+                function onRasterCellHeightChanged() {
+                    pixelGrid.requestPaint()
+                    if (pointerLayer.containsMouse)
+                        root.updateHoveredPixel(pointerLayer.mouseX, pointerLayer.mouseY)
+                }
+                function onDevicePixelRatioChanged() { pixelGrid.requestPaint() }
+            }
         }
 
-        onPositionChanged: function(mouse) {
-            root.updateHoveredPixel(mouse.x, mouse.y)
-            if (root.imageStatus !== Image.Ready || !pressed || !pressedOnImage)
-                return
+        Rectangle {
+            objectName: "pixelCoordinateOverlay"
+            property bool sampleCaptureHidden: false
+            z: 9
+            visible: root.pixelGridVisible && root.hoveredPixelX >= 0
+                && root.hoveredPixelY >= 0 && root.sampledPixelColor
+                && root.sampledPixelX === root.hoveredPixelX
+                && root.sampledPixelY === root.hoveredPixelY
+                && !root.presentationOnly && !sampleCaptureHidden
+            x: root.hoverViewportX + width + 16 <= root.width
+                ? root.hoverViewportX + 16
+                : Math.max(8, root.hoverViewportX - width - 16)
+            y: root.hoverViewportY + height + 16 <= root.height
+                ? root.hoverViewportY + 16
+                : Math.max(8, root.hoverViewportY - height - 16)
+            width: pixelCoordinateText.implicitWidth + 16
+            height: pixelCoordinateText.implicitHeight + 10
+            radius: 5
+            color: "#E6191B20"
+            border.color: "#B0FFFFFF"
+            border.width: 1
 
-            if (Math.abs(mouse.x - pressPosition.x) >= root.pointerStyleHints.startDragDistance
-                    || Math.abs(mouse.y - pressPosition.y) >= root.pointerStyleHints.startDragDistance) {
-                if (!dragged && !root.fullScreenMode && root.floatingPlaybackEnabled)
-                    root.windowMoveStarted()
-                dragged = true
+            Text {
+                id: pixelCoordinateText
+                anchors.centerIn: parent
+                objectName: "pixelCoordinateText"
+                text: root.inspectedPixelKind + " (" + root.hoveredPixelX
+                    + ", " + root.hoveredPixelY + ")  "
+                    + (root.sampledPixelColor && root.sampledPixelColor.alpha < 255
+                        ? "RGBA(" + root.sampledPixelColor.red + ", "
+                            + root.sampledPixelColor.green + ", "
+                            + root.sampledPixelColor.blue + ", "
+                            + root.sampledPixelColor.alpha + ")"
+                        : "RGB(" + (root.sampledPixelColor ? root.sampledPixelColor.red : 0)
+                            + ", " + (root.sampledPixelColor ? root.sampledPixelColor.green : 0)
+                            + ", " + (root.sampledPixelColor ? root.sampledPixelColor.blue : 0)
+                            + ")")
+                color: "white"
+                font.pixelSize: 12
+            }
+        }
+
+        Rectangle {
+            id: emptyState
+            objectName: "emptyImageState"
+            anchors.centerIn: parent
+            readonly property bool compact: root.width < 320 || root.height < 200
+            visible: !root.presentationOnly
+                && (root.imageStatus === Image.Loading || root.imageStatus === Image.Error)
+                && root.width >= 180 && root.height >= 110
+            z: 20
+            width: Math.min(420, Math.max(0, parent.width - 24))
+            height: Math.min(parent.height - 24, compact ? 104 : 176)
+            radius: 24
+            color: Qt.rgba(18 / 255, 20 / 255, 24 / 255, 0.94)
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.16)
+            antialiasing: true
+
+            Column {
+                id: emptyStateContent
+                anchors.centerIn: parent
+                spacing: emptyState.compact ? 8 : 14
+
+                Text {
+                    objectName: "emptyStateTitle"
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: text
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    color: "#f2f2f2"
+                    font.pixelSize: emptyState.compact ? 16 : 20
+                    font.weight: Font.DemiBold
+                    renderType: Text.NativeRendering
+                    horizontalAlignment: Text.AlignHCenter
+                    text: root.imageStatus === Image.Loading
+                        ? qsTr("Opening image…")
+                        : root.imageStatus === Image.Error
+                            ? emptyState.compact ? qsTr("Open failed")
+                                                 : qsTr("That image could not be opened")
+                            : ""
+                }
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: !emptyState.compact && root.imageStatus === Image.Error
+                    color: Qt.rgba(1, 1, 1, 0.68)
+                    font.pixelSize: 12
+                    renderType: Text.NativeRendering
+                    text: qsTr("Choose another local image file")
+                }
+
+                Rectangle {
+                    id: openImageButton
+                    objectName: "emptyStateOpenButton"
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: root.imageStatus !== Image.Loading
+                    width: 122
+                    height: 38
+                    radius: height / 2
+                    color: openButton.pressed ? "#2466D8" : openButton.containsMouse ? "#347CF2" : "#2A72E8"
+                    border.width: activeFocus ? 2 : 1
+                    border.color: activeFocus ? "#D8FFFFFF" : "#50FFFFFF"
+                    activeFocusOnTab: true
+
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("Open image")
+                    Accessible.description: root.imageStatus === Image.Error
+                        ? qsTr("That image could not be opened. Choose another local image file. Shortcut: Ctrl+O.")
+                        : qsTr("Choose an image file to view. Shortcut: Ctrl+O.")
+                    Accessible.focusable: visible
+                    Accessible.focused: activeFocus
+                    Accessible.onPressAction: {
+                        openImageButton.forceActiveFocus(Qt.OtherFocusReason)
+                        root.openDialogRequested()
+                    }
+
+                    Keys.onPressed: function(event) {
+                        if (event.key !== Qt.Key_Space && event.key !== Qt.Key_Return
+                                && event.key !== Qt.Key_Enter)
+                            return
+                        if (!event.isAutoRepeat)
+                            root.openDialogRequested()
+                        event.accepted = true
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: qsTr("Open image")
+                        color: "white"
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                        renderType: Text.NativeRendering
+                    }
+
+                    MouseArea {
+                        id: openButton
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onPressed: openImageButton.forceActiveFocus()
+                        onClicked: root.openDialogRequested()
+                    }
+                }
+            }
+
+        }
+
+        Item {
+            id: wheelInputLayer
+
+            x: root.renderedImageX
+            y: root.renderedImageY
+            width: Math.max(0, root.renderedImageRight - root.renderedImageX)
+            height: Math.max(0, root.renderedImageBottom - root.renderedImageY)
+            z: 11
+            visible: root.imageStatus === Image.Ready
+            enabled: visible && !root.interactionBlocked
+
+            WheelHandler {
+                id: imageWheelHandler
+
+                target: null
+                orientation: Qt.Vertical
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                blocking: true
+
+                onWheel: function(wheel) {
+                    const viewportPoint = wheelInputLayer.mapToItem(
+                        root,
+                        point.position.x,
+                        point.position.y
+                    )
+                    root.handleWheel(wheel, viewportPoint.x, viewportPoint.y)
+                }
+            }
+        }
+
+        MouseArea {
+            id: pointerLayer
+            objectName: "imagePointerLayer"
+            anchors.fill: parent
+            z: 10
+            acceptedButtons: Qt.LeftButton
+            hoverEnabled: true
+            preventStealing: true
+            enabled: !root.interactionBlocked
+
+            readonly property bool hoverOnImage:
+                containsMouse
+                && root.imageStatus === Image.Ready
+                && root.pointHitsImage(mouseX, mouseY)
+
+            property real lastX: 0
+            property real lastY: 0
+            property point pressPosition: Qt.point(0, 0)
+            property bool dragged: false
+            property bool pressedOnImage: false
+
+            cursorShape: root.fullScreenMode
+                ? ((hoverOnImage && pressed)
+                    ? Qt.ClosedHandCursor
+                    : ((hoverOnImage && root.imageStatus === Image.Ready) ? Qt.OpenHandCursor : Qt.ArrowCursor))
+                : ((containsMouse && root.imageStatus === Image.Ready)
+                    ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
+                    : Qt.ArrowCursor)
+
+            onPressed: function(mouse) {
+                root.updateHoveredPixel(mouse.x, mouse.y)
+                pressPosition = Qt.point(mouse.x, mouse.y)
+                dragged = false
+                pressedOnImage = root.imageStatus === Image.Ready
+                    && root.pointHitsImage(mouse.x, mouse.y)
+                if (root.imageStatus !== Image.Ready)
+                    return
+
+                // Playback intent must not enqueue a still-image promotion that
+                // closes its own admission gate before the single-click timer fires.
+                if (!root.floatingPlaybackEnabled)
+                    root.promoteFullResRequested()
+                root.cancelZoomAnimationRequested()
+
+                if (!root.fullScreenMode && !root.windowedInspectionMode) {
+                    if (root.pointHitsImage(mouse.x, mouse.y) && !root.floatingPlaybackEnabled)
+                        root.windowMoveStarted()
+                    return
+                }
+
+                if (!root.pointHitsImage(mouse.x, mouse.y))
+                    return
+
+                root.disableFitModeRequested()
+                lastX = mouse.x
+                lastY = mouse.y
+            }
+
+            onPositionChanged: function(mouse) {
+                root.updateHoveredPixel(mouse.x, mouse.y)
+                if (root.imageStatus !== Image.Ready || !pressed || !pressedOnImage)
+                    return
+
+                if (Math.abs(mouse.x - pressPosition.x) >= root.pointerStyleHints.startDragDistance
+                        || Math.abs(mouse.y - pressPosition.y) >= root.pointerStyleHints.startDragDistance) {
+                    if (!dragged && !root.fullScreenMode && root.floatingPlaybackEnabled)
+                        root.windowMoveStarted()
+                    dragged = true
+                    playbackClickTimer.stop()
+                }
+
+                if (!root.fullScreenMode && !root.windowedInspectionMode) {
+                    root.windowMoveUpdated()
+                    return
+                }
+
+                root.panRequested(mouse.x - lastX, mouse.y - lastY)
+                lastX = mouse.x
+                lastY = mouse.y
+            }
+
+            onContainsMouseChanged: {
+                if (!containsMouse) {
+                    root.hoveredPixelX = -1
+                    root.hoveredPixelY = -1
+                }
+            }
+
+            onReleased: {
+                if (root.fullScreenMode || root.windowedInspectionMode)
+                    root.clampPanRequested()
+                else
+                    root.windowMoveFinished()
+            }
+
+            onCanceled: {
                 playbackClickTimer.stop()
+                if (root.fullScreenMode || root.windowedInspectionMode)
+                    root.clampPanRequested()
+                else
+                    root.windowMoveFinished()
             }
 
-            if (!root.fullScreenMode && !root.windowedInspectionMode) {
-                root.windowMoveUpdated()
-                return
+            onClicked: function(mouse) {
+                if (pressedOnImage && !dragged && !root.fullScreenMode && root.floatingPlaybackEnabled
+                        && root.playbackInteractionEnabled && root.imageStatus === Image.Ready
+                        && root.pointHitsImage(mouse.x, mouse.y))
+                    playbackClickTimer.restart()
             }
 
-            root.panRequested(mouse.x - lastX, mouse.y - lastY)
-            lastX = mouse.x
-            lastY = mouse.y
-        }
+            onDoubleClicked: function(mouse) {
+                playbackClickTimer.stop()
+                if (root.imageStatus !== Image.Ready
+                        || !root.pointHitsImage(mouse.x, mouse.y))
+                    return
 
-        onContainsMouseChanged: {
-            if (!containsMouse) {
-                root.hoveredPixelX = -1
-                root.hoveredPixelY = -1
+                if (root.fullScreenMode) {
+                    root.exitFullscreenToImageRequested()
+                    return
+                }
+
+                root.enterFullscreenRequested()
             }
         }
 
-        onReleased: {
-            if (root.fullScreenMode || root.windowedInspectionMode)
-                root.clampPanRequested()
-            else
-                root.windowMoveFinished()
-        }
+        DropArea {
+            anchors.fill: parent
 
-        onCanceled: {
-            playbackClickTimer.stop()
-            if (root.fullScreenMode || root.windowedInspectionMode)
-                root.clampPanRequested()
-            else
-                root.windowMoveFinished()
-        }
-
-        onClicked: function(mouse) {
-            if (pressedOnImage && !dragged && !root.fullScreenMode && root.floatingPlaybackEnabled
-                    && root.playbackInteractionEnabled && root.imageStatus === Image.Ready
-                    && root.pointHitsImage(mouse.x, mouse.y))
-                playbackClickTimer.restart()
-        }
-
-        onDoubleClicked: function(mouse) {
-            playbackClickTimer.stop()
-            if (root.imageStatus !== Image.Ready
-                    || !root.pointHitsImage(mouse.x, mouse.y))
-                return
-
-            if (root.fullScreenMode) {
-                root.exitFullscreenToImageRequested()
-                return
-            }
-
-            root.enterFullscreenRequested()
-        }
-    }
-
-    DropArea {
-        anchors.fill: parent
-
-        onDropped: function(drop) {
-            if (drop.hasUrls && drop.urls.length > 0) {
-                const u = drop.urls[0]
-                if (!root.canOpen || root.canOpen(u)) {
-                    root.openUrlRequested(u)
-                    drop.acceptProposedAction()
+            onDropped: function(drop) {
+                if (drop.hasUrls && drop.urls.length > 0) {
+                    const u = drop.urls[0]
+                    if (!root.canOpen || root.canOpen(u)) {
+                        root.openUrlRequested(u)
+                        drop.acceptProposedAction()
+                    }
                 }
             }
         }

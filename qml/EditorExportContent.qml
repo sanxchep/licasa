@@ -21,6 +21,7 @@ Item {
     property string estimatedSize: ""
     property bool saveBusy: false
     property bool hasImage: true
+    property bool sdrCopyRequired: false
     property bool advancedOpen: false
     readonly property bool icon: root.contains(["ico", "cur", "icns"], effectiveFormat)
     readonly property bool mono: root.contains(["pbm", "wbmp", "xbm"], effectiveFormat)
@@ -306,7 +307,8 @@ Item {
                 subtitle: qsTr("Use standard colors for screens.")
                 buttonMotionDuration: root.buttonMotionDuration
                 switchMotionDuration: root.buttonMotionDuration > 0 ? 160 : 0
-                checked: root.setting("srgb", false)
+                checked: root.sdrCopyRequired || root.setting("srgb", false)
+                enabled: !root.sdrCopyRequired
                 onToggled: function(v) { root.settingRequested("srgb", v) }
             }
             Text {
@@ -341,6 +343,15 @@ Item {
         y: Math.max(settingsColumn.implicitHeight + 12, root.height - implicitHeight)
         spacing: 12
         Text {
+            objectName: "editorSdrExportNotice"
+            visible: root.sdrCopyRequired
+            width: parent.width
+            text: qsTr("An SDR export contains only the still image. Copy the original file to keep any HDR or embedded media.")
+            color: "#C8FFFFFF"
+            font.pixelSize: 12
+            wrapMode: Text.Wrap
+        }
+        Text {
             visible: root.saveStatus.length > 0
             width: parent.width
             text: root.saveStatus
@@ -353,8 +364,9 @@ Item {
             width: parent.width
             sectionStyle: true
             affirmative: true
-            text: root.saveBusy ? qsTr("Exporting…") : qsTr("Export ") + root.formatLabel
-                + (root.estimatedSize.length > 0 ? " · " + root.estimatedSize : "")
+            text: root.saveBusy ? qsTr("Exporting…")
+                : (root.sdrCopyRequired ? qsTr("Export SDR copy") : qsTr("Export ") + root.formatLabel)
+                    + (root.estimatedSize.length > 0 ? " · " + root.estimatedSize : "")
             subtitle: root.icon ? root.iconPixels + " × " + root.iconPixels + qsTr(" pixels") : root.outputWidth + " × " + root.outputHeight + qsTr(" pixels")
             enabled: root.hasImage && !root.saveBusy
             animationDuration: root.buttonMotionDuration

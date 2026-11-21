@@ -4,6 +4,7 @@
 #include "imaging/image_resource_policy.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QFileInfo>
 #include <QMutexLocker>
 #include <utility>
 
@@ -49,6 +50,16 @@ QString ImageSaveService::sourceVersion(const QUrl& sourceUrl) const
     }
     const auto identity = externalFileIdentity(source);
     return identity ? versionToken(*identity) : QString();
+}
+
+bool ImageSaveService::requiresSdrExport(const QUrl& sourceUrl) const
+{
+    if (!sourceUrl.isLocalFile() || !QFileInfo(sourceUrl.toLocalFile()).isFile()) {
+        return false;
+    }
+    QFile source(sourceUrl.toLocalFile());
+    return source.open(QIODevice::ReadOnly) &&
+           ImageSaveOperations::requiresSdrExport(source);
 }
 
 bool ImageSaveService::save(const QUrl& sourceUrl, const QUrl& destinationUrl,

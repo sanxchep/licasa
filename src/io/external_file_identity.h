@@ -46,6 +46,41 @@ inline bool operator!=(const ExternalFileIdentity& left, const ExternalFileIdent
     return !(left == right);
 }
 
+#if defined(Q_OS_UNIX)
+namespace ExternalFileIdentityDetail {
+inline std::optional<ExternalFileIdentity> fromStat(const struct stat& status)
+{
+    if (!S_ISREG(status.st_mode) || status.st_size < 0) {
+        return std::nullopt;
+    }
+#if defined(Q_OS_DARWIN)
+    const auto modified = status.st_mtimespec;
+    const auto changed = status.st_ctimespec;
+#else
+    const auto modified = status.st_mtim;
+    const auto changed = status.st_ctim;
+#endif
+    return ExternalFileIdentity{
+        quint64(status.st_dev),  quint64(status.st_ino),  quint64(status.st_nlink),
+        quint64(status.st_size), qint64(modified.tv_sec), qint64(modified.tv_nsec),
+        qint64(changed.tv_sec),  qint64(changed.tv_nsec),
+    };
+}
+} // namespace ExternalFileIdentityDetail
+
+// Resolve the current path without reopening it on cache hits. A decoder
+// still compares its open descriptor with this identity before using it.
+inline std::optional<ExternalFileIdentity> externalFileIdentityAtPath(const QString& path)
+{
+    const QByteArray name = QFile::encodeName(path);
+    struct stat status {};
+    if (::stat(name.constData(), &status) != 0) {
+        return std::nullopt;
+    }
+    return ExternalFileIdentityDetail::fromStat(status);
+}
+#endif
+
 inline std::optional<ExternalFileIdentity> externalFileIdentity(const QFile& file,
                                                                 QString* reason = nullptr)
 {
@@ -64,24 +99,11 @@ inline std::optional<ExternalFileIdentity> externalFileIdentity(const QFile& fil
         }
         return std::nullopt;
     }
-    if (!S_ISREG(status.st_mode) || status.st_size < 0) {
-        if (reason) {
-            *reason = QStringLiteral("External video source is not a regular file");
-        }
-        return std::nullopt;
+    const auto identity = ExternalFileIdentityDetail::fromStat(status);
+    if (!identity && reason) {
+        *reason = QStringLiteral("External video source is not a regular file");
     }
-#if defined(Q_OS_DARWIN)
-    const auto modified = status.st_mtimespec;
-    const auto changed = status.st_ctimespec;
-#else
-    const auto modified = status.st_mtim;
-    const auto changed = status.st_ctim;
-#endif
-    return ExternalFileIdentity{
-        quint64(status.st_dev),  quint64(status.st_ino),  quint64(status.st_nlink),
-        quint64(status.st_size), qint64(modified.tv_sec), qint64(modified.tv_nsec),
-        qint64(changed.tv_sec),  qint64(changed.tv_nsec),
-    };
+    return identity;
 #else
     Q_UNUSED(file);
     if (reason) {

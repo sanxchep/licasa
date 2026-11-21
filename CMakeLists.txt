@@ -29,6 +29,7 @@ install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/licasa)
 
 # Optional IPO/LTO switch. Enabled by default, but only applied when supported.
 option(LICASA_ENABLE_IPO "Enable IPO/LTO for release builds when supported" ON)
+option(LICASA_ENABLE_HDR_VIEWER_LAB "Build gated Qt 6.11 Vulkan HDR viewer integration (unqualified for release)" OFF)
 option(LICASA_BUILD_DIAGNOSTICS "Build format diagnostics and performance runner" OFF)
 option(LICASA_ENABLE_GPU_EDITS "Build optional, lazily loaded GPU edit backends" ON)
 option(LICASA_ENABLE_HEIF "Build the application-private HEIC/HEIF Qt reader" OFF)
@@ -57,6 +58,13 @@ endif()
 include(cmake/LicasaRuntimeProfiles.cmake)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickDialogs2 LinguistTools)
+if(LICASA_ENABLE_HDR_VIEWER_LAB)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR Qt6_VERSION VERSION_LESS "6.11" OR Qt6_VERSION VERSION_GREATER_EQUAL "6.12")
+        message(FATAL_ERROR "The HDR viewer lab requires the separately qualified Linux Qt 6.11 Vulkan runtime")
+    endif()
+    find_package(Qt6 REQUIRED COMPONENTS Concurrent GuiPrivate)
+    include(cmake/LicasaWaylandHdr.cmake)
+endif()
 if(LICASA_ENABLE_MOTION_PLAYBACK)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Multimedia)
     # Bounded QIODevice playback requires the patched private plugin for the
@@ -123,6 +131,9 @@ endif()
 qt_standard_project_setup()
 
 set(LICASA_PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/licasa/plugins")
+if(LICASA_ENABLE_HDR_VIEWER_LAB)
+    include(cmake/LicasaHdrCodec.cmake)
+endif()
 if(LICASA_QT_EXTRA_IMAGEFORMATS_DIR)
     foreach(extra_plugin libqtiff.so libqwebp.so)
         if(NOT EXISTS "${LICASA_QT_EXTRA_IMAGEFORMATS_DIR}/${extra_plugin}")
@@ -402,6 +413,10 @@ add_library(licasa_image_services STATIC
         src/export/image_save_operations.h
         src/export/image_save_service.cpp
         src/export/image_save_service.h
+        src/io/atomic_file_copy.cpp
+        src/io/atomic_file_copy.h
+        src/io/byte_range_device.cpp
+        src/io/byte_range_device.h
         src/imaging/async_image_provider.cpp
         src/imaging/async_image_provider.h
         src/imaging/nearby_preview_cache.cpp
@@ -522,10 +537,6 @@ set(LICASA_APPLICATION_SOURCES
         src/media/android_motion_photo.h
         src/export/animation_export.cpp
         src/export/animation_export.h
-        src/io/atomic_file_copy.cpp
-        src/io/atomic_file_copy.h
-        src/io/byte_range_device.cpp
-        src/io/byte_range_device.h
         src/io/external_file_identity.h
         src/imaging/codec_plugins.cpp
         src/imaging/codec_plugins.h
@@ -636,6 +647,7 @@ function(licasa_add_qml target_name)
         # unrelated, deliberately-invalid Qt parser/fuzz fixtures in build/deps.
         set(import_scan_option NO_IMPORT_SCAN)
     endif()
+    target_include_directories(${target_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/imaging/hdr")
     qt_add_qml_module(${target_name}
             URI Licasa
             VERSION 1.0
@@ -662,6 +674,7 @@ function(licasa_add_qml target_name)
             qml/TemporalExportCoordinator.qml
             qml/FullscreenSideMenu.qml
             qml/FullscreenSettingsContent.qml
+            qml/HdrCalibrationSettings.qml
             qml/ShortcutsDialog.qml
             qml/EditorSidePanel.qml
             qml/EditorPanelContent.qml
@@ -678,6 +691,7 @@ function(licasa_add_qml target_name)
             qml/ViewerTemporalControls.qml
             qml/WindowedMoveController.qml
             qml/WindowedZoomController.qml
+            qml/components/SdrCompositionLayer.qml
             qml/components/HeaderButton.qml
             qml/components/ExportChoice.qml
             qml/components/ExportNumber.qml
@@ -691,18 +705,42 @@ function(licasa_add_qml target_name)
             qml/components/InteractiveScrollBar.qml
             qml/components/RoundIconButton.qml
             SOURCES
+            src/imaging/hdr/hdr_image_item.cpp
+            src/imaging/hdr/hdr_image_item.h
             src/media/motion/motion_photo_frame_surface.cpp
             src/media/motion/motion_photo_frame_surface.h
             RESOURCES
+            assets/shaders/sdr-composition.frag
+            assets/shaders/sdr-composition.frag.qsb
             assets/shaders/shortcuts-blur.frag
             assets/shaders/shortcuts-blur.frag.qsb
             qml/MotionPhotoFrameSurfaceHost.qml
+            qml/HdrImageSurfaceHost.qml
+            qml/HdrOverlayCompositionHost.qml
             assets/icons/settings.svg
             assets/icons/edit.svg
             assets/icons/exit-fullscreen.svg
             assets/icons/close.svg
             assets/icons/notifications.svg
     )
+    if(LICASA_ENABLE_HDR_VIEWER_LAB)
+        target_sources(${target_name} PRIVATE
+            src/imaging/hdr/vulkan_frame_fence.cpp
+            src/imaging/hdr/output_negotiation.cpp
+            src/imaging/hdr/render_target_budget.cpp
+            src/imaging/hdr/adapter_budget.cpp
+            tools/gainmap-lab/async_decoder.cpp tools/gainmap-lab/request_coordinator.cpp
+            tools/gainmap-lab/jpeg_gainmap.cpp tools/hdr-probe/gainmap_photo.cpp
+            tools/hdr-probe/surface_format.cpp)
+        target_compile_definitions(${target_name} PRIVATE
+                LICASA_ENABLE_HDR_VIEWER_LAB LICASA_USE_PRIVATE_UHDR)
+        target_include_directories(${target_name} PRIVATE "${UHDR_INCLUDE_DIR}")
+        target_link_libraries(${target_name} PRIVATE Qt6::Concurrent Qt6::GuiPrivate licasa_hdr_wayland)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+            set_source_files_properties(tools/hdr-probe/surface_format.cpp PROPERTIES COMPILE_OPTIONS "-fno-sanitize=vptr")
+        endif()
+    endif()
+
 endfunction()
 licasa_add_qml(licasa)
 # Explicit source collection and the separate Linguist commands also work on
@@ -779,8 +817,11 @@ if(LICASA_BUILD_DIAGNOSTICS)
             tools/diagnostics_common.cpp
             tools/diagnostics_raw_behavior.cpp
             tools/diagnostics_motion_controls.cpp
+            tools/diagnostics_motion_hdr.cpp
+            tools/diagnostics_camera_navigation.cpp
             tools/diagnostics_playback_click.h
             tools/diagnostics_navigation_transition.cpp
+            tools/diagnostics_hdr_navigation.cpp
             tools/diagnostics_viewer_measurement.cpp
             ${LICASA_APPLICATION_SOURCES})
     target_include_directories(licasa_diagnostics PRIVATE src)
@@ -791,6 +832,9 @@ if(LICASA_BUILD_DIAGNOSTICS)
         target_link_libraries(licasa_diagnostics PRIVATE X11::X11)
     endif()
     licasa_add_qml(licasa_diagnostics)
+    if(LICASA_ENABLE_HDR_VIEWER_LAB)
+        target_compile_definitions(licasa_diagnostics PRIVATE LICASA_HDR_RETRY_DIAGNOSTIC)
+    endif()
     licasa_enable_warnings(licasa_diagnostics)
     if(LICASA_ENABLE_MOTION_PLAYBACK)
         licasa_enable_motion_backend_loader(licasa_diagnostics)

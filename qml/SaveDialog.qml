@@ -16,6 +16,7 @@ FileDialog {
     required property var formatSupport
     required property url suggestedFile
     property string fileFormat: ""
+    property bool originalCopy: false
 
     signal fileChosen(url fileUrl)
     signal openFailed(string message)
@@ -36,12 +37,12 @@ FileDialog {
 
     title: qsTr("Save as a copy")
     fileMode: FileDialog.SaveFile
-    nameFilters: fileFormat.length > 0
+    nameFilters: originalCopy ? [qsTr("All files (*)")] : fileFormat.length > 0
         ? formatSupport.saveNameFilters.filter(function(filter) {
             return String(filter).indexOf("*." + FileUrls.parts(suggestedFile).suffix) >= 0
                 && String(filter) !== formatSupport.allWritableNameFilter
         }) : formatSupport.saveNameFilters
-    defaultSuffix: FileUrls.parts(suggestedFile).suffix || "png"
+    defaultSuffix: FileUrls.parts(suggestedFile).suffix || (originalCopy ? "" : "png")
 
     Component.onCompleted: {
         selectedFile = suggestedFile

@@ -33,6 +33,9 @@ class PreferredCoverFrameCoordinator final : public QObject {
     // invokables, so QML cannot inject source identities or raw temporal values.
     void setSource(const QUrl& sourceUrl, PreferredCoverFrameKind kind);
     void clearSource();
+    // A Motion Photo binding ends with the open that made it, so opening the
+    // same file again reloads its stored choice. Animation bindings are kept.
+    void clearMotionSource();
     void setCurrentState(qint64 value, bool canSetCurrent, bool canApplyPreferred);
     void setApplyHandler(std::function<bool(qint64)> handler);
 

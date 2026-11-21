@@ -20,6 +20,22 @@ Column {
         return -1
     }
 
+    Loader {
+        id: hdrCalibrationLoader
+        objectName: "hdrCalibrationLoader"
+        width: parent.width
+        active: content.menu.hdrOutputController !== null
+        function loadControls() {
+            if (active) setSource(Qt.resolvedUrl("HdrCalibrationSettings.qml"), { controller: content.menu.hdrOutputController })
+        }
+        onActiveChanged: loadControls()
+        Component.onCompleted: { if (active && status === Loader.Null) loadControls() }
+        Connections {
+            target: content.menu
+            function onHdrOutputControllerChanged() { hdrCalibrationLoader.loadControls() }
+        }
+    }
+
     Column {
         objectName: "languageSettingRow"
         visible: content.menu.languageManager !== null

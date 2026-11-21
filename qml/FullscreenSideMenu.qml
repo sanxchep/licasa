@@ -24,6 +24,7 @@ Item {
     property bool startInFullscreenEnabled: true
     property var backgroundModeManager: null
     property var languageManager: null
+    property var hdrOutputController: null
     property string appVersion: ""
     property string releaseDate: ""
     property bool installedAsSnap: false

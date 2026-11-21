@@ -25,6 +25,7 @@ Item {
     property bool hasAdjustments: false
     property bool saveBusy: false
     property bool sourceChanged: false
+    property bool sdrCopyRequired: false
     property url imageSource: ""
     property bool overwriteConfirmationOpen: false
     readonly property Item focusedItem: Window.window ? Window.window.activeFocusItem : null
@@ -39,7 +40,7 @@ Item {
     }
     readonly property bool pendingNumber: focusedNumber !== null && focusedNumber.dirty
     readonly property bool canOverwrite: panelOpen && hasImage && (hasAdjustments || pendingNumber)
-        && !saveBusy && !cropMode && !sourceChanged
+        && !saveBusy && !cropMode && !sourceChanged && !sdrCopyRequired
     property string saveStatus: ""
     property bool cropMode: false
     property string cropAspectPreset: "free"
@@ -753,7 +754,7 @@ Item {
                     Accessible.ignored: root.cropMode || !footer.enabled
                     width: parent.width - x
                     height: parent.height
-                    text: qsTr("Save as a copy")
+                    text: root.sdrCopyRequired ? qsTr("Copy original file") : qsTr("Save as a copy")
                     enabled: !root.saveBusy && root.hasImage && !root.sourceChanged
                     animationDuration: root.buttonMotionDuration
                     onClicked: {

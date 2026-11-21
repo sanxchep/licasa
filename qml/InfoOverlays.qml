@@ -6,6 +6,7 @@
 */
 
 import QtQuick
+import "components"
 
 Item {
     id: root
@@ -22,6 +23,26 @@ Item {
     required property real currentScale
 
     property bool editorPanelVisible: false
+    property string hdrStatusText: ""
+    property string hdrPhotoStatusText: ""
+    signal hdrSettingsRequested()
+
+    ActionChip {
+        objectName: "hdrOutputStatusBadge"
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: root.fullScreenMode && root.compareOriginal ? 54 : 18
+        width: Math.min(520, Math.max(0, parent.width - 160))
+        visible: text.length > 0 && root.infoOverlayEnabled && root.imageReady && !root.editorPanelVisible
+        text: root.hdrPhotoStatusText || root.hdrStatusText
+        subtitle: root.hdrPhotoStatusText && root.hdrStatusText
+            ? root.hdrStatusText + "\n" + qsTr("Display settings")
+            : qsTr("Display settings")
+        sectionStyle: true
+        onClicked: root.hdrSettingsRequested()
+        Rectangle { anchors.fill: parent; z: -1; radius: 12; color: "#E0161616" }
+    }
+
     property bool smoothMotionEnabled: true
 
     Rectangle {

@@ -742,7 +742,7 @@ ImageExportOptions exportOptionsFromMap(const QVariantMap& values)
                                  QStringLiteral("hotspotX"),      QStringLiteral("hotspotY"),
                                  QStringLiteral("dpi"),           QStringLiteral("srgb"),
                                  QStringLiteral("stripMetadata"), QStringLiteral("copyOnly"),
-                                 QStringLiteral("symbol")};
+                                 QStringLiteral("copyOriginalBytes"), QStringLiteral("symbol")};
     for (auto it = values.cbegin(); it != values.cend(); ++it) {
         if (!allowed.contains(it.key())) {
             options.validationError = QStringLiteral("Unknown export option: %1").arg(it.key());
@@ -790,6 +790,7 @@ ImageExportOptions exportOptionsFromMap(const QVariantMap& values)
     options.srgb = values.value(QStringLiteral("srgb"), false).toBool();
     options.stripMetadata = values.value(QStringLiteral("stripMetadata"), true).toBool();
     options.copyOnly = values.value(QStringLiteral("copyOnly"), false).toBool();
+    options.copyOriginalBytes = values.value(QStringLiteral("copyOriginalBytes"), false).toBool();
     options.symbol =
         values.value(QStringLiteral("symbol"), QStringLiteral("licasa_image")).toString();
     return options;

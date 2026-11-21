@@ -171,6 +171,12 @@ class MotionPhotoControlsCheck final : public QObject, public DiagnosticCheck {
             if (!session_->available() || !control) {
                 return;
             }
+            // The HDR viewer keeps its scene hidden until it has sampled the
+            // native surface format; the tray's effective visibility follows.
+            if (const QVariant ready = window_->property("hdrCompositionReady");
+                ready.isValid() && !ready.toBool()) {
+                return;
+            }
             if (multimediaMapped()) {
                 finish(QStringLiteral("Temporal tray loaded Multimedia before playback intent"));
                 return;

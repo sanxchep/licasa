@@ -64,6 +64,7 @@ struct ImageExportOptions {
     bool srgb = false;
     bool stripMetadata = true;
     bool copyOnly = false;
+    bool copyOriginalBytes = false;
     QString validationError;
     QString symbol = QStringLiteral("licasa_image");
 };

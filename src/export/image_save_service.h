@@ -22,6 +22,7 @@ class ImageSaveService final : public QObject {
 
     bool busy() const;
     Q_INVOKABLE QString sourceVersion(const QUrl& sourceUrl) const;
+    Q_INVOKABLE bool requiresSdrExport(const QUrl& sourceUrl) const;
 
     // Results identify the initiating window independently of its source URL.
     // Requests observe the owner weakly so closing a window never keeps it alive.

@@ -43,6 +43,7 @@ QtObject {
     property rect restoreGeometry: Qt.rect(0, 0, 1, 1)
     property bool restoreGeometryValid: false
     property bool suppressGeometryCapture: false
+    property int restoreGeometryRetries: 0
 
     function screenGeometry() {
         if (gestureActive)
@@ -134,11 +135,23 @@ QtObject {
     }
 
     function captureGeometry() {
-        if (hostWindow.fullScreenMode || gestureActive || suppressGeometryCapture)
+        if (hostWindow.fullScreenMode || gestureActive)
             return
 
         const geometry = currentNativeGeometry()
         if (geometry.width <= 0 || geometry.height <= 0)
+            return
+
+        if (restoreGeometryRetries > 0 && stateValid && hostWindow.hasImage()) {
+            const expected = exactGeometryForScale(scale)
+            if (geometry.width !== expected.width || geometry.height !== expected.height) {
+                // Native window-state feedback may arrive after the first
+                // restore frame. Keep the intended image scale and bounds.
+                applyTimer.restart()
+                return
+            }
+        }
+        if (suppressGeometryCapture)
             return
 
         restoreGeometry = Qt.rect(
@@ -490,11 +503,15 @@ QtObject {
         targetScale = 1.0
         geometryAnchorActive = false
         suppressGeometryCapture = false
+        restoreGeometryRetries = 0
+        restoreGeometryReleaseTimer.stop()
         contentX = 0
         contentY = 0
     }
 
     function restore() {
+        restoreGeometryRetries = 4
+        restoreGeometryReleaseTimer.restart()
         if (!restoreGeometryValid) {
             restoreGeometry = defaultGeometry()
             restoreGeometryValid = true
@@ -526,6 +543,12 @@ QtObject {
         interval: 250
         repeat: false
         onTriggered: controller.suppressGeometryCapture = false
+    }
+
+    property Timer restoreGeometryReleaseTimer: Timer {
+        interval: 1000
+        repeat: false
+        onTriggered: controller.restoreGeometryRetries = 0
     }
 
     property NumberAnimation zoomAnimation: NumberAnimation {
@@ -652,6 +675,7 @@ QtObject {
                 return
             }
 
+            controller.restoreGeometryRetries = Math.max(0, controller.restoreGeometryRetries - 1)
             if (controller.hostWindow.hasImage()) {
                 controller.ensureState()
                 controller.setTopLeftAnchor(

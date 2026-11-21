@@ -12,6 +12,8 @@ struct MotionPhotoFrameRaster;
 
 namespace ImageSaveOperations {
 
+bool requiresSdrExport(QFile& source);
+
 struct ImageSaveResult {
     QUrl destinationUrl;
     QString errorMessage;

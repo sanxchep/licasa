@@ -4,6 +4,7 @@
 #include "imaging/image_decode_contract.h"
 #include "imaging/image_edit_pipeline.h"
 #include "imaging/image_processing.h"
+#include "io/atomic_file_copy.h"
 #include "io/external_file_identity.h"
 #include "media/motion/motion_photo_frame.h"
 #include <QColorSpace>
@@ -13,7 +14,9 @@
 #include <QImageReader>
 #include <QImageWriter>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QTemporaryDir>
+#include <QtEndian>
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -25,6 +28,45 @@ namespace {
 QString userMessage(const char* source)
 {
     return QCoreApplication::translate("ImageSaveOperations", source);
+}
+
+bool jpegHasMultiPictureIndex(QFile& source)
+{
+    // MPF can also describe other multi-picture JPEGs. Preserve those sources
+    // as well because a still writer cannot reconstruct their auxiliary data.
+    const qint64 limit = std::min<qint64>(source.size(), 1024 * 1024);
+    if (!source.seek(2)) {
+        return false;
+    }
+    for (int segment = 0; segment < 512 && source.pos() < limit; ++segment) {
+        char marker = 0;
+        if (!source.getChar(&marker) || uchar(marker) != 0xff) {
+            return false;
+        }
+        do {
+            if (source.pos() >= limit || !source.getChar(&marker)) {
+                return false;
+            }
+        } while (uchar(marker) == 0xff);
+        if (uchar(marker) == 0xda || uchar(marker) == 0xd9 || limit - source.pos() < 2) {
+            return false;
+        }
+        const QByteArray length = source.read(2);
+        if (length.size() != 2) {
+            return false;
+        }
+        const int payload = int(qFromBigEndian<quint16>(length.constData())) - 2;
+        if (payload < 0 || payload > limit - source.pos()) {
+            return false;
+        }
+        if (uchar(marker) == 0xe2 && payload >= 4 && source.peek(4) == QByteArrayView("MPF\0", 4)) {
+            return true;
+        }
+        if (!source.seek(source.pos() + payload)) {
+            return false;
+        }
+    }
+    return false;
 }
 
 QByteArray normalizedWriterFormat(const QString& suffix)
@@ -196,6 +238,19 @@ ImageSaveResult writeExportImage(QImage image, const ImageDestination& destinati
 
 } // namespace
 
+bool requiresSdrExport(QFile& source)
+{
+    const qint64 position = source.pos();
+    if (position < 0 || !source.seek(0)) {
+        return false;
+    }
+    const auto restorePosition = qScopeGuard([&source, position] { source.seek(position); });
+    if (source.peek(2) == QByteArrayView("\xff\xd8", 2)) {
+        return jpegHasMultiPictureIndex(source);
+    }
+    return false;
+}
+
 ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationPath,
                                  const ImageEditParameters& parameters,
                                  const ImageExportOptions& options, int maximumMegapixels,
@@ -208,12 +263,6 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
         return {{},
                 userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations",
                                               "The original image no longer exists."))};
-    }
-
-    const ImageDestination destination =
-        resolveImageDestination(std::move(destinationPath), options, sourceInfo.suffix());
-    if (!destination.errorMessage.isEmpty()) {
-        return {{}, destination.errorMessage};
     }
 
     QFile source(sourceInfo.absoluteFilePath());
@@ -231,20 +280,39 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
             userMessage(QT_TRANSLATE_NOOP("ImageSaveOperations",
                                           "The original image changed before export. Try again."))};
     }
-    bool aliasesSource =
-        QFileInfo(destination.path).canonicalFilePath() == sourceInfo.canonicalFilePath();
-#if defined(Q_OS_UNIX)
-    struct stat destinationStatus {};
-    if (::stat(QFile::encodeName(destination.path).constData(), &destinationStatus) == 0) {
-        aliasesSource = aliasesSource || (quint64(destinationStatus.st_dev) == identity->device &&
-                                          quint64(destinationStatus.st_ino) == identity->inode);
+    if (options.copyOriginalBytes) {
+        if (!options.validationError.isEmpty()) {
+            return {{}, options.validationError};
+        }
+        const QString suffix = sourceInfo.suffix();
+        if (QFileInfo(destinationPath).suffix().isEmpty() && !suffix.isEmpty()) {
+            destinationPath += '.' + suffix;
+        }
+        if (!options.format.isEmpty() ||
+            QFileInfo(destinationPath).suffix().compare(suffix, Qt::CaseInsensitive) != 0) {
+            return {{}, userMessage(QT_TRANSLATE_NOOP(
+                            "ImageSaveOperations", "Keep the original file extension for a byte-for-byte copy."))};
+        }
+        const QString destination = QFileInfo(destinationPath).absoluteFilePath();
+        const QString error = copyFileRangeAtomically(source, *identity, {0, identity->size}, destination);
+        return error.isEmpty() ? ImageSaveResult{QUrl::fromLocalFile(destination), {}}
+                               : ImageSaveResult{{}, error};
     }
-#endif
+    const ImageDestination destination =
+        resolveImageDestination(std::move(destinationPath), options, sourceInfo.suffix());
+    if (!destination.errorMessage.isEmpty()) {
+        return {{}, destination.errorMessage};
+    }
+    const bool aliasesSource = destinationAliasesSource(destination.path, sourcePath, *identity);
     if (options.copyOnly && aliasesSource) {
         return {{},
                 userMessage(QT_TRANSLATE_NOOP(
                     "ImageSaveOperations",
                     "Choose a copy destination different from the original image."))};
+    }
+    if (aliasesSource && requiresSdrExport(source)) {
+        return {{}, userMessage(QT_TRANSLATE_NOOP(
+                        "ImageSaveOperations", "Export an SDR copy to keep the original intact."))};
     }
     QImageReader reader(&source);
     // Saving is an explicit full-pixel operation. RAW viewing's embedded
@@ -281,6 +349,10 @@ ImageSaveResult writeEditedImage(const QString& sourcePath, QString destinationP
     return writeExportImage(
         std::move(image), destination, options, maximumMegapixels,
         [&]() {
+            if (options.copyOnly && destinationAliasesSource(destination.path, sourcePath, *identity)) {
+                return userMessage(QT_TRANSLATE_NOOP(
+                    "ImageSaveOperations", "Choose a copy destination different from the original image."));
+            }
             const auto after = externalFileIdentity(source, &identityError);
             QFile current(sourcePath);
             if (!current.open(QIODevice::ReadOnly)) {
