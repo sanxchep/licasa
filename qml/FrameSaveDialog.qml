@@ -28,5 +28,5 @@ FileDialog {
     defaultSuffix: "png"
 
     Component.onCompleted: selectedFile = suggestedFile
-    onAccepted: fileChosen(selectedFile)
+    onAccepted: fileChosen(DialogRuntime.destinationUrl(selectedFile))
 }

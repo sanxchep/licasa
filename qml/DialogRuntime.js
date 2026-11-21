@@ -1,3 +1,11 @@
+.import "FileUrls.js" as FileUrls
+
+function destinationUrl(selection) {
+    // Qt 6.4's fallback save picker returns an absolute path for typed names.
+    const value = String(selection)
+    return value.startsWith("/") ? FileUrls.fromLocalPath(value) : selection
+}
+
 // Probe the fallback dependency before Qt 6.4 FileDialog enters its native
 // open path. Its C++ fallback dereferences a null implementation if this import
 // fails, so Loader.Error and JavaScript exceptions around open() are too late.
