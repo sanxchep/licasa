@@ -1,0 +1,136 @@
+--- a/src/gui/image/qxbmhandler.cpp
++++ b/src/gui/image/qxbmhandler.cpp
+@@ -12,7 +12,6 @@
+ #include <qvariant.h>
+ 
+ #include <stdio.h>
+-#include <ctype.h>
+ 
+ QT_BEGIN_NAMESPACE
+ 
+@@ -22,10 +21,13 @@
+   X bitmap image read/write functions
+  *****************************************************************************/
+ 
+-static inline int hex2byte(char *p)
++static inline unsigned hexDigit(uchar byte)
+ {
+-    return ((isdigit((uchar) *p) ? *p - '0' : toupper((uchar) *p) - 'A' + 10) << 4) |
+-           (isdigit((uchar) *(p+1)) ? *(p+1) - '0' : toupper((uchar) *(p+1)) - 'A' + 10);
++    const unsigned decimal = unsigned(byte) - '0';
++    if (decimal <= 9)
++        return decimal;
++    const unsigned letter = unsigned(byte | 0x20) - 'a';
++    return letter <= 5 ? letter + 10 : 16;
+ }
+ 
+ static bool read_xbm_header(QIODevice *device, int& w, int& h)
+@@ -96,57 +98,64 @@
+ 
+ static bool read_xbm_body(QIODevice *device, int w, int h, QImage *outImage)
+ {
+-    const int buflen = 300;
+-    char buf[buflen + 1];
+-
+-    qint64 readBytes = 0;
+-
+-    char *p;
+-
+-    // scan for database
+-    do {
+-        if ((readBytes = device->readLine(buf, buflen)) <= 0) {
+-            // end of file
+-            return false;
++    constexpr int readSize = 300;
++    constexpr int tokenSize = 4; // 0xNN
++    char buf[readSize + tokenSize - 1];
++    int carry = 0;
++    const int bytesPerLine = (w + 7) / 8;
++    int x = 0;
++    int y = 0;
++    uchar *dest = nullptr;
++
++    for (;;) {
++        const qint64 readBytes = device->readLine(buf + carry, readSize);
++        if (readBytes <= 0)
++            return dest != nullptr; // Preserve the white fill on truncated raster data.
++
++        const char *end = buf + carry + readBytes;
++        const char *p = strstr(buf, "0x");
++        if (p && !dest) {
++            if (!QImageIOHandler::allocateImage(QSize(w, h), QImage::Format_MonoLSB, outImage))
++                return false;
++            outImage->fill(Qt::color0);
++            outImage->setColorCount(2);
++            outImage->setColor(0, qRgb(255, 255, 255));
++            outImage->setColor(1, qRgb(0, 0, 0));
++            dest = outImage->scanLine(0);
+         }
+ 
+-        buf[readBytes] = '\0';
+-        p = strstr(buf, "0x");
+-    } while (!p);
+-
+-    if (!QImageIOHandler::allocateImage(QSize(w, h), QImage::Format_MonoLSB, outImage))
+-        return false;
+-
+-    outImage->fill(Qt::color0);       // in case the image data does not cover the full image
+-
+-    outImage->setColorCount(2);
+-    outImage->setColor(0, qRgb(255,255,255));        // white
+-    outImage->setColor(1, qRgb(0,0,0));                // black
+-
+-    int           x = 0, y = 0;
+-    uchar *b = outImage->scanLine(0);
+-    w = (w+7)/8;                                // byte width
+-
+-    while (y < h) {                                // for all encoded bytes...
+-        if (p && p < (buf + readBytes - 3)) {      // p = "0x.."
+-            if (!isxdigit(p[2]) || !isxdigit(p[3]))
++        while (p && end - p >= tokenSize) {
++            const unsigned high = hexDigit(uchar(p[2]));
++            const unsigned low = hexDigit(uchar(p[3]));
++            if (high >= 16 || low >= 16)
+                 return false;
+-            *b++ = hex2byte(p+2);
+-            p += 2;
+-            if (++x == w && ++y < h) {
+-                b = outImage->scanLine(y);
++            *dest++ = uchar((high << 4) | low);
++            if (++x == bytesPerLine) {
++                if (++y == h)
++                    return true;
++                dest = outImage->scanLine(y);
+                 x = 0;
+             }
+-            p = strstr(p, "0x");
+-        } else {                                // read another line
+-            if ((readBytes = device->readLine(buf,buflen)) <= 0)        // EOF ==> truncated image
+-                break;
+-            buf[readBytes] = '\0';
+-            p = strstr(buf, "0x");
++
++            // Advance directly on packed data, keeping the old separator search.
++            if (end - p >= 7 && p[4] == ',' && p[5] == '0' && p[6] == 'x')
++                p += 5;
++            else
++                p = strstr(p + 2, "0x");
+         }
+-    }
+ 
+-    return true;
++        // The next read may continue this physical line. Keep a partial
++        // token (0, 0x or 0xN) across reads, but never across a newline.
++        carry = 0;
++        if (end[-1] != '\n') {
++            if (p)
++                carry = int(end - p);
++            else if (end[-1] == '0')
++                carry = 1;
++        }
++        if (carry)
++            memmove(buf, end - carry, carry);
++    }
+ }
+ 
+ static bool read_xbm_image(QIODevice *device, QImage *outImage)
