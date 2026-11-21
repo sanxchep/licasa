@@ -374,6 +374,9 @@ def main() -> None:
         report_path.write_text(json.dumps(runtime_report, indent=2) + "\n")
         built = work / f"Licasa-{version}-x86_64.AppImage"
         install_appimage_launcher(appdir)
+        # copytree preserves the private build payload's 0700 root. SquashFS
+        # records it as root-owned, so other users must be able to traverse it.
+        appdir.chmod(0o755)
         run([str(tools_dir / "appimagetool-x86_64.AppImage"), "--runtime-file",
              str(tools_dir / "runtime-x86_64"), str(appdir), str(built)],
             env=env, cwd=work)
