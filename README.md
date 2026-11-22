@@ -8,20 +8,11 @@
 
 # Licasa
 
-Licasa is an image viewer and editor for the Linux desktop inspired by Google's Picasa Photo Viewer. It opens photos from your file manager in a fullscreen viewer or floating windows.
+Licasa is an image viewer and a simple editor for the Linux desktop inspired by Google's Picasa Photo Viewer. It opens photos from your file manager in a fullscreen viewer or floating windows.
 
 **Licasa is an independent open-source project and is not affiliated with or endorsed by Google.**
 
-> [!CAUTION]
-> **Upgrading from 0.8.1? Fully quit Licasa before installing.**
->
-> Save your edits, finish exports and close dialogs. Focus the Licasa viewer and press **Ctrl+Shift+Q**. Do this for each running copy, including copies in other user sessions if applicable.
->
-> **Arch users: do this before starting `pacman`.** Follow the [upgrade checklist](#before-updating-an-existing-installation) below.
-
 ## Download Licasa
-
-**[Download published releases](https://github.com/sanxchep/licasa/releases)** · [0.9.5 release notes](packaging/release-notes/v0.9.5.md) · [0.9.6 release notes](packaging/release-notes/v0.9.6.md)
 
 - View photos fullscreen or in a floating window, then crop, adjust, and export them.
 - Open JPEG, PNG, TIFF, WebP, HEIC/HEIF, JPEG XL, AVIF, JPEG 2000, and RAW previews.
@@ -59,7 +50,7 @@ the other distribution.
 1. **Fully quit the old version** as described in the warning above.
 2. **Use the same package format** and the matching distribution package,
    following the checksum and installation commands below.
-3. **Launch 0.9.5 once after installing**, then check **Settings → Background
+3. **Launch Licasa once after installing**, then check **Settings → Background
    process** matches your preference. Recognized, unmodified startup entries
    migrate automatically; a settings reset or reboot is not normally needed.
 
