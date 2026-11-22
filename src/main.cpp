@@ -96,10 +96,11 @@ int main(int argc, char* argv[])
     if (rawArguments.size() == 2 && !rawArguments[1].startsWith(QLatin1Char('-')) &&
         !qEnvironmentVariableIsSet("XDG_ACTIVATION_TOKEN") &&
         !qEnvironmentVariableIsSet("DESKTOP_STARTUP_ID") &&
-        !qEnvironmentVariableIsSet("LICASA_SOFTWARE_RETRY") &&
-        !endpoint.isEmpty() && QFileInfo::exists(endpoint)) {
+        !qEnvironmentVariableIsSet("LICASA_SOFTWARE_RETRY") && !endpoint.isEmpty() &&
+        QFileInfo::exists(endpoint)) {
         const auto options = Licasa::parseLaunchOptions(rawArguments);
-        if (options.initialUrl.isLocalFile() && QFileInfo(options.initialUrl.toLocalFile()).isFile()) {
+        if (options.initialUrl.isLocalFile() &&
+            QFileInfo(options.initialUrl.toLocalFile()).isFile()) {
             int coreArgc = 1;
             char* coreArgv[] = {argv[0], nullptr};
             QCoreApplication core(coreArgc, coreArgv);

@@ -35,8 +35,8 @@ QString hashFile(const QString& path)
     }
 #if defined(LICASA_EXECUTABLE_HASH_OPENSSL)
     // Keep the same complete SHA-256 digest for portable executable receipts.
-    const std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(
-        EVP_MD_CTX_new(), EVP_MD_CTX_free);
+    const std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(),
+                                                                          EVP_MD_CTX_free);
     if (context && EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) == 1) {
         std::array<char, 64 * 1024> bytes;
         qint64 count = 0;
@@ -50,8 +50,7 @@ QString hashFile(const QString& path)
         if (count < 0 || EVP_DigestFinal_ex(context.get(), digest, &size) != 1 || size != 32) {
             return {};
         }
-        return QString::fromLatin1(
-            QByteArray(reinterpret_cast<const char*>(digest), size).toHex());
+        return QString::fromLatin1(QByteArray(reinterpret_cast<const char*>(digest), size).toHex());
     }
 #endif
     QCryptographicHash hash(QCryptographicHash::Sha256);

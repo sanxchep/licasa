@@ -9,9 +9,9 @@
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QFileInfo>
-#include <QThread>
 #include <QJsonDocument>
 #include <QLocalSocket>
+#include <QThread>
 #include <QTimer>
 
 #include <memory>
@@ -127,7 +127,8 @@ ForwardLaunchResult forwardLaunchToExistingInstance(const LaunchOptions& options
         return ForwardLaunchResult::Forwarded;
     }
     if (phase == LaunchPhase::BeforeGui &&
-        ((!writeAttempted && reply.value(QStringLiteral("result")).toString() == QStringLiteral("absent")) ||
+        ((!writeAttempted &&
+          reply.value(QStringLiteral("result")).toString() == QStringLiteral("absent")) ||
          (reply.value(QStringLiteral("result")).toString() == QStringLiteral("busy") &&
           reply.value(QStringLiteral("state")).toString() == QStringLiteral("stopping") &&
           reply.value(QStringLiteral("pid")).toDouble() == double(residentPid) &&
@@ -254,7 +255,8 @@ QJsonObject SingleInstanceServer::processPayload(const QByteArray& payload)
         if (!lifecycle_ || !lifecycle_->launchAllowed()) {
             auto reply = lifecycleError(QStringLiteral("busy"));
             if (lifecycle_) {
-                reply.insert(QStringLiteral("state"), lifecycle_->status().value(QStringLiteral("state")));
+                reply.insert(QStringLiteral("state"),
+                             lifecycle_->status().value(QStringLiteral("state")));
             }
             return reply;
         }
