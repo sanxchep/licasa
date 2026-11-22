@@ -14,5 +14,10 @@
     "url": "https://ffmpeg.org/releases/ffmpeg-6.1.6.tar.xz",
     "sha256": "d4fcb164028dd3beee5d92c0ac72e46aac6973c75ea12dc14de07bf8f407370a",
     "license": "LGPL-2.1-or-later"
+  },
+  "libtiff": {
+    "url": "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.xz",
+    "sha256": "4996f0c4f93094719b1ca5c6279b20e588773ba8a247533e486416fb662ddb88",
+    "license": "libtiff"
   }
 }

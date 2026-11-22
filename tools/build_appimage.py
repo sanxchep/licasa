@@ -78,18 +78,30 @@ def runtime_environment(work):
                 LD_LIBRARY_PATH=os.pathsep.join(str(prefix / "lib") for prefix in (qt, ffmpeg, codecs)))
 
 
-def build_application(work, output, tools_dir, jobs, sources, ffmpeg_source, *, offline):
+def build_application(work, output, tools_dir, jobs, sources, ffmpeg_source, tiff_source, *, offline):
     build = work / "build-licasa"
     qt_prefix = work / "qt-sdk"
     codec_prefix = work / "codecs/release-prefix"
     ffmpeg_prefix = work / "ffmpeg"
     quick = work / "qt/qt-backport-runtime"
     ffmpeg_plugin = work / "qt/qt-ffmpeg-runtime-release/libffmpegmediaplugin.so"
+    tiff_build = work / "build-tiff"
+    tiff_prefix = work / "tiff-private"
+    run("cmake", "-S", tiff_source, "-B", tiff_build, "-G", "Ninja",
+        "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={tiff_prefix}",
+        "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+        "-DBUILD_SHARED_LIBS=OFF", "-Dtiff-tools=OFF", "-Dtiff-tests=OFF",
+        "-Dtiff-contrib=OFF", "-Dtiff-docs=OFF", "-Dtiff-cxx=OFF", "-Dzlib=ON",
+        "-Djpeg=OFF", "-Djbig=OFF", "-Dlerc=OFF", "-Dlzma=OFF", "-Dzstd=OFF",
+        "-Dwebp=OFF", "-Dlibdeflate=OFF")
+    run("cmake", "--build", tiff_build, "--parallel", jobs)
+    run("cmake", "--install", tiff_build)
     environment = runtime_environment(work)
     environment["LD_LIBRARY_PATH"] = f"{quick}:{environment['LD_LIBRARY_PATH']}"
     run("cmake", "-S", ROOT, "-B", build, "-G", "Ninja",
         "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr", "-DCMAKE_INSTALL_LIBDIR=lib",
-        "-DBUILD_TESTING=ON", "-DLICASA_ENABLE_IPO=OFF", "-DLICASA_TEST_QT_XBM_BOUNDARIES=ON",
+        f"-DLICASA_APPIMAGE_TIFF_PREFIX={tiff_prefix}", "-DBUILD_TESTING=ON",
+        "-DLICASA_ENABLE_IPO=OFF", "-DLICASA_TEST_QT_XBM_BOUNDARIES=ON",
         *(f"-D{name}=ON" for name in REQUIRED_FEATURES),
         f"-DCMAKE_PREFIX_PATH={qt_prefix};{codec_prefix};{ffmpeg_prefix}",
         f"-DLICASA_QT_QUICK_BACKPORT_LIBRARY={quick / 'libQt6Quick.so.6.4.2'}",
@@ -108,6 +120,7 @@ def build_application(work, output, tools_dir, jobs, sources, ffmpeg_source, *, 
         shutil.copy2(LOCK, licenses / LOCK.name)
         for module, source in sources.items():
             shutil.copytree(source / "LICENSES", licenses / module)
+        shutil.copy2(tiff_source / "LICENSE.md", licenses / "LibTIFF-LICENSE.md")
         shutil.copy2(ffmpeg_source / "COPYING.LGPLv2.1", licenses / "FFmpeg-LGPL-2.1")
         run(sys.executable, "tools/package_appimage.py", "--payload", payload, "--version", version,
             "--output-dir", output, "--tools-dir", tools_dir,
@@ -144,6 +157,8 @@ def main():
         archives[module] = fetch_archive(downloads, f"{lock['qt_url']}/{name}", checksum, offline=args.offline)
     ffmpeg = lock["ffmpeg"]
     ffmpeg_archive = fetch_archive(downloads, ffmpeg["url"], ffmpeg["sha256"], offline=args.offline)
+    tiff = lock["libtiff"]
+    tiff_archive = fetch_archive(downloads, tiff["url"], tiff["sha256"], offline=args.offline)
     codec_work = work / "codecs"
     codec_prefix = codec_work / "release-prefix"
     qt_work = work / "qt"
@@ -179,7 +194,7 @@ def main():
     run("cmake", "--install", ffmpeg_qt_build, "--prefix", qt_prefix, env=environment)
 
     build_application(work, output, args.tools_dir.resolve(), jobs, sources, ffmpeg_source,
-                      offline=args.offline)
+                      unpack(tiff_archive, work), offline=args.offline)
 
 
 if __name__ == "__main__":
