@@ -2,6 +2,7 @@
 #include "platform/lifecycle_control.h"
 #include "platform/lifecycle_launch_gate.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
@@ -88,6 +89,12 @@ class LifecyclePlatformTests final : public QObject {
         QVERIFY(Licasa::processStartIdentity(99999999).isEmpty());
         QCOMPARE(identity.generation,
                  Licasa::processExecutableHash(QCoreApplication::applicationPid()));
+        QFile executable(QStringLiteral("/proc/self/exe"));
+        QVERIFY(executable.open(QIODevice::ReadOnly));
+        QCryptographicHash reference(QCryptographicHash::Sha256);
+        QVERIFY(reference.addData(&executable));
+        QCOMPARE(identity.generation, QString::fromLatin1(reference.result().toHex()));
+        QVERIFY(Licasa::processExecutableHash(99999999).isEmpty());
     }
 
     void launchGateBlocksInterruptedAndConcurrentUpdates()

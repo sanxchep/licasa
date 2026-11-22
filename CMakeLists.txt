@@ -374,6 +374,14 @@ add_library(licasa_lifecycle_platform STATIC
         src/platform/single_instance_endpoint.cpp src/platform/single_instance_endpoint.h)
 target_include_directories(licasa_lifecycle_platform PUBLIC src)
 target_link_libraries(licasa_lifecycle_platform PUBLIC Qt6::Core Qt6::Network)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(OpenSSL QUIET COMPONENTS Crypto)
+    if(TARGET OpenSSL::Crypto)
+        target_link_libraries(licasa_lifecycle_platform PRIVATE OpenSSL::Crypto)
+        set_property(SOURCE src/platform/application_identity.cpp APPEND PROPERTY
+            COMPILE_DEFINITIONS LICASA_EXECUTABLE_HASH_OPENSSL)
+    endif()
+endif()
 target_compile_definitions(licasa_lifecycle_platform PRIVATE
         "LICASA_SOURCE_RECEIPT=\"${LICASA_SOURCE_RECEIPT}\"")
 licasa_enable_warnings(licasa_lifecycle_platform)
