@@ -8,20 +8,9 @@
 
 # Licasa
 
-Licasa is an image viewer and a simple editor for the Linux desktop inspired by Google's Picasa Photo Viewer. It opens photos from your file manager in a fullscreen viewer or floating windows.
+Licasa is an image-first viewer with a simple editor for the Linux desktop, inspired by Google’s Picasa Photo Viewer. Open a photo from your file manager in fullscreen or a floating window. Licasa aims to show the photo quickly, across formats ranging from JPEG and PNG to HEIC, JPEG XL, and camera RAW and Motion Photos.
 
 **Licasa is an independent open-source project and is not affiliated with or endorsed by Google.**
-
-## Download Licasa
-
-- View photos fullscreen or in a floating window, then crop, adjust, and export them.
-- Open JPEG, PNG, TIFF, WebP, HEIC/HEIF, JPEG XL, AVIF, JPEG 2000, and RAW previews.
-- Play Motion Photos and animated APNG files.
-- Type exact adjustment values and keep independent edits in each window.
-- Confirm before overwriting an original, or choose **Save as a copy**.
-- Export to 14 formats with tailored settings, linked dimensions and estimated file size.
-
-If you try it, [report a bug or suggest a feature](https://github.com/sanxchep/licasa/issues/new).
 
 ## In action
 
@@ -39,210 +28,162 @@ If you try it, [report a bug or suggest a feature](https://github.com/sanxchep/l
 
 ## Install
 
-Choose the package built for your distribution. All current packages target
-**x86-64 Intel/AMD Linux**. The Ubuntu native package requires Ubuntu 24.04;
-the Debian native package requires Debian 13 (Trixie). Their Qt, JPEG and FFmpeg
-libraries differ, so editing dependency names cannot make one package work on
-the other distribution.
+Choose a package for your **x86-64 Intel or AMD** desktop. The AppImage is a good starting point if you want a per-user install.
 
-### Before updating an existing installation
+| Desktop | Package |
+| --- | --- |
+| Ubuntu 22.04, 24.04, 26.04 · Debian 13 · Fedora 44 · Arch | AppImage |
+| Ubuntu 24.04 | Ubuntu DEB |
+| Debian 13 (Trixie) | Debian DEB with `+deb13` in the filename (experimental) |
+| Fedora 44 | Fedora RPM |
+| Arch Linux | Arch `.pkg.tar.zst` |
+| Systems with snapd | Snap Store, with automatic updates on the tracked channel |
 
-1. **Fully quit the old version** as described in the warning above.
-2. **Use the same package format** and the matching distribution package,
-   following the checksum and installation commands below.
-3. **Launch Licasa once after installing**, then check **Settings → Background
-   process** matches your preference. Recognized, unmodified startup entries
-   migrate automatically; a settings reset or reboot is not normally needed.
+Download the [latest release](https://github.com/sanxchep/licasa/releases/latest) or browse [all releases](https://github.com/sanxchep/licasa/releases). The GitHub download commands below use 0.9.8.
 
-If switching package formats, disable **Background process** in the old copy
-and fully quit it before enabling background mode in the new copy. Startup
-preferences belong to each installation.
+<details>
+<summary>Installation Steps for AppImage</summary>
 
-**Future updates:** Store-installed Snaps follow their tracked channel
-automatically unless updates are held. GitHub downloads need manual installation
-for each release unless you separately configure a package repository. Licasa's
-background setting does not download updates.
+1. From the [release page](https://github.com/sanxchep/licasa/releases/latest), download the AppImage, `install-licasa-appimage.sh`, and the matching `.sha256` file for each.
+2. Open a terminal in the download folder. Run these commands as your regular user, without `sudo`.
 
-From 0.9.0, managed AppImage and native package installers can stop a verified
-idle background viewer. If an update is refused because Licasa is busy or its
-running copy cannot be verified, finish your work, fully quit and retry.
+   ```sh
+   sha256sum -c Licasa-0.9.8-x86_64.AppImage.sha256 &&
+     sha256sum -c install-licasa-appimage.sh.sha256 &&
+     bash install-licasa-appimage.sh ./Licasa-0.9.8-x86_64.AppImage
+   ```
 
-### Snap (systems with Snapd)
+The installer extracts the app under `~/.local/opt/licasa-appimage`. It works without FUSE. Keep Python 3 and `flock` installed for the launcher.
 
-Install the version currently published to the stable Store channel:
+</details>
 
-```sh
-sudo snap install licasa
-```
+<details>
+<summary>Installation Steps for Ubuntu DEB</summary>
 
-For an existing Store installation, check its tracked channel for updates:
+1. Download the native package for **Ubuntu 24.04** and its matching `.sha256` file from the same release.
+2. Open a terminal in the download folder. Verify and install the package.
 
-```sh
-sudo snap refresh licasa
-snap list licasa
-```
+   ```sh
+   sha256sum -c licasa_0.9.8-1_amd64.deb.sha256 &&
+     sudo apt install ./licasa_0.9.8-1_amd64.deb
+   ```
 
-A release `.snap` file is installed or updated manually with the same command:
+</details>
 
-```sh
-sha256sum -c licasa_0.9.5_amd64.snap.sha256 &&
-  sudo snap install --dangerous ./licasa_0.9.5_amd64.snap
-```
+<details>
+<summary>Installation Steps for Debian DEB</summary>
 
-`--dangerous` bypasses Store assertion verification for a local file. Keep
-checking the published checksum and obtain the file from the trusted release.
-Local-file installations do not automatically follow Store updates.
+1. Download the experimental `+deb13` package for **Debian 13 (Trixie)** and its matching `.sha256` file from the same release.
+2. Open a terminal in the download folder. Verify and install the package.
 
-To switch a local-file installation to the stable Store channel for automatic
-updates, fully quit Licasa, then run:
+   ```sh
+   sha256sum -c licasa_0.9.8-1+deb13_amd64.deb.sha256 &&
+     sudo apt install ./licasa_0.9.8-1+deb13_amd64.deb
+   ```
 
-```sh
-sudo snap refresh --amend licasa --channel=stable
-```
+</details>
 
-### Ubuntu 24.04 (amd64)
+<details>
+<summary>Installation Steps for Fedora RPM</summary>
 
-Download the Ubuntu `.deb` and its checksum file, then run these commands in
-the download directory. APT resolves the runtime and lifecycle dependencies.
-On Ubuntu 26.04, use the AppImage instructions below.
+1. Download the package for **Fedora 44** and its matching `.sha256` file from the same release.
+2. Open a terminal in the download folder. Verify and install the package.
 
-```sh
-sha256sum -c licasa_0.9.5-1_amd64.deb.sha256 &&
-  sudo apt install ./licasa_0.9.5-1_amd64.deb
-```
+   ```sh
+   sha256sum -c licasa-appimage-0.9.8-1.fc44.x86_64.rpm.sha256 &&
+     sudo dnf install ./licasa-appimage-0.9.8-1.fc44.x86_64.rpm
+   ```
 
-### Debian 13 / Trixie (amd64, experimental)
+</details>
 
-The native Debian package is available for testing and remains **in development**
-in the support matrix. Use the Debian-specific `+deb13` package, built against
-Debian's Qt 6.8.2 and multimedia libraries:
+<details>
+<summary>Installation Steps for Arch Linux</summary>
 
-```sh
-sha256sum -c licasa_0.9.5-1+deb13_amd64.deb.sha256 &&
-  sudo apt install ./licasa_0.9.5-1+deb13_amd64.deb
-```
+1. Download the package for **Arch Linux** and its matching `.sha256` file from the same release.
+2. Open a terminal in the download folder. Verify and install the package.
 
-### Fedora 44 (x86-64)
+   ```sh
+   sha256sum -c licasa-appimage-0.9.8-1-x86_64.pkg.tar.zst.sha256 &&
+     sudo pacman -U ./licasa-appimage-0.9.8-1-x86_64.pkg.tar.zst
+   ```
 
-```sh
-sha256sum -c licasa-appimage-0.9.5-1.fc44.x86_64.rpm.sha256 &&
-  sudo dnf install ./licasa-appimage-0.9.5-1.fc44.x86_64.rpm
-```
+</details>
 
-The RPM installs the bundled runtime through DNF and includes native transaction
-coordination. It is a different installation from a per-user AppImage.
+<details>
+<summary>Installation Steps for Snap Store</summary>
 
-### Arch Linux (x86-64)
+1. On a system with snapd, open a terminal and install Licasa from the stable channel.
 
-The ready-to-install package includes the lifecycle helper and pre-transaction
-hook:
+   ```sh
+   sudo snap install licasa
+   ```
 
-```sh
-sha256sum -c licasa-appimage-0.9.5-1-x86_64.pkg.tar.zst.sha256 &&
-  sudo pacman -U ./licasa-appimage-0.9.5-1-x86_64.pkg.tar.zst
-```
+2. Run `snap list licasa` to see the installed version and tracked channel.
 
-To build the Arch package yourself, download `PKGBUILD`, `PKGBUILD.sha256`,
-`PKGBUILD.sources.sha256`, `native_lifecycle.py`, `licasa.install`, and
-`licasa-lifecycle.hook` from the **same release** into one directory. Review
-the recipe and scripts before building. The helper, install script and hook are
-required inputs; copying only `PKGBUILD` is insufficient.
+</details>
 
-```sh
-sha256sum -c PKGBUILD.sha256 &&
-  sha256sum -c PKGBUILD.sources.sha256 &&
-  makepkg -si
-```
+<details>
+<summary>Installation Steps for Portable AppImage (run directly)</summary>
 
-Run `makepkg` as your regular user. It verifies/downloads the matching AppImage
-and asks the package manager to install the result. Later transactions use the
-installed hook to refuse unsafe replacement. Before the first upgrade or removal
-of a 0.8.1 package, fully quit Licasa; the incoming hook cannot protect that first
-transaction.
+1. Download the AppImage and its matching `.sha256` file from the same release. Running it directly requires FUSE.
+2. Open a terminal in the download folder. Verify the file, make it executable, and launch it.
 
-### Managed AppImage (compatible x86-64 glibc desktops)
+   ```sh
+   sha256sum -c Licasa-0.9.8-x86_64.AppImage.sha256 &&
+     chmod +x Licasa-0.9.8-x86_64.AppImage &&
+     ./Licasa-0.9.8-x86_64.AppImage
+   ```
 
-Download the AppImage, installer and both checksum files from the same release.
-Run the installer as your regular desktop user, **without sudo**:
+Fully quit before replacing the file and keep its path if you use shortcuts.
 
-```sh
-sha256sum -c Licasa-0.9.5-x86_64.AppImage.sha256 &&
-  sha256sum -c install-licasa-appimage.sh.sha256 &&
-  bash install-licasa-appimage.sh ./Licasa-0.9.5-x86_64.AppImage
-```
+</details>
 
-This installs **Licasa (AppImage)** under `~/.local/opt/licasa-appimage`, with a
-desktop entry and icon. It extracts the runtime, so FUSE is unnecessary for the
-installed copy. Managed installation and its launcher require **Python 3**,
-`flock` and the standard tools checked by the installer. Keep Python 3 and
-`flock` installed afterward. The portable runtime uses a glibc 2.39 baseline and
-still needs compatible system desktop libraries.
+<details>
+<summary>Installation Steps for Arch Linux (build from PKGBUILD)</summary>
 
-### Raw portable AppImage
+1. Download `PKGBUILD`, `PKGBUILD.sha256`, `PKGBUILD.sources.sha256`, `native_lifecycle.py`, `licasa.install`, and `licasa-lifecycle.hook` from the same release.
+2. Review the files, then open a terminal in the download folder and run these commands as your regular user.
 
-To run the downloaded file directly, without the managed installer:
+   ```sh
+   sha256sum -c PKGBUILD.sha256 &&
+     sha256sum -c PKGBUILD.sources.sha256 &&
+     makepkg -si
+   ```
 
-```sh
-sha256sum -c Licasa-0.9.5-x86_64.AppImage.sha256 &&
-  chmod +x Licasa-0.9.5-x86_64.AppImage &&
-  ./Licasa-0.9.5-x86_64.AppImage
-```
+</details>
 
-Fully quit before **every** replacement. Keep the file location/name used by
-your shortcuts. If changing it, disable background mode in the old copy before
-quitting, then enable it in the new copy if wanted. The same glibc and desktop
-library requirements apply. If direct execution fails with a FUSE error, use
-the FUSE-free managed installation above.
+<details>
+<summary>Update or uninstall</summary>
 
-## Uninstall
+For GitHub downloads, install the new release using the same steps. Launch Licasa once and check your background preference. For Store installations, snapd handles updates. Run `sudo snap refresh licasa` to install an available update now. To move a manually installed Snap to Store updates, fully quit and run `sudo snap refresh --amend licasa --channel=stable`.
 
-Finish work and fully quit first, especially when removing an older build.
-Use the manager for the package actually installed:
+To uninstall, fully quit and use the command for your installation.
+
+| Installed with | Remove |
+| --- | --- |
+| Managed AppImage | `bash "$HOME/.local/opt/licasa-appimage/install-licasa-appimage.sh" --uninstall` |
+| APT | `sudo apt remove licasa` |
+| DNF | `sudo dnf remove licasa-appimage` |
+| pacman | `sudo pacman -R licasa-appimage` |
+| Snap | `sudo snap remove licasa` |
+| Raw AppImage | Delete the downloaded file and any shortcut you created for it. |
+
+</details>
+
+<details>
+<summary>Troubleshooting and logs</summary>
+
+To check an installed AppImage without opening the viewer, run the saved installer in diagnostic mode.
 
 ```sh
-# Run only the command for your installed package:
-sudo apt remove licasa             # Ubuntu or Debian native package
-sudo dnf remove licasa-appimage    # Fedora RPM
-sudo pacman -R licasa-appimage     # Arch package
-sudo snap remove licasa            # Snap
+bash "$HOME/.local/opt/licasa-appimage/install-licasa-appimage.sh" --diagnose
 ```
 
-For managed AppImage, use its saved removal script as your regular user:
+If installation failed, use `bash install-licasa-appimage.sh --diagnose ./Licasa-0.9.8-x86_64.AppImage` from your download directory.
 
-```sh
-bash "$HOME/.local/opt/licasa-appimage/install-licasa-appimage.sh" --uninstall
-```
+Installer and viewer logs are normally in `~/.local/state/licasa/` as `installation.log` and `errors.log`. A custom `XDG_STATE_HOME` or Snap installation can change the location. Review logs for personal paths before sharing them. When [reporting an issue](https://github.com/sanxchep/licasa/issues/new), include the package filename, distribution, desktop session, and exact error.
 
-The managed remover handles its viewer, desktop entry, icon and unmodified
-startup integration. A raw portable file can be deleted after quitting;
-remove any desktop entry you created manually. Local deployment can share
-`~/.local` with unrelated software: do not remove that entire prefix to uninstall
-Licasa.
-
-## Troubleshooting and logs
-
-For an AppImage support report without starting the viewer:
-
-```sh
-bash install-licasa-appimage.sh --diagnose ./Licasa-0.9.5-x86_64.AppImage > licasa-support.txt
-```
-
-Omit the AppImage filename to inspect an existing installation. The report checks
-system tools and the installation destination, plus libraries of an installed
-copy when present. It does not extract or validate the libraries inside an
-uninstalled AppImage. Review the report before sharing it.
-
-The AppImage installer keeps a private log at
-`$XDG_STATE_HOME/licasa/installation.log` (normally
-`~/.local/state/licasa/installation.log`), with one rotated copy. The viewer's
-warning/error log is `$XDG_STATE_HOME/licasa/errors.log` (normally
-`~/.local/state/licasa/errors.log`); Snap uses its own user data when
-`XDG_STATE_HOME` has no absolute path. Logs stay local and may contain photo or
-installation paths. Review them before attaching them to an
-[issue](https://github.com/sanxchep/licasa/issues/new).
-
-Include the Licasa version, package filename, distribution, desktop and session
-type, plus the exact command/error and support report when applicable.
+</details>
 
 <details>
 <summary>Package support and runtime details</summary>
@@ -267,6 +208,9 @@ type, plus the exact command/error and support report when applicable.
 <!-- support-matrix:end -->
 
 </details>
+
+<details>
+<summary>Build from source and translations</summary>
 
 ## Build the Ubuntu package and AppImage
 
@@ -299,9 +243,9 @@ Verify the local package checksums.
 (cd build/appimage-output && sha256sum -c ./*.sha256)
 ```
 
-### Install a Local development copy
+### Install a local development copy
 
-For an already configured and built CMake tree, run as your regular user:
+After building Licasa in `./build`, run the deployment tool as your regular user.
 
 ```sh
 python3 tools/deploy_local.py --build-dir ./build --launch
@@ -329,6 +273,8 @@ language; reopen an existing dialog to use updated application labels and filter
 
 The Swedish catalog (`licasa_sv.ts`) builds on
 [yeager's contribution in PR #7](https://github.com/sanxchep/licasa/pull/7).
+
+</details>
 
 ## License
 
