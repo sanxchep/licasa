@@ -335,8 +335,15 @@ quote_exec() {
   printf '"%s"' "$value"
 }
 write_desktop() {
-  local mime prefix='bash '
-  [[ ${2:-} != legacy ]] || prefix=''
+  local mime prefix='bash ' label=Licasa
+  # Icon is a desktop string, not an Exec argument. Escape literal backslashes.
+  local icon_value="${icon//\\/\\\\}"
+  icon_value="${icon_value//$'\t'/\\t}"
+  if [[ ${2:-} == legacy ]]; then
+    prefix=''
+    label='Licasa (AppImage)'
+    icon_value=licasa-appimage
+  fi
   mime="$(sed -n 's/^MimeType=//p' "$1")"
   if [[ -z $mime || $mime == *$'\n'* ]]; then
     echo "The AppImage has no valid desktop MIME list" >&2
@@ -346,13 +353,13 @@ write_desktop() {
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Licasa (AppImage)
+Name=$label
 Comment=Image viewer
 Exec=$prefix$(quote_exec "$target/AppRun" "${2:-}") %f
 Terminal=false
 Categories=Graphics;Viewer;
 MimeType=$mime
-Icon=licasa-appimage
+Icon=$icon_value
 StartupNotify=false
 EOF
 }
@@ -745,7 +752,7 @@ lifecycle_committed=1
 committed=1
 refresh_desktop installed
 echo "Installed Licasa in $target"
-echo "Find 'Licasa (AppImage)' in your application menu or use Open With in your file manager."
+echo "Find 'Licasa' in your application menu or use Open With in your file manager."
 echo "Remove it with: bash \"$target/install-licasa-appimage.sh\" --uninstall"
 echo "A graphical desktop is needed to open windows; installation did not start the application."
 echo "Background startup is deferred to the next desktop login."

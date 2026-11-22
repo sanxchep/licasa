@@ -171,7 +171,7 @@ sha256sum -c Licasa-0.9.5-x86_64.AppImage.sha256 &&
   bash install-licasa-appimage.sh ./Licasa-0.9.5-x86_64.AppImage
 ```
 
-This installs **Licasa (AppImage)** under `~/.local/opt/licasa-appimage`, with a
+This installs **Licasa** under `~/.local/opt/licasa-appimage`, with a
 desktop entry and icon. It extracts the runtime, so FUSE is unnecessary for the
 installed copy. Managed installation and its launcher require **Python 3**,
 `flock` and the standard tools checked by the installer. Keep Python 3 and

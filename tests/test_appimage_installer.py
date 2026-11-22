@@ -302,7 +302,10 @@ exec "{real_mv}" "$@"
         for name in (".licasa-appimage-paths", ".licasa-appimage.desktop", "install-licasa-appimage.sh"):
             (target / name).unlink()
         desktop = data / "applications/licasa-appimage.desktop"
-        desktop.write_text(desktop.read_text().replace('Exec=bash "', 'Exec="'))
+        desktop.write_text(desktop.read_text().replace('Exec=bash "', 'Exec="')
+                           .replace("Name=Licasa\n", "Name=Licasa (AppImage)\n")
+                           .replace(f"Icon={data}/icons/hicolor/512x512/apps/licasa-appimage.png",
+                                    "Icon=licasa-appimage"))
         result = self.run_installer(uninstall=True, XDG_DATA_HOME=str(data))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(target.exists())
@@ -429,8 +432,13 @@ time.sleep(60)
 from gi.repository import Gio
 app = Gio.DesktopAppInfo.new_from_filename(sys.argv[1])
 assert app is not None, 'Desktop entry could not be parsed'
+assert app.get_name() == 'Licasa'
+icon = app.get_icon()
+assert isinstance(icon, Gio.FileIcon)
+assert icon.get_file().get_path() == sys.argv[3]
+assert icon.get_file().query_exists(None)
 app.launch([Gio.File.new_for_path(sys.argv[2])], None)
-""", str(desktop), str(photo)], env=self.environment, capture_output=True, text=True, timeout=10)
+""", str(desktop), str(photo), str(self.user_home / ".local/share/icons/hicolor/512x512/apps/licasa-appimage.png")], env=self.environment, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         started = self.work / "app-started"
         deadline = time.monotonic() + 5
