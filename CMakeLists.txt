@@ -5,10 +5,10 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Licasa
-        VERSION 0.9.7
+        VERSION 0.9.8
         LANGUAGES CXX
 )
-set(LICASA_RELEASE_DATE "2026-11-05")
+set(LICASA_RELEASE_DATE "2026-11-22")
 
 # Qt 6 requires C++17 or newer.
 set(CMAKE_CXX_STANDARD 17)

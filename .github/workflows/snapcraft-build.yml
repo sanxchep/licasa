@@ -1,14 +1,22 @@
-name: Build and qualify Linux packages
+name: CD · GitHub Releases · Publish Linux packages (manual)
 
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Stage a prerelease or approve its exact files as latest
+        type: choice
+        options: [stage, promote]
+        default: stage
+      build_run_id:
+        description: Successful staging run ID (promotion only)
+        type: string
       expected_sha:
         description: Exact reviewed main commit to qualify and publish as a prerelease
         required: true
         type: string
       approve_prerelease:
-        description: Explicitly authorize Store edge and GitHub prerelease publication
+        description: Explicitly approve the selected GitHub release operation
         required: true
         type: boolean
         default: false
@@ -40,7 +48,7 @@ jobs:
           APPROVED: ${{ inputs.approve_prerelease }}
         run: |
           test "$APPROVED" = true || {
-            echo "::error::Enable approve_prerelease to authorize Snap edge and GitHub prerelease publication."
+            echo "::error::Enable approve_prerelease to authorize GitHub release publication."
             exit 1
           }
           test "$GITHUB_REF" = refs/heads/main || {
@@ -55,7 +63,13 @@ jobs:
             echo "::error::The selected main commit differs from expected_sha. Review the selected commit before dispatching again."
             exit 1
           }
+      - name: Require the original build run for promotion
+        if: inputs.operation == 'promote'
+        env:
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: '[[ "$BUILD_RUN_ID" =~ ^[1-9][0-9]*$ ]]'
       - name: Check source, new version, stable grade, and notes
+        if: inputs.operation == 'stage'
         id: version
         run: |
           version="$(python3 tools/check_release_version.py \
@@ -64,6 +78,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "release_tag=v$version" >> "$GITHUB_OUTPUT"
       - name: Require a new GitHub Release
+        if: inputs.operation == 'stage'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
@@ -77,6 +92,7 @@ jobs:
             exit 1
           fi
   verify_sanitizers:
+    if: inputs.operation == 'stage'
     name: Verify the complete exact candidate
     needs: preflight
     permissions:
@@ -87,6 +103,7 @@ jobs:
     with:
       source_ref: ${{ github.sha }}
       profile: FULL
+      offline_packages: true
 
   stage_candidate:
     needs: [preflight, verify_sanitizers]
@@ -112,10 +129,6 @@ jobs:
           path: dist
       - uses: actions/download-artifact@v8
         with:
-          name: verification-snap
-          path: dist/snap
-      - uses: actions/download-artifact@v8
-        with:
           name: licasa-verification-evidence
           path: build/full-evidence
       - uses: actions/download-artifact@v8
@@ -127,9 +140,9 @@ jobs:
           VERSION: ${{ needs.preflight.outputs.version }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
-          python3 tools/ci_receipt.py check --receipt build/full-evidence/verification-result.json \
+          python3 tools/ci_receipt.py check --offline-packages --receipt build/full-evidence/verification-result.json \
             --source-sha "$SOURCE_SHA" --version "$VERSION"
-          python3 tools/qualification_evidence.py check --source-sha "$SOURCE_SHA" \
+          python3 tools/qualification_evidence.py check --offline-packages --source-sha "$SOURCE_SHA" \
             --build-run-id "$GITHUB_RUN_ID" --version "$VERSION" --packages dist --evidence build/full-evidence
       - uses: actions/upload-artifact@v7
         with:
@@ -151,103 +164,16 @@ jobs:
           compression-level: 0
       - uses: actions/upload-artifact@v7
         with:
-          name: licasa-snap-amd64
-          path: dist/snap/
-          if-no-files-found: error
-          retention-days: 90
-          compression-level: 0
-      - uses: actions/upload-artifact@v7
-        with:
           name: licasa-full-verification
           path: build/full-evidence/
           if-no-files-found: error
           retention-days: 90
 
-  upload_snap_edge:
-    # Keep every portable check before the first Store publication.
+  github_prerelease:
     needs: [preflight, stage_candidate]
     runs-on: ubuntu-24.04
-    environment: snap-beta
-    timeout-minutes: 75
-    outputs:
-      revision: ${{ steps.verify.outputs.revision }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@v8
-        with:
-          name: licasa-snap-amd64
-          path: dist/snap
-      - name: Check the Snap artifact and Store credentials
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          test -n "$SNAPCRAFT_STORE_CREDENTIALS"
-          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
-      - name: Upload the checked Snap to edge
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          python3 tools/retry_snap_store.py \
-            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
-            --report build/snap-store-retries/1.json -- sudo snap install snapcraft --classic
-          python3 tools/retry_snap_store.py \
-            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
-            --report build/snap-store-retries/2.json -- snapcraft upload "dist/snap/licasa_${VERSION}_amd64.snap" --release=edge
-      - name: Verify the Store's edge revision
-        id: verify
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          sudo snap set system experimental.user-daemons=false
-          python3 tools/retry_snap_store.py \
-            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
-            --report build/snap-store-retries/3.json -- sudo snap install --channel=edge licasa
-          for ((attempt = 1; attempt <= 10; attempt++)); do
-            installed_version="$(snap list licasa | awk 'NR == 2 {print $2}')"
-            source_file=/snap/licasa/current/usr/share/licasa/source-commit
-            if [ "$installed_version" = "$VERSION" ] &&
-               [ -f "$source_file" ] &&
-               [ "$(cat "$source_file")" = "$GITHUB_SHA" ]; then
-              break
-            fi
-            sleep 20
-            python3 tools/retry_snap_store.py \
-              --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
-              --report build/snap-store-retries/4-${attempt}.json -- sudo snap refresh --channel=edge licasa
-          done
-          python3 tools/verify_snap_install.py --version "$VERSION" \
-            --source-sha "$GITHUB_SHA" \
-            --output build/qualification/snap-edge-smoke.json
-          revision="$(snap list licasa | awk 'NR == 2 {print $3}')"
-          test "$revision" -gt 0
-          expected="$(cut -d' ' -f1 "dist/snap/licasa_${VERSION}_amd64.snap.sha256")"
-          actual="$(sudo sha256sum "/var/lib/snapd/snaps/licasa_${revision}.snap" | cut -d' ' -f1)"
-          test "$actual" = "$expected"
-          echo "revision=$revision" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: licasa-store-snap-smoke
-          path: build/qualification/snap-edge-smoke.json
-          if-no-files-found: error
-      - name: Retain Snap Store retry diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: snap-store-retries-snapcraft-build-upload_snap_edge
-          path: build/snap-store-retries/
-          if-no-files-found: ignore
-          retention-days: 7
-
-  github_prerelease:
-    needs: [preflight, stage_candidate, upload_snap_edge]
-    runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: snap-beta
+    environment: snap-beta  # Existing protected publication environment
     permissions:
       actions: read
       contents: write
@@ -261,10 +187,6 @@ jobs:
         with:
           name: licasa-linux-amd64
           path: dist
-      - uses: actions/download-artifact@v8
-        with:
-          name: licasa-snap-amd64
-          path: dist/snap
       - uses: actions/download-artifact@v8
         with:
           name: licasa-debian13-amd64
@@ -284,7 +206,6 @@ jobs:
           (cd dist/arch && sha256sum --check "licasa-appimage-${VERSION}-1-x86_64.pkg.tar.zst.sha256")
           (cd dist/arch && sha256sum --check PKGBUILD.sha256)
           (cd dist/arch && sha256sum --check PKGBUILD.sources.sha256)
-          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
       - name: Install GitHub CLI
         run: |
           sudo apt-get update
@@ -295,10 +216,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
-          SNAP_REVISION: ${{ needs.upload_snap_edge.outputs.revision }}
         run: |
           {
-            printf 'Preview release: the checked Snap is on Store edge as revision %s. Stable follows qualification.\n\n' "$SNAP_REVISION"
             cat "packaging/release-notes/$RELEASE_TAG.md"
             printf "\n### Package SHA-256 checksums\n\n\`\`\`text\n"
             cat "dist/debian13/licasa_${VERSION}-1+deb13_amd64.deb.sha256"
@@ -309,7 +228,6 @@ jobs:
             cat "dist/arch/licasa-appimage-${VERSION}-1-x86_64.pkg.tar.zst.sha256"
             cat "dist/arch/PKGBUILD.sha256"
             cat "dist/arch/PKGBUILD.sources.sha256"
-            cat "dist/snap/licasa_${VERSION}_amd64.snap.sha256"
             printf "\`\`\`\n"
             printf "\nSource commit: \`%s\`.\n" "$GITHUB_SHA"
           } > dist/release-notes.md
@@ -332,7 +250,24 @@ jobs:
             "dist/arch/licasa.install" \
             "dist/arch/licasa-lifecycle.hook" \
             "dist/arch/PKGBUILD.sources.sha256" \
-            "dist/snap/licasa_${VERSION}_amd64.snap" \
-            "dist/snap/licasa_${VERSION}_amd64.snap.sha256" \
             --target "$GITHUB_SHA" --title "Licasa $RELEASE_TAG" \
             --prerelease --latest=false --notes-file dist/release-notes.md
+
+  qualify_for_promotion:
+    needs: preflight
+    if: inputs.operation == 'promote'
+    uses: ./.github/workflows/qualify-candidate.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      build_run_id: ${{ inputs.build_run_id }}
+
+  promote:
+    needs: qualify_for_promotion
+    uses: ./.github/workflows/publish-release.yml
+    permissions:
+      actions: read
+      contents: write
+    with:
+      build_run_id: ${{ inputs.build_run_id }}

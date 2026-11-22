@@ -2,6 +2,7 @@
 """Guard release publication gates and execute artifact-transfer checks locally."""
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -36,20 +37,46 @@ class ReleaseWorkflowTests(unittest.TestCase):
         cls.jobs = cls.workflows["snapcraft-build.yml"]["jobs"]
 
     def test_publication_requires_complete_qualified_candidate_and_explicit_intent(self):
-        for publication in ("upload_snap_edge", "github_prerelease"):
-            self.assertTrue({"preflight", "verify_sanitizers", "stage_candidate"} <= ancestors(self.jobs, publication))
-        self.assertIn("upload_snap_edge", ancestors(self.jobs, "github_prerelease"))
-        for job in self.jobs.values():
-            self.assertNotIn("if", job)
-            self.assertFalse(job.get("continue-on-error", False))
-        for job in ("upload_snap_edge", "github_prerelease"):
-            self.assertEqual(self.jobs[job]["environment"], "snap-beta")
+        self.assertTrue({"preflight", "verify_sanitizers", "stage_candidate"}
+                        <= ancestors(self.jobs, "github_prerelease"))
+        self.assertNotIn("upload_snap_edge", self.jobs)
+        self.assertEqual(dependencies(self.jobs["promote"]), {"qualify_for_promotion"})
+        self.assertTrue(self.jobs["verify_sanitizers"]["with"]["offline_packages"])
+        snap = self.workflows["publish-snap-edge.yml"]["jobs"]
+        self.assertEqual(ancestors(snap, "upload_snap_edge"), {"source", "build", "snap_desktops"})
+        self.assertIn("published-linux-release", str(snap["source"]))
+        self.assertIn("--release=edge", str(snap["upload_snap_edge"]))
         call = self.jobs["verify_sanitizers"]
         self.assertEqual(call["uses"], "./.github/workflows/ci.yml")
         self.assertEqual(call["with"]["profile"], "FULL")
         scripts = "\n".join(step.get("run", "") for step in self.jobs["preflight"]["steps"])
         self.assertIn('test "$APPROVED" = true', scripts)
         self.assertIn('test "$GITHUB_SHA" = "$EXPECTED_SHA"', scripts)
+
+    def test_snap_gate_requires_the_published_commit_and_completed_release(self):
+        job = self.workflows["publish-snap-edge.yml"]["jobs"]["source"]
+        script = next(step["run"] for step in job["steps"] if step.get("id") == "validate")
+        run = {"path": ".github/workflows/snapcraft-build.yml", "conclusion": "success",
+               "event": "workflow_dispatch", "head_branch": "main", "head_sha": SOURCE_SHA,
+               "repository": {"full_name": "owner/repo"}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "receipt").mkdir()
+            (root / "receipt/published-linux-release.txt").write_text(f"v1.2.3 {SOURCE_SHA}\n")
+            gh = root / "gh"
+            gh.write_text('#!/bin/sh\ncase "$2" in */runs/*) cat run.json;; *) cat release.json;; esac\n')
+            gh.chmod(0o755)
+            env = {**os.environ, "PATH": f"{root}:{os.environ['PATH']}", "RUN_ID": "123",
+                   "GITHUB_SHA": SOURCE_SHA, "GITHUB_REF": "refs/tags/v1.2.3",
+                   "GITHUB_REF_NAME": "v1.2.3", "GITHUB_REPOSITORY": "owner/repo",
+                   "GITHUB_OUTPUT": str(root / "outputs")}
+            for changes, prerelease in [({}, False), ({"head_sha": "b" * 40}, False),
+                                        ({"conclusion": "failure"}, False), ({}, True)]:
+                (root / "run.json").write_text(json.dumps({**run, **changes}))
+                (root / "release.json").write_text(json.dumps({"draft": False, "prerelease": prerelease}))
+                result = subprocess.run(["bash", "-eo", "pipefail", "-c", script], cwd=root,
+                                        env=env, capture_output=True)
+                self.assertEqual(result.returncode == 0, not changes and not prerelease)
 
     def test_release_preflight_explains_rejected_dispatch_inputs(self):
         step = next(step for step in self.jobs["preflight"]["steps"]
@@ -81,7 +108,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         downloads = {step.get("with", {}).get("name") for step in stage["steps"]
                      if step.get("uses", "").startswith("actions/download-artifact@")}
         self.assertTrue({"verification-ubuntu-packages", "verification-debian-packages",
-                         "verification-portable-packages", "verification-snap",
+                         "verification-portable-packages",
                          "licasa-verification-evidence", "verification-result"} <= downloads)
         scripts = "\n".join(step.get("run", "") for step in stage["steps"])
         self.assertIn("tools/ci_receipt.py check", scripts)
@@ -113,7 +140,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                    if step.get("uses", "").startswith("actions/upload-artifact@")}
         self.assertEqual(exports["licasa-linux-amd64"][0], "stage_candidate")
         self.assertEqual(exports["licasa-debian13-amd64"][0], "stage_candidate")
-        self.assertEqual(exports["licasa-snap-amd64"][0], "stage_candidate")
+        self.assertNotIn("licasa-snap-amd64", exports)
         scripts = exports["licasa-linux-amd64"][1]
         for directory in ("deb", "appimage", "rpm", "arch"):
             self.assertIn(f"dist/{directory}", scripts)
@@ -122,7 +149,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                          for job in self.workflows[name]["jobs"].values()
                          for step in job.get("steps", [])
                          if step.get("uses", "").startswith("actions/download-artifact@")}
-            self.assertTrue({"licasa-linux-amd64", "licasa-debian13-amd64", "licasa-snap-amd64"} <= downloads)
+            self.assertTrue({"licasa-linux-amd64", "licasa-debian13-amd64"} <= downloads)
 
     def test_full_source_regression_suite_runs_once_on_the_release_call_graph(self):
         scripts = []
@@ -135,8 +162,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
         visit("snapcraft-build.yml")
         combined = "\n".join(scripts)
-        for command in ("tools/run_python_tests.py", "tools/check_code_style.py",
-                        "tools/check_support_manifest.py"):
+        for command in ("tools/run_python_tests.py", "tools/check_code_style.py"):
             self.assertEqual(combined.count(command), 1, command)
         for script in ("packaging/install-licasa-appimage.sh", "tools/check_appimage_install.sh"):
             self.assertIn("tools/check_ci_inputs.py", combined)
@@ -166,6 +192,19 @@ class ReleaseArtifactTransferTests(unittest.TestCase):
             needs["plan"]["outputs"] = plan
             receipt = create(plan, needs, "owner/repo", "123", "1")
             validate(receipt, repository="owner/repo", source="a" * 40, version="1.2.3", run_id="123", attempt="1")
+            offline_plan = dict(plan, offline_packages="true")
+            offline_needs = {key: value for key, value in needs.items()
+                             if key not in {"snap", "snap_desktops", "plan"}}
+            offline_needs["plan"] = {"result": "success", "outputs": offline_plan}
+            offline_receipt = create(offline_plan, offline_needs, "owner/repo", "123", "1")
+            identity = dict(repository="owner/repo", source=plan["sha"], version="1.2.3",
+                            run_id="123", attempt="1")
+            validate(offline_receipt, **identity, offline_packages=True)
+            with self.assertRaisesRegex(ValueError, "wrong package scope"):
+                validate(offline_receipt, **identity)
+            with self.assertRaisesRegex(ValueError, "did not pass"):
+                create(offline_plan, dict(offline_needs, packages={"result": "skipped"}),
+                       "owner/repo", "123", "1")
             arguments = dict(source_sha="a" * 40, build_run_id="123", version="1.2.3",
                              packages=fixture.packages, evidence=fixture.reports, manifest_path=fixture.manifest_path)
             with patch.object(evidence, "MANIFEST", fixture.manifest_path):

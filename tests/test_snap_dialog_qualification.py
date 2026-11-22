@@ -287,7 +287,7 @@ class SnapDialogQualificationTests(unittest.TestCase):
                 desktop.wayland_socket(runtime)
 
     def test_all_desktop_workflows_install_the_actual_plasma_shell(self):
-        for name in ("ci.yml", "qualify-candidate.yml", "qualify-packages.yml", "retry-verification.yml"):
+        for name in ("ci.yml", "publish-snap-edge.yml", "qualify-packages.yml", "retry-verification.yml"):
             with self.subTest(workflow=name):
                 workflow = (ROOT / ".github/workflows" / name).read_text()
                 kde = workflow.split('kde) sudo apt-get install', 1)[1].split(';;', 1)[0]

@@ -1,4 +1,4 @@
-name: Retry failed platform verification
+name: CI · Retry failed platform checks (reusable)
 
 on:
   workflow_call:

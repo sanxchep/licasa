@@ -1,4 +1,4 @@
-name: Build and verify
+name: CI · Build and verify (push, PR, merge queue, schedule, manual)
 on:
   push:
     branches: ['**']
@@ -27,6 +27,9 @@ on:
         type: string
   workflow_call:
     inputs:
+      offline_packages:
+        type: boolean
+        default: false
       source_ref:
         required: true
         type: string
@@ -69,6 +72,7 @@ jobs:
     outputs:
       sha: ${{ steps.plan.outputs.sha }}
       policy_sha: ${{ steps.plan.outputs.policy_sha }}
+      offline_packages: ${{ steps.plan.outputs.offline_packages }}
       version: ${{ steps.plan.outputs.version }}
       profile: ${{ steps.plan.outputs.profile }}
       build: ${{ steps.plan.outputs.build }}
@@ -102,6 +106,7 @@ jobs:
           POLICY_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           PROFILE: ${{ inputs.profile || 'FULL' }}
+          OFFLINE_PACKAGES: ${{ inputs.offline_packages || false }}
           REUSABLE: ${{ inputs.source_ref != '' }}
           COLD: ${{ inputs.cold || false }}
         run: |
@@ -256,7 +261,7 @@ jobs:
 
   snap:
     needs: [plan, ubuntu]
-    if: ${{ needs.plan.outputs.complete == 'true' }}
+    if: ${{ needs.plan.outputs.complete == 'true' && !inputs.offline_packages }}
     runs-on: ubuntu-24.04
     timeout-minutes: 210
     steps:
@@ -362,7 +367,7 @@ jobs:
 
   snap_desktops:
     needs: [plan, snap]
-    if: ${{ needs.plan.outputs.complete == 'true' }}
+    if: ${{ needs.plan.outputs.complete == 'true' && !inputs.offline_packages }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     strategy:
@@ -444,6 +449,7 @@ jobs:
           name: verification-debian-packages
           path: build/candidate-packages
       - uses: actions/download-artifact@v8
+        if: ${{ !inputs.offline_packages }}
         with:
           name: verification-snap
           path: build/candidate-packages/snap
@@ -466,7 +472,7 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
           BUILD_RUN_ID: ${{ github.run_id }}
         run: |
-          python3 tools/qualification_evidence.py assemble --source-sha "$SOURCE_SHA" \
+          python3 tools/qualification_evidence.py assemble ${{ inputs.offline_packages && '--offline-packages' || '' }} --source-sha "$SOURCE_SHA" \
             --build-run-id "$BUILD_RUN_ID" --version "$VERSION" --packages build/candidate-packages --evidence build/candidate-evidence
       - uses: actions/upload-artifact@v7
         if: always()

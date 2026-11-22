@@ -329,7 +329,7 @@ if args[-1:] == ['/snap/bin/snapcraft'] and args[0] == '-u':
 
 class SnapWorkflowTests(unittest.TestCase):
     def test_every_store_operation_uses_one_job_budget_and_retains_diagnostics(self):
-        operations = 0
+        store_jobs = set()
         for path in (ROOT / ".github/workflows").glob("*.yml"):
             workflow = yaml.safe_load(path.read_text())
             for name, job in workflow["jobs"].items():
@@ -340,7 +340,8 @@ class SnapWorkflowTests(unittest.TestCase):
                     with self.subTest(workflow=path.name, job=name, line=line):
                         self.assertIn("--report build/snap-store-retries/", line)
                         self.assertIn(" -- ", line)
-                operations += len(store_lines)
+                if store_lines:
+                    store_jobs.add((path.name, name))
                 if store_lines or "tools/build_snap_ci.py" in scripts:
                     self.assertIn('--budget-file "$RUNNER_TEMP/snap-store-retry-budget.json"', scripts)
                     self.assertGreaterEqual(job["timeout-minutes"], 45)
@@ -348,7 +349,8 @@ class SnapWorkflowTests(unittest.TestCase):
                         step.get("with", {}).get("path") == "build/snap-store-retries/"
                         for step in job["steps"]))
                 self.assertNotIn("snapcore/action-build", str(job))
-        self.assertGreaterEqual(operations, 15)
+        self.assertIn(("publish-snap-edge.yml", "upload_snap_edge"), store_jobs)
+        self.assertFalse(any(file in {"snapcraft-build.yml", "publish-release.yml"} for file, _ in store_jobs))
 
 
 if __name__ == "__main__":

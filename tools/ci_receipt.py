@@ -28,6 +28,8 @@ def create(plan: dict, needs: dict, repository: str, run_id: str, attempt: str) 
                 'matrix', 'merge_eligible', 'cold', 'retention', 'cache_scope'):
         if outputs.get(key) != plan.get(key):
             raise ValueError(f'Changed CI plan output: {key}')
+    if outputs.get('offline_packages', '') != plan.get('offline_packages', ''):
+        raise ValueError('Changed CI package scope')
     required = check_results(needs)
     return {'schema_version': 1, 'status': 'passed', 'repository': repository,
             'source_sha': plan['sha'], 'policy_sha': plan['policy_sha'],
@@ -38,13 +40,15 @@ def create(plan: dict, needs: dict, repository: str, run_id: str, attempt: str) 
 
 
 def validate(receipt: dict, *, repository: str, source: str, version: str,
-             run_id: str, attempt: str) -> dict:
+             run_id: str, attempt: str, offline_packages: bool = False) -> dict:
     expected = {'schema_version': 1, 'status': 'passed', 'repository': repository,
                 'source_sha': source, 'version': version, 'run_id': run_id,
                 'run_attempt': attempt, 'profile': 'FULL'}
     if any(receipt.get(key) != value for key, value in expected.items()):
         raise ValueError('Release requires a successful FULL receipt for this exact run/attempt/source')
     plan = receipt.get('plan', {})
+    if (plan.get('offline_packages') == 'true') != offline_packages:
+        raise ValueError('Verification receipt has the wrong package scope')
     needs = {name: {'result': status} for name, status in receipt.get('outcomes', {}).items()}
     needs.setdefault('plan', {})['outputs'] = plan
     rebuilt = create(plan, needs, repository, run_id, attempt)
@@ -62,6 +66,7 @@ def main():
     parser.add_argument('--source-sha')
     parser.add_argument('--version')
     parser.add_argument('--run-id', default=os.environ.get('GITHUB_RUN_ID', ''))
+    parser.add_argument('--offline-packages', action='store_true')
     parser.add_argument('--attempt', default=os.environ.get('GITHUB_RUN_ATTEMPT', ''))
     args = parser.parse_args()
     if args.action == 'create':
@@ -71,7 +76,7 @@ def main():
         args.output.write_text(json.dumps(result, indent=2) + '\n')
     else:
         validate(json.loads(args.receipt.read_text()), repository=os.environ['GITHUB_REPOSITORY'],
-                 source=args.source_sha, version=args.version, run_id=args.run_id, attempt=args.attempt)
+                 source=args.source_sha, version=args.version, run_id=args.run_id, attempt=args.attempt, offline_packages=args.offline_packages)
         print('Exact FULL verification receipt passed')
 
 
