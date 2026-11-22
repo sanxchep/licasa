@@ -1,4 +1,4 @@
-name: Check public repository files
+name: CI · Check public files (main, PR, merge queue, manual)
 
 on:
   push:

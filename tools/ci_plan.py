@@ -77,6 +77,10 @@ def check_results(needs: dict) -> list[str]:
     if profile == "FULL":
         required.update(("rpm_preflight", "ubuntu", "debian", "wrappers", "snap",
                          "packages", "snap_desktops", "attest"))
+    if outputs.get("offline_packages") == "true":
+        if profile != "FULL" or outputs.get("merge_eligible") == "true":
+            raise ValueError("Invalid offline package scope")
+        required.difference_update(("snap", "snap_desktops"))
     if profile == "FULL" and outputs.get("cold") == "true":
         required.add("reproducibility")
     failed = sorted(name for name in required if needs.get(name, {}).get("result") != "success")

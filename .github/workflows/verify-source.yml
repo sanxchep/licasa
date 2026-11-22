@@ -1,4 +1,4 @@
-name: Verify source presets
+name: CI · Verify source and sanitizers (reusable)
 
 on:
   workflow_call:

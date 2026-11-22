@@ -1,4 +1,4 @@
-name: Build native packages
+name: CI · Build Linux packages (reusable)
 on:
   workflow_call:
     inputs:

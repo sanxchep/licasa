@@ -1,0 +1,197 @@
+name: CD · Snap Store · Publish to edge (manual after GitHub release)
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Successful Linux promotion run ID. Dispatch at its published version tag.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: publish-snap-edge
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ github.sha }}
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: published-linux-release
+          path: receipt
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify successful Linux promotion and published tag
+        id: validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" | jq -e \
+            --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" \
+            '.conclusion == "success" and .path == ".github/workflows/snapcraft-build.yml" and
+             .event == "workflow_dispatch" and .head_branch == "main" and .head_sha == $sha and .repository.full_name == $repo'
+          test "$(cat receipt/published-linux-release.txt)" = "$GITHUB_REF_NAME $GITHUB_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" | jq -e '.draft == false and .prerelease == false'
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: source
+    uses: ./.github/workflows/snap-qualify.yml
+    with:
+      published_deb: true
+      source_ref: ${{ needs.source.outputs.sha }}
+
+  snap_desktops:
+    needs: [source, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: [gnome, kde]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: licasa-snap-qualification-${{ github.run_id }}
+          path: dist/snap
+          github-token: ${{ github.token }}
+      - name: Install the exact candidate and disposable desktop
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          DESKTOP: ${{ matrix.desktop }}
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-pil xvfb dbus-x11 \
+            libglib2.0-bin x11-utils xdotool imagemagick mesa-utils libgl1-mesa-dri fonts-dejavu-core
+          case "$DESKTOP" in
+            gnome) sudo apt-get install -y --no-install-recommends gnome-shell ;;
+            kde) sudo apt-get install -y --no-install-recommends kwin-x11 kwin-wayland qtwayland5 plasma-desktop plasma-workspace plasma-workspace-wayland ;;
+          esac
+          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
+          sudo snap set system experimental.user-daemons=false
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/1.json -- sudo snap install --dangerous "dist/snap/licasa_${VERSION}_amd64.snap"
+          python3 tools/verify_snap_install.py --version "$VERSION" --source-sha "$SOURCE_SHA" \
+            --output reports-install.json
+      - name: Qualify GNOME or Plasma with retained evidence
+        env:
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          VERSION: ${{ needs.source.outputs.version }}
+          BUILD_RUN_ID: ${{ github.run_id }}
+          TARGET: ubuntu24-snap-${{ matrix.desktop }}
+        run: |
+          /usr/bin/python3 tools/qualification_evidence.py run-target --source-sha "$SOURCE_SHA" \
+            --build-run-id "$BUILD_RUN_ID" --version "$VERSION" \
+            --packages dist --evidence reports --target "$TARGET"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: candidate-snap-${{ matrix.desktop }}
+          path: reports/
+          retention-days: 90
+          if-no-files-found: error
+      - name: Retain Snap Store retry diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snap-store-retries-edge-qualification-${{ matrix.desktop }}
+          path: build/snap-store-retries/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  upload_snap_edge:
+    needs: [source, snap_desktops]
+    runs-on: ubuntu-24.04
+    environment: snap-beta
+    timeout-minutes: 75
+    outputs:
+      revision: ${{ steps.verify.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: licasa-snap-qualification-${{ github.run_id }}
+          path: dist/snap
+      - name: Check the Snap artifact and Store credentials
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          test -n "$SNAPCRAFT_STORE_CREDENTIALS"
+          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
+      - name: Upload the checked Snap to edge
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/1.json -- sudo snap install snapcraft --classic
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/2.json -- snapcraft upload "dist/snap/licasa_${VERSION}_amd64.snap" --release=edge
+      - name: Verify the Store's edge revision
+        id: verify
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          sudo snap set system experimental.user-daemons=false
+          python3 tools/retry_snap_store.py \
+            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+            --report build/snap-store-retries/3.json -- sudo snap install --channel=edge licasa
+          for ((attempt = 1; attempt <= 10; attempt++)); do
+            installed_version="$(snap list licasa | awk 'NR == 2 {print $2}')"
+            source_file=/snap/licasa/current/usr/share/licasa/source-commit
+            if [ "$installed_version" = "$VERSION" ] &&
+               [ -f "$source_file" ] &&
+               [ "$(cat "$source_file")" = "$GITHUB_SHA" ]; then
+              break
+            fi
+            sleep 20
+            python3 tools/retry_snap_store.py \
+              --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
+              --report build/snap-store-retries/4-${attempt}.json -- sudo snap refresh --channel=edge licasa
+          done
+          python3 tools/verify_snap_install.py --version "$VERSION" \
+            --source-sha "$GITHUB_SHA" \
+            --output build/qualification/snap-edge-smoke.json
+          revision="$(snap list licasa | awk 'NR == 2 {print $3}')"
+          test "$revision" -gt 0
+          expected="$(cut -d' ' -f1 "dist/snap/licasa_${VERSION}_amd64.snap.sha256")"
+          actual="$(sudo sha256sum "/var/lib/snapd/snaps/licasa_${revision}.snap" | cut -d' ' -f1)"
+          test "$actual" = "$expected"
+          echo "Published latest/edge revision $revision for $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: licasa-store-snap-smoke
+          path: build/qualification/snap-edge-smoke.json
+          if-no-files-found: error
+      - name: Retain Snap Store retry diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snap-store-retries-edge-publication
+          path: build/snap-store-retries/
+          if-no-files-found: ignore
+          retention-days: 7

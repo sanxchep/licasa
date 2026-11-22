@@ -471,8 +471,16 @@ def validate(attestation: dict, manifest: dict, *, source_sha: str, build_run_id
             validate_rejected_artifacts(payload, target, attestation["packages"])
 
 
-def assemble(args: argparse.Namespace) -> None:
+def selected_manifest(args: argparse.Namespace) -> dict:
     manifest = load_manifest()
+    if getattr(args, "offline_packages", False):
+        manifest["artifacts"].pop("snap")
+        manifest["targets"] = [row for row in manifest["targets"] if row["artifact"] != "snap"]
+    return manifest
+
+
+def assemble(args: argparse.Namespace) -> None:
+    manifest = selected_manifest(args)
     verification = ensure_candidate_source(args.source_sha, getattr(args, "verification_sha", None))
     attestation = {"schema_version": 1, "source_sha": args.source_sha, "build_run_id": args.build_run_id,
                    "version": args.version, "manifest_sha256": digest(MANIFEST), "created_at": utc_now(),
@@ -497,6 +505,7 @@ def main() -> None:
     parser.add_argument("--packages", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--target")
+    parser.add_argument("--offline-packages", action="store_true")
     parser.add_argument("--published", type=Path, help="Also check flattened downloaded release assets")
     parser.add_argument("--release-notes", type=Path, help="Reject stable notes describing preview or pending acceptance")
     parser.add_argument("--timeout", type=int, default=2400)
@@ -508,11 +517,11 @@ def main() -> None:
     elif args.action == "assemble":
         assemble(args)
     else:
-        validate(json.loads((args.evidence / "qualification.json").read_text()), load_manifest(),
+        validate(json.loads((args.evidence / "qualification.json").read_text()), selected_manifest(args),
                  source_sha=args.source_sha, build_run_id=args.build_run_id, version=args.version,
                  packages=args.packages, evidence=args.evidence)
         if args.published:
-            hashes = package_hashes(load_manifest(), args.packages, args.version)
+            hashes = package_hashes(selected_manifest(args), args.packages, args.version)
             for package in hashes.values():
                 path = checked_path(args.published, Path(package["path"]).name)
                 if digest(path) != package["sha256"]:

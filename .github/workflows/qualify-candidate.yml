@@ -1,6 +1,11 @@
-name: Qualify exact release candidate
+name: CI · Verify exact release candidate (release workflow or manual)
 
 on:
+  workflow_call:
+    inputs:
+      build_run_id:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       build_run_id:
@@ -109,74 +114,8 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-  snap_desktops:
-    needs: source
-    runs-on: ubuntu-24.04
-    timeout-minutes: 75
-    strategy:
-      fail-fast: false
-      matrix:
-        desktop: [gnome, kde]
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.source.outputs.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@v8
-        with:
-          name: licasa-snap-amd64
-          path: dist/snap
-          run-id: ${{ inputs.build_run_id }}
-          github-token: ${{ github.token }}
-      - name: Install the exact candidate and disposable desktop
-        env:
-          VERSION: ${{ needs.source.outputs.version }}
-          SOURCE_SHA: ${{ needs.source.outputs.sha }}
-          DESKTOP: ${{ matrix.desktop }}
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-pil xvfb dbus-x11 \
-            libglib2.0-bin x11-utils xdotool imagemagick mesa-utils libgl1-mesa-dri fonts-dejavu-core
-          case "$DESKTOP" in
-            gnome) sudo apt-get install -y --no-install-recommends gnome-shell ;;
-            kde) sudo apt-get install -y --no-install-recommends kwin-x11 kwin-wayland qtwayland5 plasma-desktop plasma-workspace plasma-workspace-wayland ;;
-          esac
-          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
-          sudo snap set system experimental.user-daemons=false
-          python3 tools/retry_snap_store.py \
-            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
-            --report build/snap-store-retries/1.json -- sudo snap install --dangerous "dist/snap/licasa_${VERSION}_amd64.snap"
-          python3 tools/verify_snap_install.py --version "$VERSION" --source-sha "$SOURCE_SHA" \
-            --output reports-install.json
-      - name: Qualify GNOME or Plasma with retained evidence
-        env:
-          SOURCE_SHA: ${{ needs.source.outputs.sha }}
-          VERSION: ${{ needs.source.outputs.version }}
-          BUILD_RUN_ID: ${{ inputs.build_run_id }}
-          TARGET: ubuntu24-snap-${{ matrix.desktop }}
-        run: |
-          /usr/bin/python3 tools/qualification_evidence.py run-target --source-sha "$SOURCE_SHA" \
-            --build-run-id "$BUILD_RUN_ID" --version "$VERSION" \
-            --packages dist --evidence reports --target "$TARGET"
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: candidate-snap-${{ matrix.desktop }}
-          path: reports/
-          retention-days: 90
-          if-no-files-found: error
-      - name: Retain Snap Store retry diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: snap-store-retries-qualify-candidate-snap_desktops-${{ matrix.desktop }}
-          path: build/snap-store-retries/
-          if-no-files-found: ignore
-          retention-days: 7
-
   attest:
-    needs: [source, packages, snap_desktops]
+    needs: [source, packages]
     if: ${{ always() && needs.source.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -199,12 +138,6 @@ jobs:
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v8
         with:
-          name: licasa-snap-amd64
-          path: dist/snap
-          run-id: ${{ inputs.build_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v8
-        with:
           pattern: candidate-*
           path: evidence
           merge-multiple: true
@@ -214,7 +147,7 @@ jobs:
           VERSION: ${{ needs.source.outputs.version }}
           BUILD_RUN_ID: ${{ inputs.build_run_id }}
         run: |
-          python3 tools/qualification_evidence.py assemble --source-sha "$SOURCE_SHA" \
+          python3 tools/qualification_evidence.py assemble --offline-packages --source-sha "$SOURCE_SHA" \
             --build-run-id "$BUILD_RUN_ID" --version "$VERSION" --packages dist --evidence evidence
       - uses: actions/upload-artifact@v7
         if: always()

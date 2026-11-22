@@ -1,30 +1,15 @@
-name: Approve stable and mark GitHub release latest
+name: CD · GitHub Releases · Promote verified files (reusable)
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      approve_stable:
-        description: Explicitly authorize stable/latest publication of this exact qualified candidate
-        required: true
-        type: boolean
-        default: false
       build_run_id:
         description: Successful build run that published the GitHub prerelease
         required: true
         type: string
-      qualification_run_id:
-        description: Successful exact-candidate qualification run for these source and package hashes
-        required: true
-        type: string
-
 permissions:
   actions: read
   contents: read
-
-concurrency:
-  group: licasa-release
-  cancel-in-progress: false
-  queue: max
 
 jobs:
   preflight:
@@ -36,25 +21,17 @@ jobs:
       source_sha: ${{ steps.build.outputs.source_sha }}
       build_attempt: ${{ steps.build.outputs.build_attempt }}
     steps:
-      - name: Require explicit stable publication intent
-        env:
-          APPROVED: ${{ inputs.approve_stable }}
-        run: test "$APPROVED" = true
       - name: Check the selected build run succeeded
         id: build
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_RUN_ID: ${{ inputs.build_run_id }}
-          QUALIFICATION_RUN_ID: ${{ inputs.qualification_run_id }}
         run: |
           [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
-          [[ "$QUALIFICATION_RUN_ID" =~ ^[0-9]+$ ]]
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gh
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" \
             > "$RUNNER_TEMP/licasa-build-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFICATION_RUN_ID" \
-            > "$RUNNER_TEMP/licasa-qualification-run.json"
           python3 - "$RUNNER_TEMP/licasa-build-run.json" "$GITHUB_OUTPUT" <<'PY'
           import json
           import os
@@ -65,15 +42,10 @@ jobs:
           path = build["path"].split("@", 1)[0]
           if (path != ".github/workflows/snapcraft-build.yml"
                   or build["head_branch"] != "main"
+                  or build["head_sha"] != os.environ["GITHUB_SHA"]
+                  or build["repository"]["full_name"] != os.environ["GITHUB_REPOSITORY"]
                   or build["conclusion"] != "success"):
               raise SystemExit("Select a successful Licasa main build run")
-          with open(os.environ['RUNNER_TEMP'] + '/licasa-qualification-run.json', encoding='utf-8') as stream:
-              qualification = json.load(stream)
-          if (qualification['path'].split('@', 1)[0] != '.github/workflows/qualify-candidate.yml'
-                  or qualification['conclusion'] != 'success'
-                  or qualification['head_sha'] != build['head_sha']
-                  or qualification['repository']['full_name'] != os.environ['GITHUB_REPOSITORY']):
-              raise SystemExit('Require successful exact-candidate qualification from this repository and source SHA')
           with open(sys.argv[2], "a", encoding="utf-8") as output:
               output.write(f"source_sha={build['head_sha']}\n")
               output.write(f"build_attempt={build['run_attempt']}\n")
@@ -116,8 +88,6 @@ jobs:
     needs: preflight
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    outputs:
-      revision: ${{ steps.edge.outputs.revision }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -131,12 +101,6 @@ jobs:
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v8
         with:
-          name: licasa-snap-amd64
-          path: dist/snap
-          run-id: ${{ inputs.build_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v8
-        with:
           name: licasa-debian13-amd64
           path: dist/debian13
           run-id: ${{ inputs.build_run_id }}
@@ -145,7 +109,7 @@ jobs:
         with:
           name: licasa-candidate-qualification
           path: evidence
-          run-id: ${{ inputs.qualification_run_id }}
+          run-id: ${{ github.run_id }}
           github-token: ${{ github.token }}
       - name: Require complete qualification of these exact candidate files
         env:
@@ -159,19 +123,17 @@ jobs:
           mkdir -p published
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir published \
             --pattern '*.deb' --pattern '*.AppImage' --pattern '*.rpm' \
-            --pattern '*.pkg.tar.zst' --pattern '*.snap' --pattern 'PKGBUILD*' \
+            --pattern '*.pkg.tar.zst' --pattern 'PKGBUILD*' \
             --pattern 'native_lifecycle.py' --pattern 'licasa.install' --pattern 'licasa-lifecycle.hook'
           (cd published && sha256sum --check PKGBUILD.sha256 && sha256sum --check PKGBUILD.sources.sha256)
-          python3 tools/qualification_evidence.py check --source-sha "$SOURCE_SHA" \
+          python3 tools/qualification_evidence.py check --offline-packages --source-sha "$SOURCE_SHA" \
             --build-run-id "$BUILD_RUN_ID" --version "$VERSION" --packages dist --evidence evidence \
             --published published --release-notes "packaging/release-notes/${RELEASE_TAG}.md"
-      - name: Check package hashes and embedded source commit
+      - name: Check package versions and hashes
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
           SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends squashfs-tools
           (cd dist/deb && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
           test "$(dpkg-deb --field "dist/deb/licasa_${VERSION}-1_amd64.deb" Version)" = "${VERSION}-1"
           (cd dist/appimage && sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256")
@@ -180,10 +142,6 @@ jobs:
           (cd dist/arch && sha256sum --check "licasa-appimage-${VERSION}-1-x86_64.pkg.tar.zst.sha256")
           (cd dist/arch && sha256sum --check PKGBUILD.sha256)
           (cd dist/arch && sha256sum --check PKGBUILD.sources.sha256)
-          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
-          source_commit="$(unsquashfs -cat "dist/snap/licasa_${VERSION}_amd64.snap" \
-            usr/share/licasa/source-commit)"
-          test "$source_commit" = "$SOURCE_SHA"
       - uses: actions/download-artifact@v8
         with:
           name: licasa-full-verification
@@ -197,107 +155,15 @@ jobs:
           BUILD_RUN_ID: ${{ inputs.build_run_id }}
           BUILD_ATTEMPT: ${{ needs.preflight.outputs.build_attempt }}
         run: |
-          python3 tools/ci_receipt.py check --receipt full-verification/verification-result.json \
+          python3 tools/ci_receipt.py check --offline-packages --receipt full-verification/verification-result.json \
             --source-sha "$SOURCE_SHA" --version "$VERSION" --run-id "$BUILD_RUN_ID" --attempt "$BUILD_ATTEMPT"
-          python3 tools/qualification_evidence.py check --source-sha "$SOURCE_SHA" \
+          python3 tools/qualification_evidence.py check --offline-packages --source-sha "$SOURCE_SHA" \
             --build-run-id "$BUILD_RUN_ID" --version "$VERSION" --packages dist --evidence full-verification
-      - name: Verify edge still points to this Snap
-        id: edge
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
-        run: |
-          sudo snap set system experimental.user-daemons=false
-          python3 tools/retry_snap_store.py \
-            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
-            --report build/snap-store-retries/1.json -- sudo snap install --channel=edge licasa
-          python3 tools/verify_snap_install.py --version "$VERSION" \
-            --source-sha "$SOURCE_SHA" \
-            --output build/qualification/snap-edge-publish-smoke.json
-          revision="$(snap list licasa | awk 'NR == 2 {print $3}')"
-          test "$revision" -gt 0
-          expected="$(cut -d' ' -f1 "dist/snap/licasa_${VERSION}_amd64.snap.sha256")"
-          actual="$(sudo sha256sum "/var/lib/snapd/snaps/licasa_${revision}.snap" | cut -d' ' -f1)"
-          test "$actual" = "$expected"
-          echo "revision=$revision" >> "$GITHUB_OUTPUT"
-      - name: Retain Snap Store retry diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: snap-store-retries-publish-release-verify_artifacts
-          path: build/snap-store-retries/
-          if-no-files-found: ignore
-          retention-days: 7
-
-  publish_snap:
+  finalize_github_release:
     needs: [preflight, verify_artifacts]
     runs-on: ubuntu-24.04
-    # Retain the existing credential and approval environment.
-    environment: snap-beta
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.preflight.outputs.source_sha }}
-          persist-credentials: false
-      - name: Require Store credentials
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-        run: test -n "$SNAPCRAFT_STORE_CREDENTIALS"
-      - name: Promote the checked revision to stable
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-          REVISION: ${{ needs.verify_artifacts.outputs.revision }}
-        run: |
-          python3 tools/retry_snap_store.py \
-            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
-            --report build/snap-store-retries/1.json -- sudo snap install snapcraft --classic
-          python3 tools/retry_snap_store.py \
-            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
-            --report build/snap-store-retries/2.json -- snapcraft release licasa "$REVISION" stable
-      - name: Install and verify stable
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-          REVISION: ${{ needs.verify_artifacts.outputs.revision }}
-          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
-        run: |
-          sudo snap set system experimental.user-daemons=false
-          python3 tools/retry_snap_store.py \
-            --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
-            --report build/snap-store-retries/3.json -- sudo snap install --channel=stable licasa
-          for ((attempt = 1; attempt <= 10; attempt++)); do
-            if [ "$(snap list licasa | awk 'NR == 2 {print $3}')" = "$REVISION" ]; then
-              break
-            fi
-            sleep 20
-            python3 tools/retry_snap_store.py \
-              --budget-file "$RUNNER_TEMP/snap-store-retry-budget.json" \
-              --report build/snap-store-retries/4-${attempt}.json -- sudo snap refresh --channel=stable licasa
-          done
-          test "$(snap list licasa | awk 'NR == 2 {print $3}')" = "$REVISION"
-          python3 tools/verify_snap_install.py --version "$VERSION" \
-            --source-sha "$SOURCE_SHA" \
-            --output build/qualification/snap-stable-smoke.json
-      - uses: actions/upload-artifact@v7
-        with:
-          name: licasa-stable-snap-smoke
-          path: build/qualification/snap-stable-smoke.json
-          if-no-files-found: error
-          retention-days: 7
-      - name: Retain Snap Store retry diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: snap-store-retries-publish-release-publish_snap
-          path: build/snap-store-retries/
-          if-no-files-found: ignore
-          retention-days: 7
-
-  finalize_github_release:
-    needs: [preflight, verify_artifacts, publish_snap]
-    runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: snap-beta
+    environment: snap-beta  # Existing protected publication environment
     permissions:
       actions: read
       contents: write
@@ -315,12 +181,6 @@ jobs:
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v8
         with:
-          name: licasa-snap-amd64
-          path: dist/snap
-          run-id: ${{ inputs.build_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v8
-        with:
           name: licasa-debian13-amd64
           path: dist/debian13
           run-id: ${{ inputs.build_run_id }}
@@ -329,7 +189,7 @@ jobs:
         with:
           name: licasa-candidate-qualification
           path: evidence
-          run-id: ${{ inputs.qualification_run_id }}
+          run-id: ${{ github.run_id }}
           github-token: ${{ github.token }}
       - name: Install GitHub CLI
         run: |
@@ -346,10 +206,10 @@ jobs:
           mkdir -p published
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir published \
             --pattern '*.deb' --pattern '*.AppImage' --pattern '*.rpm' \
-            --pattern '*.pkg.tar.zst' --pattern '*.snap' --pattern 'PKGBUILD*' \
+            --pattern '*.pkg.tar.zst' --pattern 'PKGBUILD*' \
             --pattern 'native_lifecycle.py' --pattern 'licasa.install' --pattern 'licasa-lifecycle.hook'
           (cd published && sha256sum --check PKGBUILD.sha256 && sha256sum --check PKGBUILD.sources.sha256)
-          python3 tools/qualification_evidence.py check --source-sha "$SOURCE_SHA" \
+          python3 tools/qualification_evidence.py check --offline-packages --source-sha "$SOURCE_SHA" \
             --build-run-id "$BUILD_RUN_ID" --version "$VERSION" --packages dist --evidence evidence \
             --published published --release-notes "packaging/release-notes/${RELEASE_TAG}.md"
       - name: Recheck source, versions, and checksums
@@ -368,16 +228,14 @@ jobs:
           (cd dist/arch && sha256sum --check "licasa-appimage-${VERSION}-1-x86_64.pkg.tar.zst.sha256")
           (cd dist/arch && sha256sum --check PKGBUILD.sha256)
           (cd dist/arch && sha256sum --check PKGBUILD.sources.sha256)
-          (cd dist/snap && sha256sum --check "licasa_${VERSION}_amd64.snap.sha256")
       - name: Mark the checked GitHub prerelease as Latest
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
-          SNAP_REVISION: ${{ needs.verify_artifacts.outputs.revision }}
           SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
-          QUALIFICATION_RUN_ID: ${{ inputs.qualification_run_id }}
+          QUALIFICATION_RUN_ID: ${{ github.run_id }}
         run: |
           {
             printf 'Stable release: all required package qualifications passed for this source and these checksums.\n\n'
@@ -391,13 +249,21 @@ jobs:
             cat "dist/arch/licasa-appimage-${VERSION}-1-x86_64.pkg.tar.zst.sha256"
             cat "dist/arch/PKGBUILD.sha256"
             cat "dist/arch/PKGBUILD.sources.sha256"
-            cat "dist/snap/licasa_${VERSION}_amd64.snap.sha256"
             printf "\`\`\`\n"
             printf "\nPackage qualification: https://github.com/%s/actions/runs/%s.\n" "$GITHUB_REPOSITORY" "$QUALIFICATION_RUN_ID"
-            printf "\nSnap stable revision: %s.\n" "$SNAP_REVISION"
             printf "Source commit: \`%s\`.\n" "$SOURCE_SHA"
           } > dist/release-notes.md
           tar -czf "dist/qualification-${VERSION}-${SOURCE_SHA}.tar.gz" -C evidence .
           gh release upload "$RELEASE_TAG" "dist/qualification-${VERSION}-${SOURCE_SHA}.tar.gz" --clobber
           gh release edit "$RELEASE_TAG" --prerelease=false --latest \
             --notes-file dist/release-notes.md
+
+      - name: Record the published GitHub release
+        env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+        run: printf '%s %s\n' "$RELEASE_TAG" "$GITHUB_SHA" > published-linux-release.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: published-linux-release
+          path: published-linux-release.txt
+          if-no-files-found: error

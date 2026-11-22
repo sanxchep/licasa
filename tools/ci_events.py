@@ -187,6 +187,10 @@ def main():
         version = source_version((root / "CMakeLists.txt").read_text(), (root / "snap/snapcraft.yaml").read_text())
         if ref != f"refs/tags/v{version}":
             raise ValueError("Release tag and source version differ")
+    if env.get("OFFLINE_PACKAGES") == "true":
+        if not reusable or routed["profile"] != "FULL" or routed["merge_eligible"] == "true":
+            raise ValueError("Offline package scope requires a reusable FULL release verification")
+        routed["offline_packages"] = "true"
     profile = routed["profile"]
     plan = make_plan(event, profile == "FULL", [r["path"] for r in changes], profile=profile)
     retention = 90 if profile == "FULL" and event != "pull_request" else 30 if routed["merge_eligible"] == "true" else 14

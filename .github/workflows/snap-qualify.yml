@@ -1,4 +1,4 @@
-name: Qualify Snap candidate without publishing
+name: CI · Verify Snap package (reusable or manual)
 
 # Prepared only. Execution belongs on an ephemeral hosted VM, never the
 # owner's working PC. This job has no store credentials or release steps.
@@ -11,6 +11,10 @@ on:
         type: string
   workflow_call:
     inputs:
+      published_deb:
+        description: Package the verified Ubuntu DEB from the selected GitHub release
+        type: boolean
+        default: false
       source_ref:
         required: true
         type: string
@@ -51,7 +55,23 @@ jobs:
           with open(sys.argv[1], 'a') as output:
               output.write(f'version={versions[0]}\n')
           PY
-      - name: Build the complete standalone Snap source recipe
+      - name: Fetch the released Ubuntu package for Snap
+        if: inputs.published_deb
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.source.outputs.version }}
+          SOURCE_SHA: ${{ inputs.source_ref }}
+        run: |
+          test "$GITHUB_REF_NAME" = "v$VERSION"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          deb="licasa_${VERSION}-1_amd64.deb"
+          mkdir snap-input
+          gh release download "$GITHUB_REF_NAME" --dir snap-input --pattern "$deb" --pattern "$deb.sha256"
+          expected=$(gh release view "$GITHUB_REF_NAME" --json assets | jq -er --arg deb "$deb" '.assets[] | select(.name == $deb) | .digest')
+          test "$expected" = "sha256:$(sha256sum "snap-input/$deb" | cut -d' ' -f1)"
+          (cd snap-input && sha256sum --check "$deb.sha256")
+          printf '%s\n' "$SOURCE_SHA" > snap-input/source-commit.txt
+      - name: Build the Snap recipe
         id: snapcraft
         run: python3 tools/build_snap_ci.py
       - name: Install archive inspection tools in the hosted VM

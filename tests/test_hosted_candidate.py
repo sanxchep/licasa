@@ -61,7 +61,7 @@ class HostedCandidateTests(unittest.TestCase):
         self.assertIn("name: licasa-verification-evidence", workflow)
         self.assertNotIn("name: licasa-candidate-qualification", workflow)
         promotion = (ROOT / ".github/workflows/publish-release.yml").read_text()
-        self.assertIn("'.github/workflows/qualify-candidate.yml'", promotion)
+        self.assertIn("name: licasa-candidate-qualification", promotion)
         self.assertNotIn("'.github/workflows/ci.yml'", promotion)
 
 

@@ -1,4 +1,4 @@
-name: Qualify published packages
+name: CI · Verify published packages (manual by tag)
 
 on:
   workflow_dispatch:
@@ -23,6 +23,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       source_sha: ${{ steps.version.outputs.source_sha }}
+      has_snap: ${{ steps.assets.outputs.has_snap }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -37,6 +38,15 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
           echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Identify Snap assets on historical releases
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          snap="licasa_${RELEASE_TAG#v}_amd64.snap"
+          has_snap=$(gh release view "$RELEASE_TAG" --json assets | jq --arg snap "$snap" 'any(.assets[]; .name == $snap)')
+          echo "has_snap=$has_snap" >> "$GITHUB_OUTPUT"
       - name: Check source-only installer and desktop assertions
         run: |
           sudo apt-get update
@@ -88,7 +98,7 @@ jobs:
           (cd packages && sha256sum --check "licasa_${VERSION}-1_amd64.deb.sha256")
           (cd packages && sha256sum --check "Licasa-${VERSION}-x86_64.AppImage.sha256")
       - name: Check Snap installation on the additional Ubuntu hosts
-        if: matrix.ubuntu != '24.04'
+        if: matrix.ubuntu != '24.04' && needs.source_checks.outputs.has_snap == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
@@ -160,6 +170,7 @@ jobs:
           retention-days: 7
 
   snap_desktops:
+    if: needs.source_checks.outputs.has_snap == 'true'
     needs: source_checks
     runs-on: ubuntu-24.04
     timeout-minutes: 60
