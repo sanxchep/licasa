@@ -880,8 +880,8 @@
             <translation>Bakgrundsprocess</translation>
         </message>
         <message>
-            <source>Keep a lightweight background process open. Starts at next login.</source>
-            <translation>Låt en resurssnål bakgrundsprocess vara öppen. Den startar vid nästa inloggning.</translation>
+            <source>Keep a lightweight background process open.</source>
+            <translation>Låt en resurssnål bakgrundsprocess vara öppen.</translation>
         </message>
         <message>
             <source>Background opacity</source>

@@ -118,7 +118,7 @@ Column {
             && content.menu.backgroundModeManager.supported
         width: parent.width
         title: qsTr("Background process")
-        subtitle: qsTr("Keep a lightweight background process open. Starts at next login.")
+        subtitle: qsTr("Keep a lightweight background process open.")
         checked: content.menu.backgroundModeManager
             ? content.menu.backgroundModeManager.enabled : false
         buttonMotionDuration: content.menu.buttonMotionDuration
