@@ -18,7 +18,9 @@ struct LaunchOptions {
 
 LaunchOptions parseLaunchOptions(const QStringList& arguments);
 enum class ForwardLaunchResult { NoInstance, Forwarded, Blocked };
-ForwardLaunchResult forwardLaunchToExistingInstance(const LaunchOptions& options);
+enum class LaunchPhase { Gui, BeforeGui };
+ForwardLaunchResult forwardLaunchToExistingInstance(const LaunchOptions& options,
+                                                     LaunchPhase phase = LaunchPhase::Gui);
 
 class SingleInstanceServer final : public QObject {
     Q_OBJECT

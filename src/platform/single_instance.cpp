@@ -7,7 +7,9 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QFileInfo>
+#include <QThread>
 #include <QJsonDocument>
 #include <QLocalSocket>
 #include <QTimer>
@@ -42,7 +44,7 @@ LaunchOptions parseLaunchOptions(const QStringList& arguments)
     return options;
 }
 
-ForwardLaunchResult forwardLaunchToExistingInstance(const LaunchOptions& options)
+ForwardLaunchResult forwardLaunchToExistingInstance(const LaunchOptions& options, LaunchPhase phase)
 {
     if (lifecycleEndpointName().isEmpty()) {
         QString reason;
@@ -68,6 +70,28 @@ ForwardLaunchResult forwardLaunchToExistingInstance(const LaunchOptions& options
     }
     const QString residentGeneration = reply.value(QStringLiteral("generation")).toString();
     const qint64 residentPid = qint64(reply.value(QStringLiteral("pid")).toDouble());
+    const QString residentStart = reply.value(QStringLiteral("startIdentity")).toString();
+    const auto afterResidentExit = [&] {
+        QElapsedTimer wait;
+        wait.start();
+        while (processStartIdentity(residentPid) == residentStart && wait.elapsed() < 1000) {
+            QThread::msleep(10);
+        }
+        QString reason;
+        if (processStartIdentity(residentPid) == residentStart) {
+            qCritical("The existing Licasa instance is still exiting. Retry when it completes.");
+            return ForwardLaunchResult::Blocked;
+        }
+        if (sameInstallationProcessExists(&reason, false)) {
+            qCritical().noquote() << reason;
+            return ForwardLaunchResult::Blocked;
+        }
+        return ForwardLaunchResult::NoInstance;
+    };
+    if (phase == LaunchPhase::BeforeGui &&
+        reply.value(QStringLiteral("state")).toString() == QStringLiteral("stopping")) {
+        return afterResidentExit();
+    }
     if (!canReuseExecutableGeneration(QCoreApplication::applicationPid(), residentPid) &&
         residentGeneration != applicationIdentity().generation) {
         // A newer (or intentionally older) binary may take over only an empty
@@ -97,9 +121,18 @@ ForwardLaunchResult forwardLaunchToExistingInstance(const LaunchOptions& options
     if (!options.initialUrl.isEmpty()) {
         arguments.insert(QStringLiteral("url"), options.initialUrl.toString(QUrl::FullyEncoded));
     }
-    reply = lifecycleRequest(operation, arguments);
+    bool writeAttempted = false;
+    reply = lifecycleRequest(operation, arguments, 1000, &writeAttempted);
     if (lifecycleResultExitCode(reply) == 0) {
         return ForwardLaunchResult::Forwarded;
+    }
+    if (phase == LaunchPhase::BeforeGui &&
+        ((!writeAttempted && reply.value(QStringLiteral("result")).toString() == QStringLiteral("absent")) ||
+         (reply.value(QStringLiteral("result")).toString() == QStringLiteral("busy") &&
+          reply.value(QStringLiteral("state")).toString() == QStringLiteral("stopping") &&
+          reply.value(QStringLiteral("pid")).toDouble() == double(residentPid) &&
+          reply.value(QStringLiteral("startIdentity")).toString() == residentStart))) {
+        return afterResidentExit();
     }
     qCritical() << "The existing Licasa instance is preparing an update. Retry when it completes.";
     return ForwardLaunchResult::Blocked;
@@ -219,7 +252,11 @@ QJsonObject SingleInstanceServer::processPayload(const QByteArray& payload)
                 QStringLiteral("This installation is active in another desktop session."));
         }
         if (!lifecycle_ || !lifecycle_->launchAllowed()) {
-            return lifecycleError(QStringLiteral("busy"));
+            auto reply = lifecycleError(QStringLiteral("busy"));
+            if (lifecycle_) {
+                reply.insert(QStringLiteral("state"), lifecycle_->status().value(QStringLiteral("state")));
+            }
+            return reply;
         }
         if (operation == QStringLiteral("show")) {
             if (windowManager_) {
