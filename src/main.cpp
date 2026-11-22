@@ -26,6 +26,7 @@
 
 #include <QCoreApplication>
 #include <QDate>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QLocale>
@@ -61,6 +62,64 @@ int main(int argc, char* argv[])
         qCritical().noquote() << gateError;
         return 1;
     }
+#if defined(Q_OS_LINUX)
+    const QString endpoint = Licasa::lifecycleEndpointName();
+    std::unique_ptr<Licasa::RuntimeStartupLock> startupLock;
+#else
+    QString endpoint;
+    std::unique_ptr<QLockFile> startupLock;
+#endif
+    const auto acquireStartupLock = [&] {
+        if (startupLock || endpoint.isEmpty()) {
+            return true;
+        }
+#if defined(Q_OS_LINUX)
+        startupLock = std::make_unique<Licasa::RuntimeStartupLock>();
+        QString startupError;
+        if (!startupLock->acquire(endpoint + QStringLiteral(".launch"), &startupError)) {
+            qCritical().noquote() << startupError;
+            return false;
+        }
+#else
+        startupLock = std::make_unique<QLockFile>(endpoint + QStringLiteral(".launch"));
+        if (!startupLock->tryLock(2000)) {
+            qCritical() << "Another Licasa launch is in progress. Retry shortly.";
+            return false;
+        }
+#endif
+        return true;
+    };
+    bool triedEarly = false;
+#if defined(Q_OS_LINUX)
+    // Limit the core-only path to an ordinary existing local file. Leave Qt
+    // options and desktop activation tokens for the normal GUI startup.
+    if (rawArguments.size() == 2 && !rawArguments[1].startsWith(QLatin1Char('-')) &&
+        !qEnvironmentVariableIsSet("XDG_ACTIVATION_TOKEN") &&
+        !qEnvironmentVariableIsSet("DESKTOP_STARTUP_ID") &&
+        !qEnvironmentVariableIsSet("LICASA_SOFTWARE_RETRY") && !endpoint.isEmpty() &&
+        QFileInfo::exists(endpoint)) {
+        const auto options = Licasa::parseLaunchOptions(rawArguments);
+        if (options.initialUrl.isLocalFile() &&
+            QFileInfo(options.initialUrl.toLocalFile()).isFile()) {
+            int coreArgc = 1;
+            char* coreArgv[] = {argv[0], nullptr};
+            QCoreApplication core(coreArgc, coreArgv);
+            core.setApplicationName(QString::fromLatin1(Licasa::Constants::applicationName));
+            core.setOrganizationName(QString::fromLatin1(Licasa::Constants::organizationName));
+            if (!acquireStartupLock()) {
+                return 1;
+            }
+            const auto forwarding =
+                Licasa::forwardLaunchToExistingInstance(options, Licasa::LaunchPhase::BeforeGui);
+            if (forwarding != Licasa::ForwardLaunchResult::NoInstance) {
+                return forwarding == Licasa::ForwardLaunchResult::Forwarded ? 0 : 1;
+            }
+            // Keep the lock through cold initialization so the original click
+            // cannot race another launcher for ownership.
+            triedEarly = true;
+        }
+    }
+#endif
     constexpr int softwareRetryExitCode = 42;
     Licasa::RuntimeErrorLog runtimeErrorLog;
     Licasa::ImageResourcePolicy::initializeDecoderEnvironment();
@@ -86,29 +145,14 @@ int main(int argc, char* argv[])
                                QLocale().toString(releaseDate, QStringLiteral("d MMMM yyyy"))}};
 
     const Licasa::LaunchOptions options = Licasa::parseLaunchOptions(application.arguments());
-    const QString endpoint = Licasa::lifecycleEndpointName();
-#if defined(Q_OS_LINUX)
-    std::unique_ptr<Licasa::RuntimeStartupLock> startupLock;
-#else
-    std::unique_ptr<QLockFile> startupLock;
+#if !defined(Q_OS_LINUX)
+    endpoint = Licasa::lifecycleEndpointName();
 #endif
-    if (!endpoint.isEmpty()) {
-#if defined(Q_OS_LINUX)
-        startupLock = std::make_unique<Licasa::RuntimeStartupLock>();
-        QString startupError;
-        if (!startupLock->acquire(endpoint + QStringLiteral(".launch"), &startupError)) {
-            qCritical().noquote() << startupError;
-            return 1;
-        }
-#else
-        startupLock = std::make_unique<QLockFile>(endpoint + QStringLiteral(".launch"));
-        if (!startupLock->tryLock(2000)) {
-            qCritical() << "Another Licasa launch is in progress. Retry shortly.";
-            return 1;
-        }
-#endif
+    if (!acquireStartupLock()) {
+        return 1;
     }
-    const auto forwarding = Licasa::forwardLaunchToExistingInstance(options);
+    const auto forwarding = triedEarly ? Licasa::ForwardLaunchResult::NoInstance
+                                       : Licasa::forwardLaunchToExistingInstance(options);
     if (forwarding != Licasa::ForwardLaunchResult::NoInstance) {
         return forwarding == Licasa::ForwardLaunchResult::Forwarded ? 0 : 1;
     }

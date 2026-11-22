@@ -10,6 +10,12 @@
 #include <QMutex>
 #include <QMutexLocker>
 
+#if defined(LICASA_EXECUTABLE_HASH_OPENSSL)
+#include <array>
+#include <memory>
+#include <openssl/evp.h>
+#endif
+
 #if defined(Q_OS_UNIX)
 #include <cerrno>
 #include <fcntl.h>
@@ -24,10 +30,31 @@ namespace {
 QString hashFile(const QString& path)
 {
     QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+#if defined(LICASA_EXECUTABLE_HASH_OPENSSL)
+    // Keep the same complete SHA-256 digest for portable executable receipts.
+    const std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(),
+                                                                          EVP_MD_CTX_free);
+    if (context && EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) == 1) {
+        std::array<char, 64 * 1024> bytes;
+        qint64 count = 0;
+        while ((count = file.read(bytes.data(), bytes.size())) > 0) {
+            if (EVP_DigestUpdate(context.get(), bytes.data(), size_t(count)) != 1) {
+                return {};
+            }
+        }
+        unsigned char digest[EVP_MAX_MD_SIZE];
+        unsigned int size = 0;
+        if (count < 0 || EVP_DigestFinal_ex(context.get(), digest, &size) != 1 || size != 32) {
+            return {};
+        }
+        return QString::fromLatin1(QByteArray(reinterpret_cast<const char*>(digest), size).toHex());
+    }
+#endif
     QCryptographicHash hash(QCryptographicHash::Sha256);
-    return file.open(QIODevice::ReadOnly) && hash.addData(&file)
-               ? QString::fromLatin1(hash.result().toHex())
-               : QString{};
+    return hash.addData(&file) ? QString::fromLatin1(hash.result().toHex()) : QString{};
 }
 
 QString absolutePath(const QString& path)

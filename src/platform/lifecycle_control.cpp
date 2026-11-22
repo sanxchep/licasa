@@ -66,8 +66,12 @@ bool lifecyclePeerIdentity(QLocalSocket& socket, qint64* pid)
 #endif
 }
 
-QJsonObject lifecycleRequest(const QString& operation, const QJsonObject& arguments, int timeoutMs)
+QJsonObject lifecycleRequest(const QString& operation, const QJsonObject& arguments, int timeoutMs,
+                             bool* writeAttempted)
 {
+    if (writeAttempted) {
+        *writeAttempted = false;
+    }
     const ApplicationIdentity identity = applicationIdentity(false);
     const auto fail = [&identity](const QString& result, const QString& message = QString{}) {
         auto reply = identity.toJson();
@@ -118,8 +122,13 @@ QJsonObject lifecycleRequest(const QString& operation, const QJsonObject& argume
     command.insert(QStringLiteral("installationId"), identity.installationId);
     command.insert(QStringLiteral("operation"), operation);
     const QByteArray bytes = QJsonDocument(command).toJson(QJsonDocument::Compact) + '\n';
-    if (bytes.size() > maximumLifecycleBytes || socket.write(bytes) != bytes.size() ||
-        !socket.waitForBytesWritten(remaining())) {
+    if (bytes.size() > maximumLifecycleBytes) {
+        return fail(QStringLiteral("broken"));
+    }
+    if (writeAttempted) {
+        *writeAttempted = true;
+    }
+    if (socket.write(bytes) != bytes.size() || !socket.waitForBytesWritten(remaining())) {
         return fail(QStringLiteral("broken"));
     }
     QByteArray received;
